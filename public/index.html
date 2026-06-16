@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="基于 12 项高权重宏观、信用、盈利、就业和市场指标的美国股市风险雷达" />
+    <title>kk的美股雷达</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="noise" aria-hidden="true"></div>
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="回到顶部">
+        <span class="brand-mark"><i></i><i></i><i></i></span>
+        <span>kk的美股雷达</span>
+      </a>
+      <nav class="section-nav" aria-label="页面导航">
+        <a href="#overview">风险总览</a><a href="#signals">十二项信号</a><a href="#ai">AI 财报</a><a href="#calendar">重要日期</a>
+      </nav>
+      <div class="topbar-actions">
+        <div class="live-pill"><span class="live-dot"></span><span id="liveText">正在连接数据</span></div>
+        <button class="ghost-button" id="manualButton" type="button">人工数据</button>
+        <button class="refresh-button" id="refreshButton" type="button" aria-label="刷新最新数据"><span>刷新</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-3M4 4v4h4M4 13a8.1 8.1 0 0 0 15.5 3M20 20v-4h-4"/></svg></button>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero shell" id="overview">
+        <div class="hero-copy">
+          <p class="eyebrow">US EQUITY RISK MONITOR · 12 SIGNALS</p>
+          <h1>当前美股<br />风险有多高？</h1>
+          <p class="hero-intro">用 12 项高权重信号衡量市场脆弱度，同时拆分“滞胀 / 政策压力”和“衰退 / 信用压力”。基础分、主导风险链与共振修正全部公开显示。</p>
+          <div class="hero-meta">
+            <div><span>数据覆盖</span><strong id="coverageValue">--</strong></div>
+            <div><span>最近更新</span><strong id="updatedValue">--</strong></div>
+            <div><span>刷新频率</span><strong>15 分钟</strong></div>
+          </div>
+        </div>
+
+        <div class="score-panel" id="scorePanel">
+          <div class="score-topline"><span>未来 6–12 个月综合市场风险</span><span id="scoreDelta">等待数据</span></div>
+          <div class="gauge-wrap">
+            <svg class="gauge" viewBox="0 0 260 260" role="img" aria-label="综合市场风险分">
+              <circle class="gauge-track" cx="130" cy="130" r="103"></circle>
+              <circle class="gauge-progress" id="gaugeProgress" cx="130" cy="130" r="103"></circle>
+            </svg>
+            <div class="gauge-value">
+              <strong id="scoreValue">--</strong>
+              <span>/ 100</span>
+            </div>
+          </div>
+          <div class="score-verdict">
+            <span class="verdict-dot" id="verdictDot"></span>
+            <strong id="verdictLabel">读取中</strong>
+            <p id="verdictDescription">正在抓取最新的宏观和市场数据。</p>
+          </div>
+          <div class="score-breakdown">
+            <div><span>12项基础分</span><strong id="baseScoreValue">--</strong><small>原始权重加总，不含共振</small></div>
+            <div><span>滞胀 / 政策压力</span><strong id="heatValue">--</strong><small>原油、通胀、美联储与利率</small></div>
+            <div><span>衰退 / 信用压力</span><strong id="recessionValue">--</strong><small>就业、信用与盈利</small></div>
+            <div><span>同向共振修正</span><strong id="upliftValue">--</strong><small>风险链同时恶化与高位脆弱</small></div>
+          </div>
+          <div class="action-callout" id="actionCallout">
+            <span>当前风险动作</span>
+            <strong id="actionLabel">等待数据</strong>
+            <p id="actionDetail">正在计算 12 项指标的加权结果。</p>
+          </div>
+          <p class="action-note">这是基于模型的条件式风险管理提示，不是针对个人账户的买卖指令。</p>
+          <div class="band-scale" aria-label="风险区间">
+            <span class="band-low"></span><span class="band-watch"></span><span class="band-elevated"></span><span class="band-high"></span><span class="band-crisis"></span>
+            <i id="bandMarker"></i>
+          </div>
+          <div class="band-labels"><span>低风险</span><span>警戒</span><span>升高</span><span>高风险</span><span>危机</span></div>
+        </div>
+      </section>
+
+      <section class="category-strip shell" id="categoryStrip" aria-label="风险链条分数"></section>
+
+      <section class="drivers shell" aria-labelledby="driversTitle">
+        <div class="drivers-heading">
+          <div>
+            <p class="eyebrow">WHAT DRIVES THE SCORE</p>
+            <h2 id="driversTitle">当前最大的风险贡献</h2>
+          </div>
+          <p id="driversSummary">正在识别拉高总分的主要信号。</p>
+        </div>
+        <div class="driver-list" id="driverList" aria-live="polite"></div>
+      </section>
+
+      <section class="dashboard shell" id="signals">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">THE SIGNAL BOARD</p>
+            <h2>十二项风险信号</h2>
+          </div>
+          <div class="filters" id="filters" role="group" aria-label="按类别筛选">
+            <button class="active" data-filter="全部" type="button">全部</button>
+            <button data-filter="通胀与政策" type="button">政策</button>
+            <button data-filter="信用" type="button">信用</button>
+            <button data-filter="盈利与AI" type="button">盈利与 AI</button>
+            <button data-filter="就业与经济" type="button">就业</button>
+            <button data-filter="市场确认" type="button">市场</button>
+          </div>
+        </div>
+        <div class="loading-grid" id="loadingGrid" aria-live="polite">
+          <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
+        </div>
+        <div class="indicator-grid" id="indicatorGrid"></div>
+        <div class="error-banner" id="errorBanner" hidden></div>
+      </section>
+
+      <section class="ai-section shell" id="ai" aria-labelledby="aiTitle">
+        <div class="section-heading ai-heading">
+          <div><p class="eyebrow">AI EARNINGS WATCH</p><h2 id="aiTitle">AI 产业链财报与指引</h2></div>
+          <p>核心名单按“能否改变全行业需求或供给预期”筛选，而不是按市值排名。覆盖算力、晶圆、云资本开支和 HBM 四个关键层级。</p>
+        </div>
+        <div class="ai-chain-map" id="aiChainMap" aria-label="AI产业链四层地图"></div>
+        <div class="ai-selection-note"><strong>为什么是这 8 家？</strong><span>它们分别控制算力平台、定制芯片与互连、先进制造与封装、云端资本开支、HBM 与存储供给。三星、Meta、AMD、ASML 保留为次级观察名单，当其财报成为主要风险来源时再进入核心组。</span></div>
+        <div class="ai-company-grid" id="aiCompanyGrid"></div>
+      </section>
+
+      <section class="calendar-section shell" id="calendar" aria-labelledby="calendarTitle">
+        <div class="section-heading calendar-heading">
+          <div><p class="eyebrow">RISK CALENDAR</p><h2 id="calendarTitle">重要日期提醒</h2></div>
+        </div>
+        <div class="reminder-grid" id="reminderGrid"></div>
+      </section>
+    </main>
+
+    <footer class="footer shell">
+      <span>US EQUITY RISK RADAR · v4.5</span>
+      <span>数据：公司 IR / SEC / BLS / BEA / Federal Reserve / FRED / Cboe / Nasdaq</span>
+    </footer>
+
+    <dialog class="manual-dialog" id="manualDialog">
+      <form method="dialog" id="manualForm">
+        <div class="dialog-head">
+          <div><p class="eyebrow">MANUAL OVERRIDES</p><h2>补充专业数据</h2></div>
+          <button class="icon-button" value="cancel" aria-label="关闭" type="submit">×</button>
+        </div>
+        <p class="dialog-intro">分析师一致预期通常来自付费数据库。你可以把券商、FactSet 或 Bloomberg 的结论转换成 0–100 风险值；留空则继续使用公开代理或不计分。</p>
+        <div class="manual-fields" id="manualFields"></div>
+        <div class="dialog-actions">
+          <button class="text-button" id="clearManual" type="button">清除人工数据</button>
+          <button class="primary-button" value="default" type="submit">保存并重算</button>
+        </div>
+      </form>
+    </dialog>
+
+    <template id="manualFieldTemplate">
+      <label class="manual-field">
+        <span class="manual-label"></span>
+        <span class="manual-help"></span>
+        <div><input class="manual-risk" type="number" min="0" max="100" step="1" placeholder="风险值 0–100" /><input class="manual-note" type="text" maxlength="80" placeholder="备注，例如：近三月 EPS 下调 4%" /></div>
+      </label>
+    </template>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
