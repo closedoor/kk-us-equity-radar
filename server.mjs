@@ -41,7 +41,8 @@ const aiEarnings = [
     resultTone: "positive",
     guidanceAssessment: "明显利好：Q2 营收中值 $91B 高于一致预期，AI 算力需求继续扩张；中国收入缺口仍是风险。",
     guidanceTone: "positive",
-    nextReportDate: null, nextReportLabel: "待公司官宣",
+    nextReportDate: "2026-08-26", nextReportLabel: "2026-08-26", nextReportStatus: "confirmed",
+    nextReportSource: "https://investor.nvidia.com/events-and-presentations/events-and-presentations/event-details/2026/NVIDIA-2nd-Quarter-FY27-Financial-Results/default.aspx",
     note: "GAAP 净利润包含较大投资收益；非 GAAP 净利润为 $45.548B。",
     source: "https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-first-quarter-fiscal-2027",
   },
@@ -55,7 +56,7 @@ const aiEarnings = [
     resultTone: "positive",
     guidanceAssessment: "基本面强但预期很高：AI 收入继续加速，定制芯片与网络需求明确；市场仍会追问更长期订单可见度。",
     guidanceTone: "mixed",
-    nextReportDate: null, nextReportLabel: "待公司官宣",
+    nextReportDate: null, nextReportLabel: "预计 9 月上旬 · 待官宣", nextReportStatus: "estimated",
     note: "GAAP 毛利率按 SEC 财报毛利 $15.415B / 营收 $22.187B 计算。",
     source: "https://www.sec.gov/Archives/edgar/data/1730168/000173016826000051/avgo-05032026x8kxex99.htm",
   },
@@ -69,7 +70,8 @@ const aiEarnings = [
     resultTone: "positive",
     guidanceAssessment: "明显利好：Q2 营收与利润率指引继续扩张，AI 先进制程与封装需求仍强。",
     guidanceTone: "positive",
-    nextReportDate: null, nextReportLabel: "待公司官宣",
+    nextReportDate: "2026-07-16", nextReportLabel: "2026-07-16", nextReportStatus: "confirmed",
+    nextReportSource: "https://investor.tsmc.com/english/quarterly-results/2026/q2",
     note: "美元口径采用公司官方财报；归属母公司净利润为 NT$571.15B / US$18.121B。",
     source: "https://investor.tsmc.com/english/quarterly-results/2026/q1",
   },
@@ -83,7 +85,8 @@ const aiEarnings = [
     resultTone: "positive",
     guidanceAssessment: "中性偏利好：Azure 指引强、资本开支继续扩张，但总营收中值略低于市场一致预期。",
     guidanceTone: "mixed",
-    nextReportDate: null, nextReportLabel: "待公司官宣",
+    nextReportDate: "2026-07-29", nextReportLabel: "2026-07-29", nextReportStatus: "confirmed",
+    nextReportSource: "https://news.microsoft.com/source/2026/07/08/microsoft-announces-quarterly-earnings-release-date-68/",
     note: "毛利率按官方营收与毛利润计算。",
     source: "https://www.microsoft.com/en-us/Investor/earnings/FY-2026-Q3/press-release-webcast",
   },
@@ -97,7 +100,8 @@ const aiEarnings = [
     resultTone: "positive",
     guidanceAssessment: "扩张但有压力：AI 投资继续上修，需求信号偏强；折旧、现金流与回报率压力同步上升。",
     guidanceTone: "mixed",
-    nextReportDate: null, nextReportLabel: "待公司官宣",
+    nextReportDate: "2026-07-22", nextReportLabel: "2026-07-22", nextReportStatus: "confirmed",
+    nextReportSource: "https://abc.xyz/investor/",
     note: "毛利率按 SEC 10-Q 的营收减营业成本计算；净利润含投资相关收益。",
     source: "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000048/goog-20260331.htm",
   },
@@ -111,23 +115,23 @@ const aiEarnings = [
     resultTone: "positive",
     guidanceAssessment: "偏利好：销售额与营业利润区间继续增长，但利润仍受投资收益和促销时点影响。",
     guidanceTone: "positive",
-    nextReportDate: null, nextReportLabel: "待公司官宣",
+    nextReportDate: null, nextReportLabel: "预计 7 月下旬 · 待官宣", nextReportStatus: "estimated",
     note: "净利润包含 Anthropic 投资约 $16.8B 的税前估值收益；毛利率按官方报表计算。",
     source: "https://ir.aboutamazon.com/news-release/news-release-details/2026/Amazon-com-Announces-First-Quarter-Results/default.aspx",
   },
   {
-    company: "Micron", ticker: "MU", period: "FY2026 Q2", released: "2026-03-18",
+    company: "Micron", ticker: "MU", period: "FY2026 Q3", released: "2026-06-24",
     layer: "HBM 与存储", role: "HBM / DRAM / NAND",
     impact: "美光的 HBM 产能、价格和毛利率指引，是判断存储短缺能否持续的重要公开信号。",
-    revenue: "$23.860B", netIncome: "$13.785B", grossMargin: "74.4%",
-    guidance: "FY2026 Q3 营收 $33.5B ±$0.75B，GAAP 毛利率约 81%，GAAP EPS $18.90 ±$0.40。",
-    resultAssessment: "大幅超预期：营收与调整后 EPS 均显著高于市场预期，HBM 与存储价格是核心驱动。",
+    revenue: "$41.456B", netIncome: "$28.243B", grossMargin: "84.6%",
+    guidance: "FY2026 Q4 营收 $50.0B ±$1.0B，GAAP 毛利率约 86%，GAAP EPS $30.73 ±$1.00。",
+    resultAssessment: "大幅超预期：营收、毛利率与 EPS 再创纪录，HBM 与存储价格是核心驱动。",
     resultTone: "positive",
     guidanceAssessment: "明显利好：营收、毛利率和 EPS 指引均大幅上行；主要风险是周期高位后的供给扩张。",
     guidanceTone: "positive",
-    nextReportDate: null, nextReportLabel: "待公司官宣",
+    nextReportDate: null, nextReportLabel: "预计 9 月下旬 · 待官宣", nextReportStatus: "estimated",
     note: "公司给出的下一季指引显示存储景气与 HBM 需求仍强。",
-    source: "https://investors.micron.com/news-releases/news-release-details/micron-technology-inc-reports-results-second-quarter-fiscal-2026",
+    source: "https://investors.micron.com/node/50671",
   },
   {
     company: "SK hynix", ticker: "000660.KS", period: "FY2026 Q1", released: "2026-04-23",
@@ -139,7 +143,7 @@ const aiEarnings = [
     resultTone: "positive",
     guidanceAssessment: "偏利好：出货量与价格环境仍强，需求继续高于供给；PC 与手机需求放缓需要跟踪。",
     guidanceTone: "positive",
-    nextReportDate: null, nextReportLabel: "待公司官宣",
+    nextReportDate: null, nextReportLabel: "预计 7 月下旬 · 待官宣", nextReportStatus: "estimated",
     note: "净利润包含约 KRW 9.94T 投资资产估值收益。",
     source: "https://news.skhynix.com/q1-2026-business-results/",
   },
@@ -152,16 +156,80 @@ const aiChainLayers = [
   { name: "HBM 与存储", description: "谁决定内存带宽、价格和供给周期", tickers: ["MU", "000660.KS"] },
 ];
 
-const reminders = [
-  { indicatorId: "inflation", label: "CPI 公布", date: "2026-07-14", event: "美国 6 月 CPI / 核心 CPI，08:30 ET", source: "https://www.bls.gov/schedule/2026/home.htm", linkLabel: "查看 BLS 官方发布日程" },
-  { indicatorId: "fed", label: "FOMC 利率决议", date: "2026-06-17", event: "利率决议、经济预测与主席发布会", source: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm", linkLabel: "查看美联储会议日程" },
-  { indicatorId: "unemployment", label: "失业率", date: "2026-07-02", event: "6 月就业报告", source: "https://www.bls.gov/schedule/2026/home.htm", linkLabel: "查看 BLS 就业报告日程" },
-  { indicatorId: "payrolls", label: "非农就业", date: "2026-07-02", event: "6 月非农就业报告", source: "https://www.bls.gov/schedule/2026/home.htm", linkLabel: "查看 BLS 就业报告日程" },
-  {
-    indicatorId: "aiEarnings", label: "八家 AI 巨头财报", date: null, event: "覆盖算力、晶圆、云资本开支与 HBM", source: "https://www.sec.gov/edgar/search/",
-    companies: aiEarnings.map(({ company, ticker, released, nextReportDate, nextReportLabel }) => ({ company, ticker, released, next: nextReportDate || nextReportLabel })),
-  },
+const cpiReleaseCalendar = [
+  { date: "2026-08-12", period: "7 月" },
+  { date: "2026-09-11", period: "8 月" },
+  { date: "2026-10-14", period: "9 月" },
+  { date: "2026-11-10", period: "10 月" },
+  { date: "2026-12-10", period: "11 月" },
 ];
+
+const employmentReleaseCalendar = [
+  { date: "2026-08-07", period: "7 月" },
+  { date: "2026-09-04", period: "8 月" },
+  { date: "2026-10-02", period: "9 月" },
+  { date: "2026-11-06", period: "10 月" },
+  { date: "2026-12-04", period: "11 月" },
+];
+
+const fomcDecisionCalendar = [
+  { date: "2026-07-29", meeting: "7 月 28–29 日会议", projections: false },
+  { date: "2026-09-16", meeting: "9 月 15–16 日会议", projections: true },
+  { date: "2026-10-28", meeting: "10 月 27–28 日会议", projections: false },
+  { date: "2026-12-09", meeting: "12 月 8–9 日会议", projections: true },
+];
+
+function dateInTimeZone(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function nextCalendarEvent(calendar, now = new Date()) {
+  const todayInNewYork = dateInTimeZone(now, "America/New_York");
+  return calendar.find(({ date }) => date >= todayInNewYork) || null;
+}
+
+function buildReminders(now = new Date()) {
+  const cpi = nextCalendarEvent(cpiReleaseCalendar, now);
+  const employment = nextCalendarEvent(employmentReleaseCalendar, now);
+  const fomc = nextCalendarEvent(fomcDecisionCalendar, now);
+  const blsSource = "https://www.bls.gov/schedule/2026/";
+
+  return [
+    {
+      indicatorId: "inflation", label: "CPI 公布", date: cpi?.date || null,
+      event: cpi ? `美国 ${cpi.period} CPI / 核心 CPI，08:30 ET` : "等待 BLS 公布下一年日程",
+      source: blsSource, linkLabel: "查看 BLS 官方发布日程", scheduleStatus: cpi ? "confirmed" : "pending",
+    },
+    {
+      indicatorId: "fed", label: "FOMC 利率决议", date: fomc?.date || null,
+      event: fomc ? `${fomc.meeting}：利率决议与主席发布会${fomc.projections ? "，同时公布经济预测" : ""}` : "等待美联储公布下一年日程",
+      source: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm", linkLabel: "查看美联储会议日程", scheduleStatus: fomc ? "confirmed" : "pending",
+    },
+    {
+      indicatorId: "unemployment", label: "失业率", date: employment?.date || null,
+      event: employment ? `${employment.period}就业报告·失业率，08:30 ET` : "等待 BLS 公布下一年日程",
+      source: blsSource, linkLabel: "查看 BLS 就业报告日程", scheduleStatus: employment ? "confirmed" : "pending",
+    },
+    {
+      indicatorId: "payrolls", label: "非农就业", date: employment?.date || null,
+      event: employment ? `${employment.period}就业报告·非农就业，08:30 ET` : "等待 BLS 公布下一年日程",
+      source: blsSource, linkLabel: "查看 BLS 就业报告日程", scheduleStatus: employment ? "confirmed" : "pending",
+    },
+    {
+      indicatorId: "aiEarnings", label: "八家 AI 巨头财报", date: null, event: "已确认日期与待官宣窗口分开标注", source: "https://www.sec.gov/edgar/search/",
+      companies: aiEarnings.map(({ company, ticker, released, nextReportDate, nextReportLabel, nextReportStatus, nextReportSource }) => ({
+        company, ticker, released, next: nextReportDate || nextReportLabel, status: nextReportStatus || "estimated", source: nextReportSource || null,
+      })),
+    },
+  ];
+}
 
 const officialInflationSnapshot = {
   cpi: { yoy: 4.2, mom: 0.5, period: "2026-05", released: "2026-06-10" },
@@ -173,7 +241,6 @@ const officialInflationSnapshot = {
 };
 
 const fedWatchSnapshot = {
-  meetingDate: "2026-06-17",
   asOf: "2026-06-12",
   hike25: 1.5,
   unchanged: 98.5,
@@ -391,6 +458,7 @@ function indicator({ id, title, category, weight, risk, value, detail, date, des
 }
 
 async function buildDashboard() {
+  const nextFomcDate = nextCalendarEvent(fomcDecisionCalendar)?.date || "待官方公布";
   const fredIds = ["DCOILBRENTEU", "CPIAUCSL", "CPILFESL", "PCEPILFE", "DFEDTARL", "DFEDTARU", "DGS2", "DGS10", "DFII10", "T10Y3M", "VIXCLS", "SP500", "BAMLH0A0HYM2", "DRTSCILM", "SAHMREALTIME", "ICSA", "NFCI", "CP", "UNRATE", "PAYEMS"];
   const marketSymbols = ["SPY", "RSP", "XLK", "XLF", "XLY", "XLC", "XLI", "XLV", "XLP", "XLE", "XLU", "XLRE", "XLB"];
 
@@ -635,7 +703,7 @@ async function buildDashboard() {
     }),
     indicator({
       id: "fed", title: "美联储政策周期", category: "通胀与政策", weight: weights.fed, risk: fedRisk,
-      value: fedLast && fedLowerLast ? `${round(fedLowerLast.value, 2)}%–${round(fedLast.value, 2)}%` : "暂无数据", detail: `当前联邦基金目标区间；下次会议 ${fedWatchSnapshot.meetingDate}；2 年期 ${twoYearLast ? round(twoYearLast.value, 2) : "--"}%`,
+      value: fedLast && fedLowerLast ? `${round(fedLowerLast.value, 2)}%–${round(fedLast.value, 2)}%` : "暂无数据", detail: `当前联邦基金目标区间；下次会议 ${nextFomcDate}；2 年期 ${twoYearLast ? round(twoYearLast.value, 2) : "--"}%`,
       date: fedLast?.date, description: "区分预防性降息与危机降息，并用联邦基金期货观察市场对下次会议的加息、不变和降息定价。", why: "政策收紧会压制估值和融资；市场隐含概率可以衡量预期，但不代表美联储承诺。",
       source: { label: "CME FedWatch · 官方市场概率工具", url: fedWatchSnapshot.source }, cadence: "市场快照 / 会议", confidence: "high", sparkline: spark(twoYear, 90), methodology: "市场利率重定价、实际政策变化、通胀和就业约束共同评分；会议概率来自 CME FedWatch 市场隐含定价。",
       breakdown: [
@@ -770,7 +838,7 @@ async function buildDashboard() {
     indicators,
     aiEarnings,
     aiChainLayers,
-    reminders,
+    reminders: buildReminders(),
     methodology: {
       version: "4.5",
       note: "先计算 12 项基础加权分，再用 30% 的主导风险链和最多 14 分的同向共振修正，避免油价、通胀、政策与利率同时恶化时被低风险项过度稀释。基础分与修正项均单独展示。",
@@ -829,7 +897,12 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 202, { warming: true, message: "正在同步最新数据" });
     }
     if (force || !fresh) refreshDashboard();
-    return sendJson(res, 200, { ...dashboardCache, cache: fresh && !force, refreshing: force || !fresh });
+    return sendJson(res, 200, {
+      ...dashboardCache,
+      reminders: buildReminders(),
+      cache: fresh && !force,
+      refreshing: force || !fresh,
+    });
   }
 
   const requested = url.pathname === "/" ? "/index.html" : url.pathname;

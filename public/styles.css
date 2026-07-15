@@ -199,7 +199,7 @@ a { color: inherit; }
 .reminder-card time { min-width: 95px; font: 10px var(--mono); text-align: right; }.reminder-card time b { display: block; margin-top: 7px; color: var(--orange); font-weight: 500; }
 .reminder-card.company-card { grid-column: 1 / -1; grid-template-columns: 36px 1fr auto; align-items: start; }
 .company-reminder-list { grid-column: 2 / -1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 4px; background: var(--line); border: 1px solid var(--line); }
-.company-reminder-list span { padding: 11px 12px; background: var(--paper); }.company-reminder-list b, .company-reminder-list em { display: block; }.company-reminder-list b { margin-bottom: 5px; font: 600 10px var(--mono); }.company-reminder-list em { color: var(--muted); font: normal 8px/1.5 var(--mono); }
+.company-reminder-list span { padding: 11px 12px; background: var(--paper); }.company-reminder-list b, .company-reminder-list em, .company-reminder-list i { display: block; }.company-reminder-list b { margin-bottom: 5px; font: 600 10px var(--mono); }.company-reminder-list em { color: var(--muted); font: normal 8px/1.5 var(--mono); }.company-reminder-list i { width: fit-content; margin-top: 7px; padding: 3px 6px; border: 1px solid var(--line); color: var(--muted); font: normal 7px var(--mono); }.company-reminder-list i.confirmed { border-color: rgba(46, 125, 95, .35); color: #2e7d5f; }
 
 .footer { display: flex; justify-content: space-between; padding-block: 28px 40px; border-top: 1px solid var(--line); color: var(--muted); font: 9px var(--mono); }
 

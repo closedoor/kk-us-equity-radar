@@ -241,16 +241,19 @@ function renderAiEarnings(rows = [], layers = []) {
 }
 
 function renderReminders(rows = []) {
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
   els.reminderGrid.innerHTML = rows.map((row, index) => {
-    const date = row.date ? new Date(`${row.date}T00:00:00+08:00`) : null;
-    const days = date ? Math.max(0, Math.ceil((date - now) / 86_400_000)) : null;
-    const companyList = row.companies?.length ? `<div class="company-reminder-list">${row.companies.map((company) => `<span><b>${escapeHtml(company.ticker)}</b><em>上期 ${escapeHtml(company.released)}</em><em>下期 ${escapeHtml(company.next)}</em></span>`).join("")}</div>` : "";
+    const dateParts = row.date?.split("-").map(Number);
+    const days = dateParts?.length === 3
+      ? Math.round((Date.UTC(dateParts[0], dateParts[1] - 1, dateParts[2]) - todayUtc) / 86_400_000)
+      : null;
+    const companyList = row.companies?.length ? `<div class="company-reminder-list">${row.companies.map((company) => `<span><b>${escapeHtml(company.ticker)}</b><em>上期 ${escapeHtml(company.released)}</em><em>下期 ${escapeHtml(company.next)}</em><i class="${company.status === "confirmed" ? "confirmed" : "estimated"}">${company.status === "confirmed" ? "已确认" : "预计窗口"}</i></span>`).join("")}</div>` : "";
     const sourceLink = !row.companies?.length && row.linkLabel ? `<a class="reminder-source" href="${escapeHtml(row.source)}" target="_blank" rel="noreferrer">${escapeHtml(row.linkLabel)} <span aria-hidden="true">↗</span></a>` : "";
+    const relativeLabel = days === null ? "" : days < 0 ? "已公布" : days === 0 ? "今天" : `${days} 天后`;
     return `<article class="reminder-card${row.companies?.length ? " company-card" : ""}">
       <span class="reminder-index">${String(index + 1).padStart(2, "0")}</span><div class="reminder-copy"><small>${escapeHtml(row.label)}</small><strong>${escapeHtml(row.event)}</strong>${sourceLink}</div>
-      <time>${row.date ? escapeHtml(row.date) : "逐家公司"}${days === null ? "" : `<b>${days === 0 ? "今天" : `${days} 天后`}</b>`}</time>${companyList}
+      <time>${row.date ? escapeHtml(row.date) : "逐家公司"}${relativeLabel ? `<b>${relativeLabel}</b>` : ""}</time>${companyList}
     </article>`;
   }).join("");
 }
