@@ -2,6 +2,7 @@ import http from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createCalendarService } from "./calendar.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
@@ -156,80 +157,7 @@ const aiChainLayers = [
   { name: "HBM 与存储", description: "谁决定内存带宽、价格和供给周期", tickers: ["MU", "000660.KS"] },
 ];
 
-const cpiReleaseCalendar = [
-  { date: "2026-08-12", period: "7 月" },
-  { date: "2026-09-11", period: "8 月" },
-  { date: "2026-10-14", period: "9 月" },
-  { date: "2026-11-10", period: "10 月" },
-  { date: "2026-12-10", period: "11 月" },
-];
-
-const employmentReleaseCalendar = [
-  { date: "2026-08-07", period: "7 月" },
-  { date: "2026-09-04", period: "8 月" },
-  { date: "2026-10-02", period: "9 月" },
-  { date: "2026-11-06", period: "10 月" },
-  { date: "2026-12-04", period: "11 月" },
-];
-
-const fomcDecisionCalendar = [
-  { date: "2026-07-29", meeting: "7 月 28–29 日会议", projections: false },
-  { date: "2026-09-16", meeting: "9 月 15–16 日会议", projections: true },
-  { date: "2026-10-28", meeting: "10 月 27–28 日会议", projections: false },
-  { date: "2026-12-09", meeting: "12 月 8–9 日会议", projections: true },
-];
-
-function dateInTimeZone(date, timeZone) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
-  return `${values.year}-${values.month}-${values.day}`;
-}
-
-function nextCalendarEvent(calendar, now = new Date()) {
-  const todayInNewYork = dateInTimeZone(now, "America/New_York");
-  return calendar.find(({ date }) => date >= todayInNewYork) || null;
-}
-
-function buildReminders(now = new Date()) {
-  const cpi = nextCalendarEvent(cpiReleaseCalendar, now);
-  const employment = nextCalendarEvent(employmentReleaseCalendar, now);
-  const fomc = nextCalendarEvent(fomcDecisionCalendar, now);
-  const blsSource = "https://www.bls.gov/schedule/2026/";
-
-  return [
-    {
-      indicatorId: "inflation", label: "CPI 公布", date: cpi?.date || null,
-      event: cpi ? `美国 ${cpi.period} CPI / 核心 CPI，08:30 ET` : "等待 BLS 公布下一年日程",
-      source: blsSource, linkLabel: "查看 BLS 官方发布日程", scheduleStatus: cpi ? "confirmed" : "pending",
-    },
-    {
-      indicatorId: "fed", label: "FOMC 利率决议", date: fomc?.date || null,
-      event: fomc ? `${fomc.meeting}：利率决议与主席发布会${fomc.projections ? "，同时公布经济预测" : ""}` : "等待美联储公布下一年日程",
-      source: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm", linkLabel: "查看美联储会议日程", scheduleStatus: fomc ? "confirmed" : "pending",
-    },
-    {
-      indicatorId: "unemployment", label: "失业率", date: employment?.date || null,
-      event: employment ? `${employment.period}就业报告·失业率，08:30 ET` : "等待 BLS 公布下一年日程",
-      source: blsSource, linkLabel: "查看 BLS 就业报告日程", scheduleStatus: employment ? "confirmed" : "pending",
-    },
-    {
-      indicatorId: "payrolls", label: "非农就业", date: employment?.date || null,
-      event: employment ? `${employment.period}就业报告·非农就业，08:30 ET` : "等待 BLS 公布下一年日程",
-      source: blsSource, linkLabel: "查看 BLS 就业报告日程", scheduleStatus: employment ? "confirmed" : "pending",
-    },
-    {
-      indicatorId: "aiEarnings", label: "八家 AI 巨头财报", date: null, event: "已确认日期与待官宣窗口分开标注", source: "https://www.sec.gov/edgar/search/",
-      companies: aiEarnings.map(({ company, ticker, released, nextReportDate, nextReportLabel, nextReportStatus, nextReportSource }) => ({
-        company, ticker, released, next: nextReportDate || nextReportLabel, status: nextReportStatus || "estimated", source: nextReportSource || null,
-      })),
-    },
-  ];
-}
+const calendarService = createCalendarService({ fetchText, aiEarnings });
 
 const officialInflationSnapshot = {
   cpi: { yoy: 4.2, mom: 0.5, period: "2026-05", released: "2026-06-10" },
@@ -337,13 +265,16 @@ function sourceUrl(seriesId) {
   return `https://fred.stlouisfed.org/series/${seriesId}`;
 }
 
-async function fetchText(url) {
+async function fetchText(url, headers = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(url, {
       signal: controller.signal,
-      headers: { "user-agent": "Mozilla/5.0 BearMarketRadar/1.0" },
+      headers: {
+        "user-agent": "Mozilla/5.0 BearMarketRadar/1.0",
+        ...headers,
+      },
     });
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
     return await response.text();
@@ -352,8 +283,8 @@ async function fetchText(url) {
   }
 }
 
-async function fetchJson(url) {
-  const text = await fetchText(url);
+async function fetchJson(url, headers) {
+  const text = await fetchText(url, headers);
   return JSON.parse(text);
 }
 
@@ -458,7 +389,8 @@ function indicator({ id, title, category, weight, risk, value, detail, date, des
 }
 
 async function buildDashboard() {
-  const nextFomcDate = nextCalendarEvent(fomcDecisionCalendar)?.date || "待官方公布";
+  const currentAiEarnings = calendarService.resolvedAiEarnings();
+  const nextFomcDate = calendarService.nextFomc()?.date || "待官方公布";
   const fredIds = ["DCOILBRENTEU", "CPIAUCSL", "CPILFESL", "PCEPILFE", "DFEDTARL", "DFEDTARU", "DGS2", "DGS10", "DFII10", "T10Y3M", "VIXCLS", "SP500", "BAMLH0A0HYM2", "DRTSCILM", "SAHMREALTIME", "ICSA", "NFCI", "CP", "UNRATE", "PAYEMS"];
   const marketSymbols = ["SPY", "RSP", "XLK", "XLF", "XLY", "XLC", "XLI", "XLV", "XLP", "XLE", "XLU", "XLRE", "XLB"];
 
@@ -836,9 +768,11 @@ async function buildDashboard() {
     coverage: availableWeight,
     categories,
     indicators,
-    aiEarnings,
+    aiEarnings: currentAiEarnings,
     aiChainLayers,
-    reminders: buildReminders(),
+    reminders: calendarService.buildReminders(),
+    calendarSchedule: calendarService.snapshot(),
+    calendarSync: calendarService.syncStatus(),
     methodology: {
       version: "4.5",
       note: "先计算 12 项基础加权分，再用 30% 的主导风险链和最多 14 分的同向共振修正，避免油价、通胀、政策与利率同时恶化时被低风险项过度稀释。基础分与修正项均单独展示。",
@@ -867,9 +801,11 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
-function refreshDashboard() {
+function refreshDashboard(force = false) {
   if (refreshPromise) return refreshPromise;
-  refreshPromise = buildDashboard()
+  refreshPromise = calendarService.refresh({ force })
+    .catch((error) => console.warn(`[calendar] refresh failed: ${error.message}`))
+    .then(() => buildDashboard())
     .then((next) => {
       if (!dashboardCache || next.errors.length === 0 || next.coverage >= dashboardCache.coverage) {
         dashboardCache = next;
@@ -896,10 +832,13 @@ const server = http.createServer(async (req, res) => {
       refreshDashboard();
       return sendJson(res, 202, { warming: true, message: "正在同步最新数据" });
     }
-    if (force || !fresh) refreshDashboard();
+    if (force || !fresh) refreshDashboard(force);
     return sendJson(res, 200, {
       ...dashboardCache,
-      reminders: buildReminders(),
+      reminders: calendarService.buildReminders(),
+      aiEarnings: calendarService.resolvedAiEarnings(),
+      calendarSchedule: calendarService.snapshot(),
+      calendarSync: calendarService.syncStatus(),
       cache: fresh && !force,
       refreshing: force || !fresh,
     });
@@ -925,6 +864,7 @@ const server = http.createServer(async (req, res) => {
 try {
   dashboardCache = JSON.parse(await readFile(dashboardCacheFile, "utf8"));
   dashboardCachedAt = Date.parse(dashboardCache.generatedAt) || 0;
+  calendarService.hydrate(dashboardCache.calendarSchedule);
 } catch {
   dashboardCache = null;
 }

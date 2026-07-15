@@ -242,7 +242,13 @@ function renderAiEarnings(rows = [], layers = []) {
 
 function renderReminders(rows = []) {
   const today = new Date();
-  const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  const todayParts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(today).map(({ type, value }) => [type, value]));
+  const todayUtc = Date.UTC(Number(todayParts.year), Number(todayParts.month) - 1, Number(todayParts.day));
   els.reminderGrid.innerHTML = rows.map((row, index) => {
     const dateParts = row.date?.split("-").map(Number);
     const days = dateParts?.length === 3
