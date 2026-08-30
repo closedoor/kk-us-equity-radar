@@ -368,6 +368,19 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
   function resolvedAiEarnings(at = now()) {
     const today = dateInTimeZone(at);
     return (aiEarnings || []).map((company) => {
+      const snapshotAgeDays = validIsoDate(company.released)
+        ? Math.floor((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${company.released}T00:00:00Z`)) / DAY_MS)
+        : null;
+      const knownReportPassed = company.nextReportStatus === "confirmed"
+        && validIsoDate(company.nextReportDate)
+        && company.nextReportDate < today
+        && company.nextReportDate > company.released;
+      const snapshotStale = knownReportPassed || (Number.isFinite(snapshotAgeDays) && snapshotAgeDays > 120);
+      const snapshot = {
+        snapshotStale,
+        snapshotAgeDays,
+        snapshotLabel: snapshotStale ? "财报解读待更新" : `资料截至 ${company.released}`,
+      };
       const automatic = state.earnings[company.ticker];
       const automaticIsFuture = validIsoDate(automatic?.date) && automatic.date >= today;
       const confirmedFallback = company.nextReportStatus === "confirmed"
@@ -378,6 +391,7 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
         const confirmed = confirmedFallback && company.nextReportDate === automatic.date;
         return {
           ...company,
+          ...snapshot,
           nextReportDate: automatic.date,
           nextReportLabel: `${automatic.date}${automatic.timing ? ` · ${automatic.timing}` : ""}`,
           nextReportStatus: confirmed ? "confirmed" : "estimated",
@@ -387,10 +401,11 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
         };
       }
 
-      if (confirmedFallback) return company;
+      if (confirmedFallback) return { ...company, ...snapshot };
       const estimate = estimatedQuarterDate(company.released, at);
       return {
         ...company,
+        ...snapshot,
         nextReportDate: null,
         nextReportLabel: `预计 ${estimate} 前后 · 待官宣`,
         nextReportStatus: "estimated",

@@ -159,23 +159,6 @@ const aiChainLayers = [
 
 const calendarService = createCalendarService({ fetchText, aiEarnings });
 
-const officialInflationSnapshot = {
-  cpi: { yoy: 4.2, mom: 0.5, period: "2026-05", released: "2026-06-10" },
-  coreCpi: { yoy: 2.9, mom: 0.2, period: "2026-05", released: "2026-06-10" },
-  pce: { yoy: 3.8, mom: 0.4, period: "2026-04", released: "2026-05-29" },
-  corePce: { yoy: 3.3, mom: 0.2, period: "2026-04", released: "2026-05-29" },
-  priorCpiYoy: 3.8,
-  priorCoreCpiYoy: 2.8,
-};
-
-const fedWatchSnapshot = {
-  asOf: "2026-06-12",
-  hike25: 1.5,
-  unchanged: 98.5,
-  cut25: "<0.1",
-  source: "https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html",
-};
-
 const fredMeta = {
   DCOILBRENTEU: ["Brent 现货", "日度"],
   CPIAUCSL: ["整体 CPI", "月度"],
@@ -232,6 +215,35 @@ function annualizedChange(current, previous, months) {
   return Number.isFinite(current) && Number.isFinite(previous) && previous > 0
     ? ((current / previous) ** (12 / months) - 1) * 100
     : null;
+}
+
+function monthsBefore(point, months) {
+  if (!point?.date) return null;
+  const date = new Date(`${point.date}T00:00:00Z`);
+  date.setUTCMonth(date.getUTCMonth() - months);
+  return date.toISOString().slice(0, 7);
+}
+
+function yearOverYear(series, offset = 0) {
+  const current = series?.at(-1 - offset);
+  const previousMonth = monthsBefore(current, 12);
+  const previous = series?.find((point) => point.date.startsWith(previousMonth));
+  return pctChange(current?.value, previous?.value);
+}
+
+function monthOverMonth(series) {
+  return pctChange(series?.at(-1)?.value, series?.at(-2)?.value);
+}
+
+function monthLabel(point) {
+  if (!point?.date) return "数据期未知";
+  const [year, month] = point.date.split("-");
+  return `${year} 年 ${Number(month)} 月`;
+}
+
+function signedPercent(value, digits = 1) {
+  if (!Number.isFinite(value)) return "--";
+  return `${value >= 0 ? "+" : ""}${round(value, digits)}%`;
 }
 
 function latest(series) {
@@ -391,7 +403,7 @@ function indicator({ id, title, category, weight, risk, value, detail, date, des
 async function buildDashboard() {
   const currentAiEarnings = calendarService.resolvedAiEarnings();
   const nextFomcDate = calendarService.nextFomc()?.date || "待官方公布";
-  const fredIds = ["DCOILBRENTEU", "CPIAUCSL", "CPILFESL", "PCEPILFE", "DFEDTARL", "DFEDTARU", "DGS2", "DGS10", "DFII10", "T10Y3M", "VIXCLS", "SP500", "BAMLH0A0HYM2", "DRTSCILM", "SAHMREALTIME", "ICSA", "NFCI", "CP", "UNRATE", "PAYEMS"];
+  const fredIds = ["DCOILBRENTEU", "CPIAUCSL", "CPILFESL", "PCEPI", "PCEPILFE", "DFEDTARL", "DFEDTARU", "DGS2", "DGS10", "DFII10", "T10Y3M", "VIXCLS", "SP500", "BAMLH0A0HYM2", "DRTSCILM", "SAHMREALTIME", "ICSA", "NFCI", "UNRATE", "PAYEMS"];
   const marketSymbols = ["SPY", "RSP", "XLK", "XLF", "XLY", "XLC", "XLI", "XLV", "XLP", "XLE", "XLU", "XLRE", "XLB"];
 
   const [fredResults, marketResults] = await Promise.all([
@@ -413,17 +425,18 @@ async function buildDashboard() {
 
   const headlineCpi = getFred("CPIAUCSL");
   const coreCpi = getFred("CPILFESL");
+  const headlinePce = getFred("PCEPI");
   const corePce = getFred("PCEPILFE");
-  // Display and year-over-year scoring use the latest BLS/BEA release values.
-  // FRED seasonally adjusted series remain the source for multi-month momentum.
-  const headlineCpiYoy = officialInflationSnapshot.cpi.yoy;
-  const priorHeadlineCpiYoy = officialInflationSnapshot.priorCpiYoy;
-  const coreCpiYoy = officialInflationSnapshot.coreCpi.yoy;
-  const priorCoreCpiYoy = officialInflationSnapshot.priorCoreCpiYoy;
-  const headlinePceYoy = officialInflationSnapshot.pce.yoy;
-  const headlinePceMom = officialInflationSnapshot.pce.mom;
-  const corePceYoy = officialInflationSnapshot.corePce.yoy;
-  const corePceMom = officialInflationSnapshot.corePce.mom;
+  const headlineCpiYoy = yearOverYear(headlineCpi);
+  const priorHeadlineCpiYoy = yearOverYear(headlineCpi, 1);
+  const headlineCpiMom = monthOverMonth(headlineCpi);
+  const coreCpiYoy = yearOverYear(coreCpi);
+  const priorCoreCpiYoy = yearOverYear(coreCpi, 1);
+  const coreCpiMom = monthOverMonth(coreCpi);
+  const headlinePceYoy = yearOverYear(headlinePce);
+  const headlinePceMom = monthOverMonth(headlinePce);
+  const corePceYoy = yearOverYear(corePce);
+  const corePceMom = monthOverMonth(corePce);
   const headlineCpi3m = headlineCpi.length >= 4 ? annualizedChange(headlineCpi.at(-1).value, headlineCpi.at(-4).value, 3) : null;
   const coreCpi3m = coreCpi.length >= 4 ? annualizedChange(coreCpi.at(-1).value, coreCpi.at(-4).value, 3) : null;
   const pce3m = corePce.length >= 4 ? annualizedChange(corePce.at(-1).value, corePce.at(-4).value, 3) : null;
@@ -518,7 +531,14 @@ async function buildDashboard() {
     ? clamp(realYieldRisk * 0.72 + yieldCurveRisk * 0.28)
     : realYieldRisk;
   const aiToneRisk = { positive: 0.12, mixed: 0.34, negative: 0.75 };
-  const aiRisk = clamp(average(aiEarnings.map((row) => aiToneRisk[row.guidanceTone] ?? 0.5)) + 0.03);
+  const currentAiSnapshots = currentAiEarnings.filter((row) => !row.snapshotStale);
+  const aiRiskAverage = average(currentAiSnapshots.map((row) => aiToneRisk[row.guidanceTone] ?? 0.5));
+  const aiRisk = Number.isFinite(aiRiskAverage) ? clamp(aiRiskAverage + 0.03) : null;
+  const aiLatestRelease = currentAiSnapshots
+    .map((row) => row.released)
+    .filter(Boolean)
+    .sort()
+    .at(-1);
 
   const vix = getFred("VIXCLS");
   const vixLast = latest(vix);
@@ -597,11 +617,6 @@ async function buildDashboard() {
     ? clamp(scale(-relative60, 0, 8) * 0.45 + (belowSectorCount / sectorSymbols.length) * 0.55)
     : null;
 
-  const profits = getFred("CP");
-  // Current public earnings snapshots remain constructive, but a 10% weight should not
-  // receive a zero-risk/full-confidence score from a stale quarterly profits proxy.
-  const earningsBreadthRisk = 0.10;
-
   const nfci = getFred("NFCI");
   const nfciLast = latest(nfci);
   const nfciRisk = nfciLast ? scale(nfciLast.value, -0.5, 0.5) : null;
@@ -623,27 +638,31 @@ async function buildDashboard() {
     indicator({
       id: "inflation", title: "CPI / PCE 通胀趋势", category: "通胀与政策", weight: weights.inflation, risk: inflationRisk,
       value: Number.isFinite(headlineCpiYoy) ? `${round(headlineCpiYoy, 1)}%` : "暂无数据", detail: `整体 CPI 同比；三个月年化 ${Number.isFinite(headlineCpi3m) ? round(headlineCpi3m, 1) : "--"}%`,
-      date: officialInflationSnapshot.cpi.released, description: "重点看核心 CPI、核心 PCE 的三个月与六个月趋势，避免被单月噪声带偏。", why: "通胀黏性决定美联储能否降息，也决定估值压力会持续多久。",
+      date: latest(headlineCpi)?.date, description: "重点看核心 CPI、核心 PCE 的三个月趋势，避免被单月噪声带偏。卡片日期表示最新数据期，不冒充官方发布日期。", why: "通胀黏性决定美联储能否降息，也决定估值压力会持续多久。",
       source: { label: "BLS / BEA / FRED · CPI 与 PCE", url: "https://www.bls.gov/news.release/cpi.nr0.htm" }, cadence: "月度", confidence: "high", sparkline: spark(headlineCpi, 18), methodology: "整体 CPI 三个月年化和同比占 60%，核心 PCE 与核心 CPI 占 40%。",
       breakdown: [
-        { label: "CPI", value: `${round(headlineCpiYoy, 1)}%`, detail: `5月 · 月率 +${officialInflationSnapshot.cpi.mom}%` },
-        { label: "核心 CPI", value: `${round(coreCpiYoy, 1)}%`, detail: `5月 · 月率 +${officialInflationSnapshot.coreCpi.mom}%` },
-        { label: "PCE", value: `${round(headlinePceYoy, 1)}%`, detail: `4月 · 月率 +${headlinePceMom}%` },
-        { label: "核心 PCE", value: `${round(corePceYoy, 1)}%`, detail: `4月 · 月率 +${corePceMom}%` },
+        { label: "CPI", value: Number.isFinite(headlineCpiYoy) ? `${round(headlineCpiYoy, 1)}%` : "--", detail: `${monthLabel(latest(headlineCpi))} · 月率 ${signedPercent(headlineCpiMom)}` },
+        { label: "核心 CPI", value: Number.isFinite(coreCpiYoy) ? `${round(coreCpiYoy, 1)}%` : "--", detail: `${monthLabel(latest(coreCpi))} · 月率 ${signedPercent(coreCpiMom)}` },
+        { label: "PCE", value: Number.isFinite(headlinePceYoy) ? `${round(headlinePceYoy, 1)}%` : "--", detail: `${monthLabel(latest(headlinePce))} · 月率 ${signedPercent(headlinePceMom)}` },
+        { label: "核心 PCE", value: Number.isFinite(corePceYoy) ? `${round(corePceYoy, 1)}%` : "--", detail: `${monthLabel(latest(corePce))} · 月率 ${signedPercent(corePceMom)}` },
       ],
       judgment: inflationTrend,
     }),
     indicator({
       id: "fed", title: "美联储政策周期", category: "通胀与政策", weight: weights.fed, risk: fedRisk,
       value: fedLast && fedLowerLast ? `${round(fedLowerLast.value, 2)}%–${round(fedLast.value, 2)}%` : "暂无数据", detail: `当前联邦基金目标区间；下次会议 ${nextFomcDate}；2 年期 ${twoYearLast ? round(twoYearLast.value, 2) : "--"}%`,
-      date: fedLast?.date, description: "区分预防性降息与危机降息，并用联邦基金期货观察市场对下次会议的加息、不变和降息定价。", why: "政策收紧会压制估值和融资；市场隐含概率可以衡量预期，但不代表美联储承诺。",
-      source: { label: "CME FedWatch · 官方市场概率工具", url: fedWatchSnapshot.source }, cadence: "市场快照 / 会议", confidence: "high", sparkline: spark(twoYear, 90), methodology: "市场利率重定价、实际政策变化、通胀和就业约束共同评分；会议概率来自 CME FedWatch 市场隐含定价。",
+      date: fedLast?.date, description: "用联邦基金目标区间、2 年期美债和宏观约束判断市场是否在重新定价政策路径。", why: "政策收紧会压制估值和融资；2 年期利率比未经自动核验的概率快照更适合持续监测。",
+      source: { label: "Federal Reserve / FRED · 政策利率", url: sourceUrl("DFEDTARU") }, cadence: "交易日 / 会议", confidence: "high", sparkline: spark(twoYear, 90), methodology: "市场利率重定价、实际政策变化、通胀和就业约束共同评分；不再展示过期的会议概率快照。",
       breakdown: [
-        { label: "加息 25 bp", value: `${fedWatchSnapshot.hike25}%`, detail: `目标区间 3.75%–4.00%` },
-        { label: "维持不变", value: `${fedWatchSnapshot.unchanged}%`, detail: `目标区间 3.50%–3.75%` },
-        { label: "降息 25 bp", value: `${fedWatchSnapshot.cut25}%`, detail: `目标区间 3.25%–3.50%` },
+        { label: "政策目标下限", value: fedLowerLast ? `${round(fedLowerLast.value, 2)}%` : "--", detail: fedLowerLast?.date || "" },
+        { label: "政策目标上限", value: fedLast ? `${round(fedLast.value, 2)}%` : "--", detail: fedLast?.date || "" },
+        { label: "2 年期美债", value: twoYearLast ? `${round(twoYearLast.value, 2)}%` : "--", detail: twoYearLast?.date || "" },
       ],
-      judgment: { tone: "watch", label: "市场预测", text: `截至 ${fedWatchSnapshot.asOf}，市场几乎确定本次按兵不动。98.5% 为最新公开 FedWatch 引用值；其余尾部定价偏向加息，降息接近零。` },
+      judgment: Number.isFinite(policyGap) ? {
+        tone: policyGap > 0.25 ? "bad" : policyGap < -0.25 ? "good" : "mixed",
+        label: "市场定价",
+        text: `2 年期美债相对政策上限${policyGap >= 0 ? "高" : "低"} ${Math.abs(round(policyGap, 2))} 个百分点，${policyGap > 0.25 ? "市场仍在计入偏紧政策风险。" : policyGap < -0.25 ? "市场正在计入未来宽松空间。" : "市场利率与当前政策区间较为接近。"}`,
+      } : null,
     }),
     indicator({
       id: "rates", title: "10年期美债与实际利率", category: "通胀与政策", weight: weights.rates, risk: ratesRisk,
@@ -676,9 +695,9 @@ async function buildDashboard() {
     }),
     indicator({
       id: "aiEarnings", title: "AI 产业链财报与指引", category: "盈利与AI", weight: weights.aiEarnings, risk: aiRisk,
-      value: "8 家", detail: "NVDA / AVGO / TSM / MSFT / GOOG / AMZN / MU / SK hynix",
-      date: "2026-06-03", description: "按算力与互连、晶圆与先进封装、云资本开支、HBM 与存储四层监测行业巨头。", why: "这些公司的指引能同时改变 AI 需求、供给、带宽和资本开支预期，比单纯按市值选股更接近产业链真实风险。",
-      source: { label: "公司 IR / SEC 原始文件", url: aiEarnings[1].source }, cadence: "季度", confidence: "high", sparkline: [], methodology: "按八家公司下一期指引语气映射基础风险，并加入 3 分产业集中度溢价；支持人工覆盖。",
+      value: `${currentAiSnapshots.length} / ${currentAiEarnings.length} 家`, detail: "仅让仍在有效期内的财报解读参与评分；下次财报日期单独自动同步",
+      date: aiLatestRelease, description: "按算力与互连、晶圆与先进封装、云资本开支、HBM 与存储四层监测行业巨头。过期解读会明确标记并退出自动评分。", why: "这些公司的指引能同时改变 AI 需求、供给、带宽和资本开支预期，比单纯按市值选股更接近产业链真实风险。",
+      source: { label: "公司 IR / SEC 原始文件", url: aiEarnings[1].source }, cadence: "季度", confidence: "medium", sparkline: [], available: currentAiSnapshots.length >= 3, methodology: "仅使用尚未跨过已知下一次财报日、且资料期不超过 120 天的公司指引；加入 3 分产业集中度溢价，支持人工覆盖。",
     }),
     indicator({
       id: "credit", title: "信用利差与银行信贷", category: "信用", weight: weights.credit, risk: creditComposite,
@@ -687,10 +706,10 @@ async function buildDashboard() {
       source: { label: "FRED / Fed SLOOS · Credit", url: sourceUrl("BAMLH0A0HYM2") }, cadence: "交易日/季度", confidence: "high", sparkline: spark(credit), methodology: "高收益债利差占 65%，SLOOS 占 25%，NFCI 占 10%。",
     }),
     indicator({
-      id: "earningsBreadth", title: "标普 500 整体盈利预期", category: "盈利与AI", weight: weights.earningsBreadth, risk: earningsBreadthRisk,
-      value: "仍在上修", detail: "公开市场快照：远期盈利预期保持增长，尚未出现持续 8–12 周的广泛下修",
-      date: "2026-06-12", description: "观察未来 12 个月 EPS 是否连续 8 至 12 周下修，并检查下修是否扩散。", why: "盈利下调从科技扩散至金融、工业和消费时，熊市风险会显著上升。",
-      source: { label: "S&P Global / 公开盈利预期跟踪", url: "https://www.spglobal.com/spdji/en/indices/equity/sp-500/" }, cadence: "每周复核", confidence: "medium", sparkline: spark(profits, 20), methodology: "当前公开盈利快照偏强，风险设为 10；如有 FactSet/Bloomberg EPS 修正广度，可人工覆盖。",
+      id: "earningsBreadth", title: "标普 500 整体盈利预期", category: "盈利与AI", weight: weights.earningsBreadth, risk: null,
+      value: "待接入", detail: "免费公开源无法稳定提供每周 EPS 上调/下调广度，暂不以旧快照计分",
+      date: null, description: "观察未来 12 个月 EPS 是否连续 8 至 12 周下修，并检查下修是否扩散。", why: "盈利下调从科技扩散至金融、工业和消费时，熊市风险会显著上升。",
+      source: { label: "S&P Global · S&P 500", url: "https://www.spglobal.com/spdji/en/indices/equity/sp-500/" }, cadence: "需要专业数据", confidence: "manual", sparkline: [], available: false, methodology: "该项需要 FactSet、Bloomberg 或同等级 EPS 修正广度；接入前保持未计分，也可人工覆盖。",
     }),
     indicator({
       id: "breadth", title: "市场宽度", category: "市场确认", weight: weights.breadth, risk: breadthRisk,
@@ -832,15 +851,16 @@ const server = http.createServer(async (req, res) => {
       refreshDashboard();
       return sendJson(res, 202, { warming: true, message: "正在同步最新数据" });
     }
-    if (force || !fresh) refreshDashboard(force);
+    if (force) await refreshDashboard(true);
+    else if (!fresh) refreshDashboard();
     return sendJson(res, 200, {
       ...dashboardCache,
       reminders: calendarService.buildReminders(),
       aiEarnings: calendarService.resolvedAiEarnings(),
       calendarSchedule: calendarService.snapshot(),
       calendarSync: calendarService.syncStatus(),
-      cache: fresh && !force,
-      refreshing: force || !fresh,
+      cache: !force && fresh,
+      refreshing: !force && !fresh,
     });
   }
 
@@ -873,4 +893,6 @@ server.listen(port, host, () => {
   const displayHost = host === "0.0.0.0" ? "127.0.0.1" : host;
   console.log(`kk的美股雷达已启动：http://${displayHost}:${port}`);
   refreshDashboard();
+  const timer = setInterval(() => refreshDashboard(), CACHE_TTL_MS);
+  timer.unref();
 });

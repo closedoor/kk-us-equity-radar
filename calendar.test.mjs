@@ -103,3 +103,23 @@ test("calendar service uses automatic dates and keeps confirmed company dates", 
   assert.equal(reminders[4].companies[0].next, "2026-07-29");
   assert.equal(reminders[4].companies[0].status, "confirmed");
 });
+
+test("marks a company snapshot stale after its confirmed next report has passed", () => {
+  const service = createCalendarService({
+    fetchText: async () => "",
+    aiEarnings: [{
+      company: "NVIDIA",
+      ticker: "NVDA",
+      released: "2026-05-20",
+      nextReportDate: "2026-08-26",
+      nextReportLabel: "2026-08-26",
+      nextReportStatus: "confirmed",
+    }],
+    now: () => new Date("2026-08-31T12:00:00Z"),
+  });
+
+  const [company] = service.resolvedAiEarnings();
+  assert.equal(company.snapshotStale, true);
+  assert.equal(company.snapshotLabel, "财报解读待更新");
+  assert.match(company.nextReportLabel, /待官宣/);
+});

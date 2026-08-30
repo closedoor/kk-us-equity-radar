@@ -167,7 +167,8 @@ function renderSummary(data) {
   els.verdictDot.style.background = meta.color;
   els.coverage.textContent = `${data.coverage}%`;
   els.updated.textContent = formatDate(data.generatedAt);
-  els.scoreDelta.textContent = `12 项权重合计 100%`;
+  const availableCount = data.indicators.filter((item) => item.available).length;
+  els.scoreDelta.textContent = `${availableCount} 项有效 · 权重 ${data.coverage}%`;
   els.baseScore.textContent = Number.isFinite(data.baseScore) ? data.baseScore.toFixed(1) : "--";
   els.heat.textContent = Number.isFinite(data.heatScore) ? data.heatScore.toFixed(1) : "--";
   els.recession.textContent = Number.isFinite(data.recessionScore) ? data.recessionScore.toFixed(1) : "--";
@@ -219,10 +220,10 @@ function renderAiEarnings(rows = [], layers = []) {
     <div>${layer.tickers.map((ticker) => `<b>${escapeHtml(ticker)}</b>`).join("")}</div>
   </article>`).join("");
 
-  els.aiCompanyGrid.innerHTML = rows.map((row) => `<article class="ai-company-card">
+  els.aiCompanyGrid.innerHTML = rows.map((row) => `<article class="ai-company-card${row.snapshotStale ? " snapshot-stale" : ""}">
     <div class="ai-card-head">
       <span class="ai-layer-pill">${escapeHtml(row.layer)}</span>
-      <time>${escapeHtml(row.released)}</time>
+      <div class="ai-snapshot-meta"><time>${escapeHtml(row.snapshotLabel || `资料截至 ${row.released}`)}</time>${row.snapshotStale ? '<span class="ai-stale-badge">待更新</span>' : ""}</div>
     </div>
     <div class="ai-company-title"><div><h3>${escapeHtml(row.company)}</h3><span>${escapeHtml(row.ticker)} · ${escapeHtml(row.period)}</span></div><strong>${escapeHtml(row.role)}</strong></div>
     <p class="ai-impact">${escapeHtml(row.impact)}</p>
@@ -330,31 +331,47 @@ function render() {
   renderErrors(data.errors);
 }
 
-async function loadData(force = false) {
-  els.refresh.classList.add("loading");
-  els.liveText.textContent = "正在更新数据";
-  try {
-    const response = await fetch(`/api/dashboard${force ? "?refresh=1" : ""}`);
-    const payload = await response.json();
-    if (response.status === 202 && payload.warming) {
-      els.liveText.textContent = "正在同步首批数据";
-      setTimeout(() => loadData(), 2500);
-      return;
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let activeLoad = null;
+
+function loadData(force = false) {
+  if (activeLoad) return activeLoad;
+  activeLoad = (async () => {
+    els.refresh.classList.add("loading");
+    els.refresh.disabled = true;
+    els.refresh.setAttribute("aria-busy", "true");
+    els.liveText.textContent = force ? "正在抓取最新数据" : "正在更新数据";
+    try {
+      let response;
+      let payload;
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        response = await fetch(`/api/dashboard${force && attempt === 0 ? "?refresh=1" : ""}`);
+        payload = await response.json();
+        if (!(response.status === 202 && payload.warming)) break;
+        els.liveText.textContent = `正在同步首批数据 · ${attempt + 1}/12`;
+        await wait(2500);
+      }
+      if (response?.status === 202) throw new Error("数据同步时间较长，请稍后再试");
+      if (!response?.ok) throw new Error(payload?.detail || payload?.error || "数据请求失败");
+      state.data = payload;
+      els.loading.hidden = true;
+      els.loading.replaceChildren();
+      els.error.hidden = true;
+      render();
+    } catch (error) {
+      els.liveText.textContent = "连接失败";
+      els.loading.hidden = true;
+      els.loading.replaceChildren();
+      els.error.hidden = false;
+      els.error.textContent = `无法更新数据：${error.message}。请稍后重试。`;
+    } finally {
+      els.refresh.classList.remove("loading");
+      els.refresh.disabled = false;
+      els.refresh.removeAttribute("aria-busy");
+      activeLoad = null;
     }
-    if (!response.ok) throw new Error(payload.detail || payload.error || "数据请求失败");
-    state.data = payload;
-    els.loading.hidden = true;
-    els.loading.replaceChildren();
-    render();
-  } catch (error) {
-    els.liveText.textContent = "连接失败";
-    els.loading.hidden = true;
-    els.loading.replaceChildren();
-    els.error.hidden = false;
-    els.error.textContent = `无法更新数据：${error.message}。请确认本地服务可以访问互联网后重试。`;
-  } finally {
-    els.refresh.classList.remove("loading");
-  }
+  })();
+  return activeLoad;
 }
 
 function buildManualFields(focusId = null) {

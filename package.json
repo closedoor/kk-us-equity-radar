@@ -1,12 +1,12 @@
 {
   "name": "us-equity-risk-radar",
-  "version": "4.5.0",
+  "version": "4.6.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
     "dev": "node --watch server.mjs",
-    "check": "node --check server.mjs && node --check public/app.js"
+    "check": "node --check server.mjs && node --check public/app.js && node --test calendar.test.mjs"
   },
   "engines": {
     "node": ">=18"
