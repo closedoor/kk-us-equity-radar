@@ -11,9 +11,15 @@ const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 25_000;
+const SECURITY_HEADERS = {
+  "content-security-policy": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'",
+  "referrer-policy": "strict-origin-when-cross-origin",
+  "x-content-type-options": "nosniff",
+};
 
 let dashboardCache = null;
 let dashboardCachedAt = 0;
+let lastDashboardAttemptAt = 0;
 let refreshPromise = null;
 
 const weights = {
@@ -33,92 +39,92 @@ const weights = {
 
 const aiEarnings = [
   {
-    company: "NVIDIA", ticker: "NVDA", period: "FY2027 Q1", released: "2026-05-20",
+    company: "NVIDIA", ticker: "NVDA", period: "FY2027 Q2", released: "2026-08-26",
     layer: "算力与互连", role: "GPU / 加速计算平台",
     impact: "GPU 需求、毛利率与供给指引，是整个 AI 服务器、HBM 和先进封装周期的第一风向标。",
-    revenue: "$81.615B", netIncome: "$58.321B", grossMargin: "74.9%",
-    guidance: "FY2027 Q2 营收 $91.0B ±2%，GAAP 毛利率 74.9% ±0.5 个百分点；指引未计入中国数据中心计算收入。",
-    resultAssessment: "明显超预期：调整后 EPS $1.87、营收 $81.6B，均高于市场预期。",
+    revenue: "$96.221B", netIncome: "$59.688B", grossMargin: "75.0%",
+    guidance: "FY2027 Q3 营收 $108.0B ±2%，GAAP 毛利率 74.0% ±0.5 个百分点；指引未计入中国数据中心计算收入。",
+    resultAssessment: "强劲：营收同比增长 106%，数据中心收入 $89.0B、同比增长 117%。",
     resultTone: "positive",
-    guidanceAssessment: "明显利好：Q2 营收中值 $91B 高于一致预期，AI 算力需求继续扩张；中国收入缺口仍是风险。",
+    guidanceAssessment: "明显利好：下一季营收中值继续上行，AI 算力需求加速；中国收入缺口仍是风险。",
     guidanceTone: "positive",
-    nextReportDate: "2026-08-26", nextReportLabel: "2026-08-26", nextReportStatus: "confirmed",
-    nextReportSource: "https://investor.nvidia.com/events-and-presentations/events-and-presentations/event-details/2026/NVIDIA-2nd-Quarter-FY27-Financial-Results/default.aspx",
-    note: "GAAP 净利润包含较大投资收益；非 GAAP 净利润为 $45.548B。",
-    source: "https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-first-quarter-fiscal-2027",
+    nextReportDate: null, nextReportLabel: "预计 11 月下旬 · 待官宣", nextReportStatus: "estimated",
+    nextReportSource: null,
+    note: "GAAP 净利润包含 $7.8B 股权证券净收益；非 GAAP 净利润为 $53.954B。",
+    source: "https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-second-quarter-fiscal-2027",
   },
   {
-    company: "Broadcom", ticker: "AVGO", period: "FY2026 Q2", released: "2026-06-03",
+    company: "Broadcom", ticker: "AVGO", period: "FY2026 Q3", released: "2026-09-02",
     layer: "算力与互连", role: "定制 ASIC / AI 网络",
     impact: "定制加速器和以太网交换芯片直接反映云厂商自研芯片与集群互连需求，是 NVIDIA 之外最重要的增量信号。",
-    revenue: "$22.187B", netIncome: "$9.310B", grossMargin: "69.5%",
-    guidance: "FY2026 Q3 营收约 $29.4B；AI 半导体收入预计 $16.0B、同比增长超过 200%；非 GAAP 营业利润率约 67%。",
-    resultAssessment: "超预期：营收与调整后 EPS 均高于市场预期，AI 半导体收入 $10.8B、同比增长 143%。",
+    revenue: "$29.591B", netIncome: "$13.088B", grossMargin: "69.1%",
+    guidance: "FY2026 Q4 营收约 $34.8B，非 GAAP 营业利润约占营收 66%；AI 半导体收入预计 $21.7B、同比增长 236%。",
+    resultAssessment: "强劲：营收同比增长 86%，AI 半导体收入 $16.7B、同比增长 221%。",
     resultTone: "positive",
-    guidanceAssessment: "基本面强但预期很高：AI 收入继续加速，定制芯片与网络需求明确；市场仍会追问更长期订单可见度。",
-    guidanceTone: "mixed",
-    nextReportDate: null, nextReportLabel: "预计 9 月上旬 · 待官宣", nextReportStatus: "estimated",
-    note: "GAAP 毛利率按 SEC 财报毛利 $15.415B / 营收 $22.187B 计算。",
-    source: "https://www.sec.gov/Archives/edgar/data/1730168/000173016826000051/avgo-05032026x8kxex99.htm",
+    guidanceAssessment: "明显利好：AI 收入预计继续加速，定制芯片与网络需求明确；高预期下仍需跟踪订单兑现。",
+    guidanceTone: "positive",
+    nextReportDate: null, nextReportLabel: "预计 12 月上旬 · 待官宣", nextReportStatus: "estimated",
+    note: "GAAP 毛利率按公司财报毛利 $20.456B / 营收 $29.591B 计算。",
+    source: "https://investors.broadcom.com/news-releases/news-release-details/broadcom-inc-announces-third-quarter-fiscal-year-2026-financial",
   },
   {
-    company: "TSMC", ticker: "TSM", period: "2026 Q1", released: "2026-04-16",
+    company: "TSMC", ticker: "TSM", period: "2026 Q2", released: "2026-07-16",
     layer: "晶圆与先进封装", role: "先进制程 / CoWoS",
     impact: "先进制程产能、良率与 CoWoS 扩产决定多数 AI 芯片能否按时交付，是供给端最关键的共同瓶颈。",
-    revenue: "$35.898B", netIncome: "$18.121B", grossMargin: "66.2%",
-    guidance: "2026 Q2 营收 $39.0B-$40.2B；毛利率 65.5%-67.5%，营业利润率 56.0%-58.0%。",
-    resultAssessment: "超出公司指引：营收高于原指引上限，毛利率 66.2% 也高于原区间上限。",
+    revenue: "$40.20B", netIncome: "NT$706.56B", grossMargin: "67.7%",
+    guidance: "2026 Q3 营收 $44.6B-$45.8B；毛利率 65%-67%，营业利润率 56%-58%。",
+    resultAssessment: "强劲：美元营收同比增长 33.7%，先进制程占晶圆收入 77%，毛利率升至 67.7%。",
     resultTone: "positive",
-    guidanceAssessment: "明显利好：Q2 营收与利润率指引继续扩张，AI 先进制程与封装需求仍强。",
+    guidanceAssessment: "明显利好：Q3 营收中值预计环比增长约 12%，2nm 放量与先进制程需求继续推动增长。",
     guidanceTone: "positive",
-    nextReportDate: "2026-07-16", nextReportLabel: "2026-07-16", nextReportStatus: "confirmed",
-    nextReportSource: "https://investor.tsmc.com/english/quarterly-results/2026/q2",
-    note: "美元口径采用公司官方财报；归属母公司净利润为 NT$571.15B / US$18.121B。",
-    source: "https://investor.tsmc.com/english/quarterly-results/2026/q1",
+    nextReportDate: null, nextReportLabel: "预计 10 月中旬 · 待官宣", nextReportStatus: "estimated",
+    nextReportSource: null,
+    note: "营收采用公司官方美元口径，净利润采用新台币口径。",
+    source: "https://investor.tsmc.com/english/quarterly-results/2026/q2",
   },
   {
-    company: "Microsoft", ticker: "MSFT", period: "FY2026 Q3", released: "2026-04-29",
+    company: "Microsoft", ticker: "MSFT", period: "FY2026 Q4", released: "2026-07-29",
     layer: "云与资本开支", role: "Azure / AI 基础设施",
     impact: "Azure 增速、AI 供给约束和资本开支决定企业 AI 需求能否转化为云收入。",
-    revenue: "$82.886B", netIncome: "$31.778B", grossMargin: "67.6%",
-    guidance: "FY2026 Q4 营收 $86.7B-$87.8B；Azure 固定汇率增速 39%-40%；季度资本开支预计超过 $40B。",
-    resultAssessment: "超预期：EPS $4.27、营收 $82.9B，均高于市场预期，Azure 增长保持强劲。",
+    revenue: "$90.007B", netIncome: "$35.766B", grossMargin: "67.2%",
+    guidance: "FY2027 Q1 营收 $89.85B-$90.95B；Azure 固定汇率增速约 45%；季度资本开支预计超过 $50B。",
+    resultAssessment: "强劲：营收同比增长 18%，Azure 收入增长 43%，客户需求仍高于可用产能。",
     resultTone: "positive",
-    guidanceAssessment: "中性偏利好：Azure 指引强、资本开支继续扩张，但总营收中值略低于市场一致预期。",
+    guidanceAssessment: "中性偏利好：Azure 指引继续加速、需求信号强；资本开支上升会继续压低云业务毛利率。",
     guidanceTone: "mixed",
-    nextReportDate: "2026-07-29", nextReportLabel: "2026-07-29", nextReportStatus: "confirmed",
-    nextReportSource: "https://news.microsoft.com/source/2026/07/08/microsoft-announces-quarterly-earnings-release-date-68/",
-    note: "毛利率按官方营收与毛利润计算。",
-    source: "https://www.microsoft.com/en-us/Investor/earnings/FY-2026-Q3/press-release-webcast",
+    nextReportDate: null, nextReportLabel: "预计 10 月下旬 · 待官宣", nextReportStatus: "estimated",
+    nextReportSource: null,
+    note: "GAAP 毛利率按官方营收与毛利润计算。",
+    source: "https://www.microsoft.com/en-us/Investor/earnings/FY-2026-Q4/press-release-webcast",
   },
   {
-    company: "Alphabet", ticker: "GOOG", period: "2026 Q1", released: "2026-04-29",
+    company: "Alphabet", ticker: "GOOG", period: "2026 Q2", released: "2026-07-22",
     layer: "云与资本开支", role: "Google Cloud / TPU",
     impact: "Google Cloud、TPU 和年度资本开支指引共同反映自研算力、外购 GPU 与数据中心投资强度。",
-    revenue: "$109.896B", netIncome: "$62.578B", grossMargin: "62.4%",
-    guidance: "2026 年资本开支上调至 $180B-$190B，并预计 2027 年资本开支仍将显著增加，AI 基础设施投入继续扩张。",
-    resultAssessment: "明显超预期：营收高于市场预期，EPS 受投资收益放大，需结合主营利润判断。",
-    resultTone: "positive",
-    guidanceAssessment: "扩张但有压力：AI 投资继续上修，需求信号偏强；折旧、现金流与回报率压力同步上升。",
+    revenue: "$119.796B", netIncome: "$112.107B", grossMargin: "61.6%",
+    guidance: "公司未提供季度营收指引；Q2 资本开支 $44.924B，并募资扩充 AI 基础设施和全球算力。",
+    resultAssessment: "主营强劲但净利润失真：营收同比增长 24%，Google Cloud 收入增长 82%；大额投资收益放大净利润。",
+    resultTone: "mixed",
+    guidanceAssessment: "扩张但有压力：Cloud 需求强劲，AI 投资继续提速；折旧、现金流与投资回报压力同步上升。",
     guidanceTone: "mixed",
-    nextReportDate: "2026-07-22", nextReportLabel: "2026-07-22", nextReportStatus: "confirmed",
-    nextReportSource: "https://abc.xyz/investor/",
-    note: "毛利率按 SEC 10-Q 的营收减营业成本计算；净利润含投资相关收益。",
-    source: "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000048/goog-20260331.htm",
+    nextReportDate: null, nextReportLabel: "预计 10 月下旬 · 待官宣", nextReportStatus: "estimated",
+    nextReportSource: null,
+    note: "归属普通股股东净利润包含股权证券净收益带来的约 $77.1B 税后增益；毛利率按 SEC 报表计算。",
+    source: "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000066/googexhibit991q22026.htm",
   },
   {
-    company: "Amazon", ticker: "AMZN", period: "2026 Q1", released: "2026-04-29",
+    company: "Amazon", ticker: "AMZN", period: "2026 Q2", released: "2026-07-30",
     layer: "云与资本开支", role: "AWS / Trainium",
     impact: "AWS 是最大云基础设施平台之一，其增长、供给和 Trainium 投入会改变整个 AI 服务器需求曲线。",
-    revenue: "$181.519B", netIncome: "$30.255B", grossMargin: "51.8%",
-    guidance: "2026 Q2 净销售额 $194B-$199B，营业利润 $20B-$24B。",
-    resultAssessment: "超预期：营收高于市场预期，EPS 明显超预期但包含 Anthropic 估值收益。",
-    resultTone: "positive",
-    guidanceAssessment: "偏利好：销售额与营业利润区间继续增长，但利润仍受投资收益和促销时点影响。",
-    guidanceTone: "positive",
-    nextReportDate: null, nextReportLabel: "预计 7 月下旬 · 待官宣", nextReportStatus: "estimated",
-    note: "净利润包含 Anthropic 投资约 $16.8B 的税前估值收益；毛利率按官方报表计算。",
-    source: "https://ir.aboutamazon.com/news-release/news-release-details/2026/Amazon-com-Announces-First-Quarter-Results/default.aspx",
+    revenue: "$200.606B", netIncome: "$62.647B", grossMargin: "52.3%",
+    guidance: "2026 Q3 净销售额 $197B-$202B，营业利润 $22.5B-$26.5B。",
+    resultAssessment: "强劲但净利润受一次性项目放大：营收同比增长 20%，AWS 收入增长 37%、营业利润 $16.6B。",
+    resultTone: "mixed",
+    guidanceAssessment: "中性偏利好：销售额与营业利润区间继续增长；AI 资本开支上升令自由现金流承压。",
+    guidanceTone: "mixed",
+    nextReportDate: null, nextReportLabel: "预计 10 月下旬 · 待官宣", nextReportStatus: "estimated",
+    note: "净利润包含 $53.4B 非经营性税前其他收益，主要来自 Anthropic 投资；毛利率按官方报表计算。",
+    source: "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000024/amzn-20260630xex991.htm",
   },
   {
     company: "Micron", ticker: "MU", period: "FY2026 Q3", released: "2026-06-24",
@@ -132,21 +138,21 @@ const aiEarnings = [
     guidanceTone: "positive",
     nextReportDate: null, nextReportLabel: "预计 9 月下旬 · 待官宣", nextReportStatus: "estimated",
     note: "公司给出的下一季指引显示存储景气与 HBM 需求仍强。",
-    source: "https://investors.micron.com/node/50671",
+    source: "https://investors.micron.com/news/press-release/2026/Micron-Technology-Inc--Reports-Record-Results-for-the-Third-Quarter-of-Fiscal-2026/default.aspx",
   },
   {
-    company: "SK hynix", ticker: "000660.KS", period: "FY2026 Q1", released: "2026-04-23",
+    company: "SK hynix", ticker: "000660.KS", period: "2026 Q2", released: "2026-07-29",
     layer: "HBM 与存储", role: "HBM 领先供应商",
     impact: "SK hynix 的 HBM 出货、定价与客户放量节奏直接决定高端显存供需，是存储链最纯的 AI 信号。",
-    revenue: "KRW 52.576T", netIncome: "KRW 40.346T", grossMargin: "79.0%",
-    guidance: "Q2 DRAM 出货量预计环比增长中十位数百分比、NAND 增长高个位数；HBM4 按客户计划放量，存储定价环境短期仍有利。",
-    resultAssessment: "明显超预期：营收和净利润高于市场预期，HBM 与存储价格共同推动纪录业绩。",
+    revenue: "KRW 79.319T", netIncome: "KRW 93.923T", grossMargin: "76.0%", marginLabel: "营业利润率",
+    guidance: "HBM4 已在 Q2 开始量产出货、下半年继续爬坡；公司已与约 10 家关键客户签订长期协议，并维持资本开支纪律。",
+    resultAssessment: "强劲：营收同比增长 257%，营业利润同比增长 557%，AI 服务器内存与 HBM 是核心驱动。",
     resultTone: "positive",
-    guidanceAssessment: "偏利好：出货量与价格环境仍强，需求继续高于供给；PC 与手机需求放缓需要跟踪。",
+    guidanceAssessment: "偏利好：HBM4 开始放量，长期协议提高需求可见度；扩产节奏与存储周期高位仍需跟踪。",
     guidanceTone: "positive",
-    nextReportDate: null, nextReportLabel: "预计 7 月下旬 · 待官宣", nextReportStatus: "estimated",
-    note: "净利润包含约 KRW 9.94T 投资资产估值收益。",
-    source: "https://news.skhynix.com/q1-2026-business-results/",
+    nextReportDate: null, nextReportLabel: "预计 10 月下旬 · 待官宣", nextReportStatus: "estimated",
+    note: "净利润显著高于营业利润，观察主营表现时以 76% 营业利润率为主。",
+    source: "https://news.skhynix.com/en/q2-2026-business-results/",
   },
 ];
 
@@ -403,7 +409,7 @@ function indicator({ id, title, category, weight, risk, value, detail, date, des
 async function buildDashboard() {
   const currentAiEarnings = calendarService.resolvedAiEarnings();
   const nextFomcDate = calendarService.nextFomc()?.date || "待官方公布";
-  const fredIds = ["DCOILBRENTEU", "CPIAUCSL", "CPILFESL", "PCEPI", "PCEPILFE", "DFEDTARL", "DFEDTARU", "DGS2", "DGS10", "DFII10", "T10Y3M", "VIXCLS", "SP500", "BAMLH0A0HYM2", "DRTSCILM", "SAHMREALTIME", "ICSA", "NFCI", "UNRATE", "PAYEMS"];
+  const fredIds = ["DCOILBRENTEU", "CPIAUCSL", "CPIAUCNS", "CPILFESL", "CPILFENS", "PCEPI", "PCEPILFE", "DFEDTARL", "DFEDTARU", "DGS2", "DGS10", "DFII10", "T10Y3M", "VIXCLS", "SP500", "BAMLH0A0HYM2", "DRTSCILM", "SAHMREALTIME", "ICSA", "NFCI", "UNRATE", "PAYEMS"];
   const marketSymbols = ["SPY", "RSP", "XLK", "XLF", "XLY", "XLC", "XLI", "XLV", "XLP", "XLE", "XLU", "XLRE", "XLB"];
 
   const [fredResults, marketResults] = await Promise.all([
@@ -424,14 +430,16 @@ async function buildDashboard() {
     : null;
 
   const headlineCpi = getFred("CPIAUCSL");
+  const headlineCpiNsa = getFred("CPIAUCNS");
   const coreCpi = getFred("CPILFESL");
+  const coreCpiNsa = getFred("CPILFENS");
   const headlinePce = getFred("PCEPI");
   const corePce = getFred("PCEPILFE");
-  const headlineCpiYoy = yearOverYear(headlineCpi);
-  const priorHeadlineCpiYoy = yearOverYear(headlineCpi, 1);
+  const headlineCpiYoy = yearOverYear(headlineCpiNsa);
+  const priorHeadlineCpiYoy = yearOverYear(headlineCpiNsa, 1);
   const headlineCpiMom = monthOverMonth(headlineCpi);
-  const coreCpiYoy = yearOverYear(coreCpi);
-  const priorCoreCpiYoy = yearOverYear(coreCpi, 1);
+  const coreCpiYoy = yearOverYear(coreCpiNsa);
+  const priorCoreCpiYoy = yearOverYear(coreCpiNsa, 1);
   const coreCpiMom = monthOverMonth(coreCpi);
   const headlinePceYoy = yearOverYear(headlinePce);
   const headlinePceMom = monthOverMonth(headlinePce);
@@ -638,11 +646,11 @@ async function buildDashboard() {
     indicator({
       id: "inflation", title: "CPI / PCE 通胀趋势", category: "通胀与政策", weight: weights.inflation, risk: inflationRisk,
       value: Number.isFinite(headlineCpiYoy) ? `${round(headlineCpiYoy, 1)}%` : "暂无数据", detail: `整体 CPI 同比；三个月年化 ${Number.isFinite(headlineCpi3m) ? round(headlineCpi3m, 1) : "--"}%`,
-      date: latest(headlineCpi)?.date, description: "重点看核心 CPI、核心 PCE 的三个月趋势，避免被单月噪声带偏。卡片日期表示最新数据期，不冒充官方发布日期。", why: "通胀黏性决定美联储能否降息，也决定估值压力会持续多久。",
+      date: latest(headlineCpiNsa)?.date || latest(headlineCpi)?.date, description: "同比采用 BLS 未季调正式口径，月率与三个月年化采用季调数据；重点看核心 CPI、核心 PCE 的短期趋势。卡片日期表示最新数据期，不冒充官方发布日期。", why: "通胀黏性决定美联储能否降息，也决定估值压力会持续多久。",
       source: { label: "BLS / BEA / FRED · CPI 与 PCE", url: "https://www.bls.gov/news.release/cpi.nr0.htm" }, cadence: "月度", confidence: "high", sparkline: spark(headlineCpi, 18), methodology: "整体 CPI 三个月年化和同比占 60%，核心 PCE 与核心 CPI 占 40%。",
       breakdown: [
-        { label: "CPI", value: Number.isFinite(headlineCpiYoy) ? `${round(headlineCpiYoy, 1)}%` : "--", detail: `${monthLabel(latest(headlineCpi))} · 月率 ${signedPercent(headlineCpiMom)}` },
-        { label: "核心 CPI", value: Number.isFinite(coreCpiYoy) ? `${round(coreCpiYoy, 1)}%` : "--", detail: `${monthLabel(latest(coreCpi))} · 月率 ${signedPercent(coreCpiMom)}` },
+        { label: "CPI", value: Number.isFinite(headlineCpiYoy) ? `${round(headlineCpiYoy, 1)}%` : "--", detail: `${monthLabel(latest(headlineCpiNsa) || latest(headlineCpi))} · 月率 ${signedPercent(headlineCpiMom)}` },
+        { label: "核心 CPI", value: Number.isFinite(coreCpiYoy) ? `${round(coreCpiYoy, 1)}%` : "--", detail: `${monthLabel(latest(coreCpiNsa) || latest(coreCpi))} · 月率 ${signedPercent(coreCpiMom)}` },
         { label: "PCE", value: Number.isFinite(headlinePceYoy) ? `${round(headlinePceYoy, 1)}%` : "--", detail: `${monthLabel(latest(headlinePce))} · 月率 ${signedPercent(headlinePceMom)}` },
         { label: "核心 PCE", value: Number.isFinite(corePceYoy) ? `${round(corePceYoy, 1)}%` : "--", detail: `${monthLabel(latest(corePce))} · 月率 ${signedPercent(corePceMom)}` },
       ],
@@ -697,7 +705,7 @@ async function buildDashboard() {
       id: "aiEarnings", title: "AI 产业链财报与指引", category: "盈利与AI", weight: weights.aiEarnings, risk: aiRisk,
       value: `${currentAiSnapshots.length} / ${currentAiEarnings.length} 家`, detail: "仅让仍在有效期内的财报解读参与评分；下次财报日期单独自动同步",
       date: aiLatestRelease, description: "按算力与互连、晶圆与先进封装、云资本开支、HBM 与存储四层监测行业巨头。过期解读会明确标记并退出自动评分。", why: "这些公司的指引能同时改变 AI 需求、供给、带宽和资本开支预期，比单纯按市值选股更接近产业链真实风险。",
-      source: { label: "公司 IR / SEC 原始文件", url: aiEarnings[1].source }, cadence: "季度", confidence: "medium", sparkline: [], available: currentAiSnapshots.length >= 3, methodology: "仅使用尚未跨过已知下一次财报日、且资料期不超过 120 天的公司指引；加入 3 分产业集中度溢价，支持人工覆盖。",
+      source: { label: "公司 IR / SEC 原始文件", url: aiEarnings[1].source }, cadence: "季度", confidence: "medium", sparkline: [], available: currentAiSnapshots.length >= 3, methodology: "仅使用尚未跨过公司确认或自动抓取的下一次财报日、且资料期不超过 120 天的公司指引；加入 3 分产业集中度溢价，支持人工覆盖。",
     }),
     indicator({
       id: "credit", title: "信用利差与银行信贷", category: "信用", weight: weights.credit, risk: creditComposite,
@@ -760,7 +768,9 @@ async function buildDashboard() {
   const score = Number.isFinite(baseScore) && Number.isFinite(dominantRegimeScore)
     ? clamp((baseScore * 0.70 + dominantRegimeScore * 0.30 + riskUplift) / 100) * 100
     : baseScore;
-  const action = score <= 20
+  const action = !Number.isFinite(score)
+    ? { key: "unavailable", label: "数据不足：暂不提供仓位动作", detail: "等待至少一项有效数据后再判断风险，不把缺失数据误判为低风险。" }
+    : score <= 20
     ? { key: "add", label: "风险较低：可考虑分批增加风险敞口", detail: "适合按既定资产配置逐步投入，不代表短期不会回调。" }
     : score <= 40
       ? { key: "hold", label: "正常波动：以持有和再平衡为主", detail: "不追涨，也不因单项噪声急于减仓，等待风险是否跨指标扩散。" }
@@ -793,7 +803,7 @@ async function buildDashboard() {
     calendarSchedule: calendarService.snapshot(),
     calendarSync: calendarService.syncStatus(),
     methodology: {
-      version: "4.5",
+      version: "4.6.0",
       note: "先计算 12 项基础加权分，再用 30% 的主导风险链和最多 14 分的同向共振修正，避免油价、通胀、政策与利率同时恶化时被低风险项过度稀释。基础分与修正项均单独展示。",
       bands: [
         { min: 0, max: 20, label: "健康、风险较低" },
@@ -816,12 +826,16 @@ function contentType(filePath) {
 }
 
 function sendJson(res, status, payload) {
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+  res.writeHead(status, { ...SECURITY_HEADERS, "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
   res.end(JSON.stringify(payload));
 }
 
 function refreshDashboard(force = false) {
   if (refreshPromise) return refreshPromise;
+  if (!force && lastDashboardAttemptAt && Date.now() - lastDashboardAttemptAt < CACHE_TTL_MS) {
+    return Promise.resolve(dashboardCache);
+  }
+  lastDashboardAttemptAt = Date.now();
   refreshPromise = calendarService.refresh({ force })
     .catch((error) => console.warn(`[calendar] refresh failed: ${error.message}`))
     .then(() => buildDashboard())
@@ -846,21 +860,24 @@ const server = http.createServer(async (req, res) => {
 
   if (url.pathname === "/api/dashboard") {
     const force = url.searchParams.get("refresh") === "1";
-    const fresh = dashboardCache && Date.now() - dashboardCachedAt < CACHE_TTL_MS;
     if (!dashboardCache) {
       refreshDashboard();
       return sendJson(res, 202, { warming: true, message: "正在同步最新数据" });
     }
+    const fresh = Date.now() - dashboardCachedAt < CACHE_TTL_MS;
     if (force) await refreshDashboard(true);
     else if (!fresh) refreshDashboard();
+    const cacheAgeMs = Math.max(0, Date.now() - dashboardCachedAt);
     return sendJson(res, 200, {
       ...dashboardCache,
       reminders: calendarService.buildReminders(),
       aiEarnings: calendarService.resolvedAiEarnings(),
       calendarSchedule: calendarService.snapshot(),
       calendarSync: calendarService.syncStatus(),
-      cache: !force && fresh,
-      refreshing: !force && !fresh,
+      cache: !force && cacheAgeMs < CACHE_TTL_MS,
+      stale: cacheAgeMs >= CACHE_TTL_MS,
+      refreshing: Boolean(refreshPromise),
+      cacheAgeMs,
     });
   }
 
@@ -868,22 +885,22 @@ const server = http.createServer(async (req, res) => {
   const normalized = path.normalize(requested).replace(/^(\.\.(\/|\\|$))+/, "");
   const filePath = path.join(publicDir, normalized);
   if (!filePath.startsWith(publicDir)) {
-    res.writeHead(403);
+    res.writeHead(403, SECURITY_HEADERS);
     return res.end("Forbidden");
   }
   try {
     const data = await readFile(filePath);
-    res.writeHead(200, { "content-type": contentType(filePath), "cache-control": "no-cache" });
+    res.writeHead(200, { ...SECURITY_HEADERS, "content-type": contentType(filePath), "cache-control": "no-cache" });
     res.end(data);
   } catch {
-    res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+    res.writeHead(404, { ...SECURITY_HEADERS, "content-type": "text/plain; charset=utf-8" });
     res.end("Not found");
   }
 });
 
 try {
   dashboardCache = JSON.parse(await readFile(dashboardCacheFile, "utf8"));
-  dashboardCachedAt = Date.parse(dashboardCache.generatedAt) || 0;
+  dashboardCachedAt = Math.min(Date.now(), Date.parse(dashboardCache.generatedAt) || 0);
   calendarService.hydrate(dashboardCache.calendarSchedule);
 } catch {
   dashboardCache = null;

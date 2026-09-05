@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="基于 12 项高权重宏观、信用、盈利、就业和市场指标的美国股市风险雷达" />
     <title>kk的美股雷达</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -21,7 +22,7 @@
         <a href="#overview">风险总览</a><a href="#signals">十二项信号</a><a href="#ai">AI 财报</a><a href="#calendar">重要日期</a>
       </nav>
       <div class="topbar-actions">
-        <div class="live-pill"><span class="live-dot"></span><span id="liveText">正在连接数据</span></div>
+        <div class="live-pill" role="status" aria-live="polite" aria-atomic="true"><span class="live-dot"></span><span id="liveText">正在连接数据</span></div>
         <button class="ghost-button" id="manualButton" type="button">人工数据</button>
         <button class="refresh-button" id="refreshButton" type="button" aria-label="刷新最新数据"><span>刷新</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-3M4 4v4h4M4 13a8.1 8.1 0 0 0 15.5 3M20 20v-4h-4"/></svg></button>
       </div>
@@ -43,7 +44,7 @@
         <div class="score-panel" id="scorePanel">
           <div class="score-topline"><span>未来 6–12 个月综合市场风险</span><span id="scoreDelta">等待数据</span></div>
           <div class="gauge-wrap">
-            <svg class="gauge" viewBox="0 0 260 260" role="img" aria-label="综合市场风险分">
+            <svg class="gauge" id="scoreGauge" viewBox="0 0 260 260" role="img" aria-label="综合市场风险分">
               <circle class="gauge-track" cx="130" cy="130" r="103"></circle>
               <circle class="gauge-progress" id="gaugeProgress" cx="130" cy="130" r="103"></circle>
             </svg>
@@ -97,19 +98,19 @@
             <h2>十二项风险信号</h2>
           </div>
           <div class="filters" id="filters" role="group" aria-label="按类别筛选">
-            <button class="active" data-filter="全部" type="button">全部</button>
-            <button data-filter="通胀与政策" type="button">政策</button>
-            <button data-filter="信用" type="button">信用</button>
-            <button data-filter="盈利与AI" type="button">盈利与 AI</button>
-            <button data-filter="就业与经济" type="button">就业</button>
-            <button data-filter="市场确认" type="button">市场</button>
+            <button class="active" data-filter="全部" type="button" aria-pressed="true">全部</button>
+            <button data-filter="通胀与政策" type="button" aria-pressed="false">政策</button>
+            <button data-filter="信用" type="button" aria-pressed="false">信用</button>
+            <button data-filter="盈利与AI" type="button" aria-pressed="false">盈利与 AI</button>
+            <button data-filter="就业与经济" type="button" aria-pressed="false">就业</button>
+            <button data-filter="市场确认" type="button" aria-pressed="false">市场</button>
           </div>
         </div>
         <div class="loading-grid" id="loadingGrid" aria-live="polite">
           <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
         </div>
         <div class="indicator-grid" id="indicatorGrid"></div>
-        <div class="error-banner" id="errorBanner" hidden></div>
+        <div class="error-banner" id="errorBanner" role="alert" hidden></div>
       </section>
 
       <section class="ai-section shell" id="ai" aria-labelledby="aiTitle">
@@ -125,20 +126,21 @@
       <section class="calendar-section shell" id="calendar" aria-labelledby="calendarTitle">
         <div class="section-heading calendar-heading">
           <div><p class="eyebrow">RISK CALENDAR</p><h2 id="calendarTitle">重要日期提醒</h2></div>
+          <p class="calendar-sync" id="calendarSyncStatus" role="status" aria-live="polite">正在核对 BLS、Federal Reserve 与 Nasdaq 官方日程</p>
         </div>
         <div class="reminder-grid" id="reminderGrid"></div>
       </section>
     </main>
 
     <footer class="footer shell">
-      <span>US EQUITY RISK RADAR · v4.5</span>
+      <span>US EQUITY RISK RADAR · v4.6.0</span>
       <span>数据：公司 IR / SEC / BLS / BEA / Federal Reserve / FRED / Cboe / Nasdaq</span>
     </footer>
 
-    <dialog class="manual-dialog" id="manualDialog">
+    <dialog class="manual-dialog" id="manualDialog" aria-labelledby="manualDialogTitle">
       <form method="dialog" id="manualForm">
         <div class="dialog-head">
-          <div><p class="eyebrow">MANUAL OVERRIDES</p><h2>补充专业数据</h2></div>
+          <div><p class="eyebrow">MANUAL OVERRIDES</p><h2 id="manualDialogTitle">补充专业数据</h2></div>
           <button class="icon-button" value="cancel" aria-label="关闭" type="submit">×</button>
         </div>
         <p class="dialog-intro">分析师一致预期通常来自付费数据库。你可以把券商、FactSet 或 Bloomberg 的结论转换成 0–100 风险值；留空则继续使用公开代理或不计分。</p>
@@ -158,6 +160,7 @@
       </label>
     </template>
 
+    <noscript><p class="noscript-message">需要启用 JavaScript 才能读取和计算最新数据。</p></noscript>
     <script type="module" src="/app.js"></script>
   </body>
 </html>

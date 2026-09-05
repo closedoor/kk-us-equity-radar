@@ -100,7 +100,7 @@ test("calendar service uses automatic dates and keeps confirmed company dates", 
   assert.equal(reminders[0].date, "2026-08-12");
   assert.equal(reminders[1].date, "2026-07-29");
   assert.equal(reminders[2].date, "2026-08-07");
-  assert.equal(reminders[4].companies[0].next, "2026-07-29");
+  assert.equal(reminders[4].companies[0].next, "2026-07-29 · 盘后");
   assert.equal(reminders[4].companies[0].status, "confirmed");
 });
 
@@ -122,4 +122,54 @@ test("marks a company snapshot stale after its confirmed next report has passed"
   assert.equal(company.snapshotStale, true);
   assert.equal(company.snapshotLabel, "财报解读待更新");
   assert.match(company.nextReportLabel, /待官宣/);
+});
+
+test("marks a company snapshot stale after an automatically estimated report date passes", () => {
+  const service = createCalendarService({
+    fetchText: async () => "",
+    aiEarnings: [{
+      company: "Broadcom",
+      ticker: "AVGO",
+      released: "2026-06-03",
+      nextReportDate: null,
+      nextReportLabel: "预计 9 月上旬 · 待官宣",
+      nextReportStatus: "estimated",
+    }],
+    now: () => new Date("2026-09-05T12:00:00Z"),
+  });
+  service.hydrate({
+    earnings: {
+      AVGO: { date: "2026-09-03", timing: "盘后", status: "estimated" },
+    },
+  });
+
+  const [company] = service.resolvedAiEarnings();
+  assert.equal(company.snapshotStale, true);
+  assert.equal(company.snapshotLabel, "财报解读待更新");
+  assert.match(company.nextReportLabel, /2026-12-03/);
+});
+
+test("does not stale a fresh snapshot when the automatic estimate is only one day later", () => {
+  const service = createCalendarService({
+    fetchText: async () => "",
+    aiEarnings: [{
+      company: "Broadcom",
+      ticker: "AVGO",
+      released: "2026-09-02",
+      nextReportDate: null,
+      nextReportLabel: "预计 12 月上旬 · 待官宣",
+      nextReportStatus: "estimated",
+    }],
+    now: () => new Date("2026-09-05T12:00:00Z"),
+  });
+  service.hydrate({
+    earnings: {
+      AVGO: { date: "2026-09-03", timing: "盘后", status: "estimated" },
+    },
+  });
+
+  const [company] = service.resolvedAiEarnings();
+  assert.equal(company.snapshotStale, false);
+  assert.equal(company.snapshotLabel, "资料截至 2026-09-02");
+  assert.match(company.nextReportLabel, /2026-12-02/);
 });

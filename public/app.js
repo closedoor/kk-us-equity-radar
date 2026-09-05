@@ -6,6 +6,7 @@ const state = {
 
 const els = {
   score: document.querySelector("#scoreValue"),
+  scoreGauge: document.querySelector("#scoreGauge"),
   gauge: document.querySelector("#gaugeProgress"),
   marker: document.querySelector("#bandMarker"),
   verdict: document.querySelector("#verdictLabel"),
@@ -38,6 +39,7 @@ const els = {
   aiChainMap: document.querySelector("#aiChainMap"),
   aiCompanyGrid: document.querySelector("#aiCompanyGrid"),
   reminderGrid: document.querySelector("#reminderGrid"),
+  calendarSyncStatus: document.querySelector("#calendarSyncStatus"),
 };
 
 const manualConfig = [
@@ -46,16 +48,35 @@ const manualConfig = [
 ];
 
 function loadOverrides() {
-  try { return JSON.parse(localStorage.getItem("bearRadarOverrides") || "{}"); }
+  try {
+    const parsed = JSON.parse(localStorage.getItem("bearRadarOverrides") || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  }
   catch { return {}; }
 }
 
 function saveOverrides() {
-  localStorage.setItem("bearRadarOverrides", JSON.stringify(state.overrides));
+  try {
+    localStorage.setItem("bearRadarOverrides", JSON.stringify(state.overrides));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function clamp(value, min = 0, max = 100) {
   return Math.min(max, Math.max(min, value));
+}
+
+function dateInTimeZone(date = new Date(), timeZone = "America/New_York") {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function riskMeta(score) {
@@ -70,7 +91,7 @@ function computeScores(indicators) {
   const available = indicators.filter((item) => item.available && Number.isFinite(item.points));
   const availableWeight = available.reduce((sum, item) => sum + item.weight, 0);
   const rawPoints = available.reduce((sum, item) => sum + item.points, 0);
-  const baseScore = availableWeight ? (rawPoints / availableWeight) * 100 : 0;
+  const baseScore = availableWeight ? (rawPoints / availableWeight) * 100 : null;
   const confirmationIds = new Set(["vix", "sp500", "credit", "breadth", "earningsBreadth"]);
   const confirmationItems = available.filter((item) => confirmationIds.has(item.id));
   const confirmationWeight = confirmationItems.reduce((sum, item) => sum + item.weight, 0);
@@ -83,14 +104,19 @@ function computeScores(indicators) {
   const stagflationScore = subset(["oil", "inflation", "fed", "rates"]);
   const recessionScore = subset(["unemployment", "payrolls", "credit", "earningsBreadth"]);
   const marketBreakScore = subset(["vix", "breadth", "sp500"]);
-  const dominantRegimeScore = Math.max(...[stagflationScore, recessionScore, marketBreakScore].filter(Number.isFinite));
+  const regimeScores = [stagflationScore, recessionScore, marketBreakScore].filter(Number.isFinite);
+  const dominantRegimeScore = regimeScores.length ? Math.max(...regimeScores) : null;
   const stagflationHighCount = indicators.filter((item) => ["oil", "inflation", "fed", "rates"].includes(item.id) && Number(item.risk) >= 60).length;
   const macroSynergyUplift = stagflationHighCount >= 4 ? 10 : stagflationHighCount >= 3 ? 7 : 0;
   const breadthRisk = indicators.find((item) => item.id === "breadth")?.risk;
   const spRisk = indicators.find((item) => item.id === "sp500")?.risk;
   const fragileHighUplift = Number(spRisk) >= 12 && Number(spRisk) <= 25 && Number(breadthRisk) >= 20 ? 4 : 0;
   const riskUplift = macroSynergyUplift + fragileHighUplift;
-  const score = Number.isFinite(dominantRegimeScore) ? clamp(baseScore * 0.70 + dominantRegimeScore * 0.30 + riskUplift) : baseScore;
+  const score = Number.isFinite(baseScore)
+    ? Number.isFinite(dominantRegimeScore)
+      ? clamp(baseScore * 0.70 + dominantRegimeScore * 0.30 + riskUplift)
+      : baseScore
+    : null;
   return {
     available,
     availableWeight,
@@ -102,11 +128,12 @@ function computeScores(indicators) {
     marketBreakScore,
     dominantRegimeScore,
     riskUplift,
-    confirmationScore: confirmationWeight ? (confirmationPoints / confirmationWeight) * 100 : 0,
+    confirmationScore: confirmationWeight ? (confirmationPoints / confirmationWeight) * 100 : null,
   };
 }
 
 function actionFor(score) {
+  if (!Number.isFinite(score)) return { key: "unavailable", label: "数据不足：暂不提供仓位动作", detail: "等待至少一项有效数据后再判断风险，不把缺失数据误判为低风险。" };
   if (score <= 20) return { key: "add", label: "风险较低：可考虑分批增加风险敞口", detail: "适合按既定资产配置逐步投入，不代表短期不会回调。" };
   if (score <= 40) return { key: "hold", label: "正常波动：以持有和再平衡为主", detail: "不追涨，也不因单项噪声急于减仓，等待风险是否跨指标扩散。" };
   if (score <= 60) return { key: "caution", label: "黄色警戒：保持仓位，暂停加仓", detail: "当前不支持全面卖出；保留现金，优先降低高估值、高波动或带杠杆仓位，等待信用、盈利或市场宽度改善。" };
@@ -125,7 +152,7 @@ function applyOverrides(data) {
       points: Math.round((risk / 100) * item.weight * 100) / 100,
       value: `${risk}/100`,
       detail: override.note || "人工风险判断",
-      date: new Date().toISOString().slice(0, 10),
+      date: dateInTimeZone(),
       status: risk >= 80 ? "critical" : risk >= 55 ? "high" : risk >= 30 ? "watch" : "low",
       confidence: "manual",
       available: true,
@@ -144,7 +171,9 @@ function applyOverrides(data) {
 
 function formatDate(date) {
   if (!date) return "--";
-  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(date));
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) return "--";
+  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(parsed);
 }
 
 function scoreColor(score) {
@@ -152,20 +181,27 @@ function scoreColor(score) {
 }
 
 function renderSummary(data) {
-  const score = Math.round(data.score * 10) / 10;
-  const meta = riskMeta(score);
+  const score = Number.isFinite(data.score) ? Math.round(data.score * 10) / 10 : null;
+  const meta = score === null
+    ? { label: "数据不足", color: "#777a74", description: "当前有效数据不足，系统不会把缺失值当成低风险。" }
+    : riskMeta(score);
   const circumference = 2 * Math.PI * 103;
-  els.score.textContent = score.toFixed(1);
+  els.score.textContent = score === null ? "--" : score.toFixed(1);
   els.gauge.style.strokeDasharray = `${circumference}`;
-  els.gauge.style.strokeDashoffset = `${circumference * (1 - score / 100)}`;
+  els.gauge.style.strokeDashoffset = `${circumference * (1 - (score ?? 0) / 100)}`;
   els.gauge.style.stroke = meta.color;
-  els.marker.style.left = `calc(${clamp(score)}% - 1px)`;
+  els.marker.hidden = score === null;
+  els.marker.style.left = `calc(${clamp(score ?? 0)}% - 1px)`;
+  els.scoreGauge?.setAttribute("aria-label", score === null ? "综合市场风险分暂不可用" : `综合市场风险分 ${score.toFixed(1)} 分`);
   els.verdict.textContent = meta.label;
-  els.verdictDescription.textContent = Number(data.stagflationScore) === Number(data.dominantRegimeScore)
+  const stagflationDominant = Number.isFinite(data.stagflationScore)
+    && Number.isFinite(data.dominantRegimeScore)
+    && Math.abs(data.stagflationScore - data.dominantRegimeScore) < 0.05;
+  els.verdictDescription.textContent = score !== null && stagflationDominant
     ? "滞胀与政策约束正在形成共振，但信用和就业尚未确认系统性危机。"
     : meta.description;
   els.verdictDot.style.background = meta.color;
-  els.coverage.textContent = `${data.coverage}%`;
+  els.coverage.textContent = Number.isFinite(data.coverage) ? `${data.coverage}%` : "--";
   els.updated.textContent = formatDate(data.generatedAt);
   const availableCount = data.indicators.filter((item) => item.available).length;
   els.scoreDelta.textContent = `${availableCount} 项有效 · 权重 ${data.coverage}%`;
@@ -173,7 +209,11 @@ function renderSummary(data) {
   els.heat.textContent = Number.isFinite(data.heatScore) ? data.heatScore.toFixed(1) : "--";
   els.recession.textContent = Number.isFinite(data.recessionScore) ? data.recessionScore.toFixed(1) : "--";
   els.uplift.textContent = Number.isFinite(data.riskUplift) ? `+${data.riskUplift.toFixed(0)}` : "--";
-  els.liveText.textContent = data.cache ? "已连接 · 缓存数据" : "已连接 · 最新数据";
+  els.liveText.textContent = data.refreshing
+    ? "后台更新中 · 暂用缓存"
+    : data.stale
+      ? "更新暂缓 · 最近缓存"
+      : "已连接 · 数据已更新";
   els.actionLabel.textContent = data.action?.label || "等待数据";
   els.actionDetail.textContent = data.action?.detail || "";
   els.actionCallout.dataset.action = data.action?.key || "hold";
@@ -183,7 +223,7 @@ function renderCategories(categories) {
   els.categories.innerHTML = categories.map((category) => {
     const value = Number.isFinite(category.score) ? Math.round(category.score) : null;
     return `<article class="category-item">
-      <div class="category-top"><span>${category.name}</span><strong>${value ?? "--"}</strong></div>
+      <div class="category-top"><span>${escapeHtml(category.name)}</span><strong>${value ?? "--"}</strong></div>
       <div class="mini-bar"><i style="width:${value ?? 0}%;background:${value === null ? "#aaa" : scoreColor(value)}"></i></div>
     </article>`;
   }).join("");
@@ -202,9 +242,9 @@ function renderDrivers(data) {
     : "暂无可用信号，请稍后刷新数据。";
   els.drivers.innerHTML = drivers.map((item, index) => {
     const risk = Number.isFinite(item.risk) ? Math.round(item.risk) : 0;
-    return `<button class="driver-item" type="button" data-driver-id="${item.id}" data-driver-category="${item.category}">
+    return `<button class="driver-item" type="button" data-driver-id="${escapeHtml(item.id)}" data-driver-category="${escapeHtml(item.category)}">
       <span class="driver-rank">0${index + 1}</span>
-      <span class="driver-copy"><small>${item.category}</small><strong>${item.title}</strong><span>${item.detail || item.description}</span></span>
+      <span class="driver-copy"><small>${escapeHtml(item.category)}</small><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.detail || item.description)}</span></span>
       <span class="driver-score"><strong>${item.points.toFixed(1)}</strong><small>/ ${item.weight} 分</small><i><b style="width:${risk}%;background:${scoreColor(risk)}"></b></i></span>
     </button>`;
   }).join("");
@@ -214,13 +254,30 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 }
 
+function safeExternalUrl(value) {
+  try {
+    const url = new URL(String(value || ""), window.location.href);
+    return ["http:", "https:"].includes(url.protocol) ? escapeHtml(url.href) : "#";
+  } catch {
+    return "#";
+  }
+}
+
+function safeTone(value) {
+  return ["positive", "negative", "mixed", "good", "bad"].includes(value) ? value : "mixed";
+}
+
 function renderAiEarnings(rows = [], layers = []) {
   els.aiChainMap.innerHTML = layers.map((layer, index) => `<article class="ai-layer-card">
     <span class="ai-layer-index">0${index + 1}</span><h3>${escapeHtml(layer.name)}</h3><p>${escapeHtml(layer.description)}</p>
     <div>${layer.tickers.map((ticker) => `<b>${escapeHtml(ticker)}</b>`).join("")}</div>
   </article>`).join("");
 
-  els.aiCompanyGrid.innerHTML = rows.map((row) => `<article class="ai-company-card${row.snapshotStale ? " snapshot-stale" : ""}">
+  els.aiCompanyGrid.innerHTML = rows.map((row) => {
+    const nextReportLabel = row.nextReportLabel || row.nextReportDate || "待官方公布";
+    const scheduleConfirmed = row.nextReportStatus === "confirmed";
+    const scheduleSource = row.nextReportSource ? `<a class="date-source" href="${safeExternalUrl(row.nextReportSource)}" target="_blank" rel="noreferrer">核对日期</a>` : "";
+    return `<article class="ai-company-card${row.snapshotStale ? " snapshot-stale" : ""}">
     <div class="ai-card-head">
       <span class="ai-layer-pill">${escapeHtml(row.layer)}</span>
       <div class="ai-snapshot-meta"><time>${escapeHtml(row.snapshotLabel || `资料截至 ${row.released}`)}</time>${row.snapshotStale ? '<span class="ai-stale-badge">待更新</span>' : ""}</div>
@@ -230,33 +287,28 @@ function renderAiEarnings(rows = [], layers = []) {
     <div class="ai-financials">
       <div><span>营收</span><strong>${escapeHtml(row.revenue)}</strong></div>
       <div><span>净利润</span><strong>${escapeHtml(row.netIncome)}</strong></div>
-      <div><span>毛利率</span><strong>${escapeHtml(row.grossMargin)}</strong></div>
+      <div><span>${escapeHtml(row.marginLabel || "毛利率")}</span><strong>${escapeHtml(row.grossMargin)}</strong></div>
     </div>
     <div class="ai-readout">
-      <div><span>本季表现</span><p class="assessment ${escapeHtml(row.resultTone)}">${escapeHtml(row.resultAssessment)}</p></div>
-      <div><span>下一期判断</span><p class="assessment ${escapeHtml(row.guidanceTone)}">${escapeHtml(row.guidanceAssessment)}</p></div>
+      <div><span>本季表现</span><p class="assessment ${safeTone(row.resultTone)}">${escapeHtml(row.resultAssessment)}</p></div>
+      <div><span>下一期判断</span><p class="assessment ${safeTone(row.guidanceTone)}">${escapeHtml(row.guidanceAssessment)}</p></div>
     </div>
     <div class="ai-guidance-copy"><span>公司指引</span><p>${escapeHtml(row.guidance)}</p><small>${escapeHtml(row.note)}</small></div>
-    <div class="ai-card-foot"><a href="${escapeHtml(row.source)}" target="_blank" rel="noreferrer">查看官方财报</a><span>下次财报 <strong>${escapeHtml(row.nextReportDate || row.nextReportLabel)}</strong></span></div>
-  </article>`).join("");
+    <div class="ai-card-foot"><a href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">查看官方财报</a><div class="ai-next-report"><span>下次财报 <strong>${escapeHtml(nextReportLabel)}</strong></span><i class="schedule-status ${scheduleConfirmed ? "confirmed" : "estimated"}">${scheduleConfirmed ? "公司确认" : "市场预估"}</i>${scheduleSource}</div></div>
+  </article>`;
+  }).join("");
 }
 
 function renderReminders(rows = []) {
-  const today = new Date();
-  const todayParts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(today).map(({ type, value }) => [type, value]));
-  const todayUtc = Date.UTC(Number(todayParts.year), Number(todayParts.month) - 1, Number(todayParts.day));
+  const todayParts = dateInTimeZone().split("-").map(Number);
+  const todayUtc = Date.UTC(todayParts[0], todayParts[1] - 1, todayParts[2]);
   els.reminderGrid.innerHTML = rows.map((row, index) => {
     const dateParts = row.date?.split("-").map(Number);
     const days = dateParts?.length === 3
       ? Math.round((Date.UTC(dateParts[0], dateParts[1] - 1, dateParts[2]) - todayUtc) / 86_400_000)
       : null;
-    const companyList = row.companies?.length ? `<div class="company-reminder-list">${row.companies.map((company) => `<span><b>${escapeHtml(company.ticker)}</b><em>上期 ${escapeHtml(company.released)}</em><em>下期 ${escapeHtml(company.next)}</em><i class="${company.status === "confirmed" ? "confirmed" : "estimated"}">${company.status === "confirmed" ? "已确认" : "预计窗口"}</i></span>`).join("")}</div>` : "";
-    const sourceLink = !row.companies?.length && row.linkLabel ? `<a class="reminder-source" href="${escapeHtml(row.source)}" target="_blank" rel="noreferrer">${escapeHtml(row.linkLabel)} <span aria-hidden="true">↗</span></a>` : "";
+    const companyList = row.companies?.length ? `<div class="company-reminder-list">${row.companies.map((company) => `<div class="company-reminder-item"><b>${escapeHtml(company.ticker)}</b><em>上期 ${escapeHtml(company.released)}</em><em>下期 ${escapeHtml(company.next)}</em><i class="${company.status === "confirmed" ? "confirmed" : "estimated"}">${company.status === "confirmed" ? "已确认" : "预计窗口"}</i>${company.source ? `<a href="${safeExternalUrl(company.source)}" target="_blank" rel="noreferrer">核对日期</a>` : ""}</div>`).join("")}</div>` : "";
+    const sourceLink = !row.companies?.length && row.linkLabel ? `<a class="reminder-source" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">${escapeHtml(row.linkLabel)} <span aria-hidden="true">↗</span></a>` : "";
     const relativeLabel = days === null ? "" : days < 0 ? "已公布" : days === 0 ? "今天" : `${days} 天后`;
     return `<article class="reminder-card${row.companies?.length ? " company-card" : ""}">
       <span class="reminder-index">${String(index + 1).padStart(2, "0")}</span><div class="reminder-copy"><small>${escapeHtml(row.label)}</small><strong>${escapeHtml(row.event)}</strong>${sourceLink}</div>
@@ -265,14 +317,29 @@ function renderReminders(rows = []) {
   }).join("");
 }
 
+function renderCalendarSync(sync) {
+  if (!els.calendarSyncStatus) return;
+  if (!sync?.updatedAt) {
+    els.calendarSyncStatus.textContent = "正在核对 BLS、Federal Reserve 与 Nasdaq 官方日程";
+    return;
+  }
+  const sources = Object.values(sync.sources || {});
+  const failed = sources.filter((source) => source?.error).length;
+  const cadence = Number.isFinite(sync.refreshEveryHours) ? ` · 每 ${sync.refreshEveryHours} 小时自动核对` : "";
+  els.calendarSyncStatus.textContent = failed
+    ? `日程最近核对 ${formatDate(sync.updatedAt)} · ${failed} 个来源暂不可用，已保留最近成功日程${cadence}`
+    : `日程自动同步 · 最近核对 ${formatDate(sync.updatedAt)}${cadence}`;
+}
+
 function sparklineSvg(points) {
-  if (!points || points.length < 2) return `<svg class="sparkline" viewBox="0 0 170 72" aria-hidden="true"><path class="line" d="M0 36 L170 36" opacity=".15"/></svg>`;
-  const values = points.map((point) => point.value);
+  const series = (points || []).filter((point) => Number.isFinite(point?.value));
+  if (series.length < 2) return `<svg class="sparkline" viewBox="0 0 170 72" aria-hidden="true"><path class="line" d="M0 36 L170 36" opacity=".15"/></svg>`;
+  const values = series.map((point) => point.value);
   const min = Math.min(...values);
   const max = Math.max(...values);
   const spread = max - min || 1;
-  const coords = points.map((point, index) => {
-    const x = (index / (points.length - 1)) * 170;
+  const coords = series.map((point, index) => {
+    const x = (index / (series.length - 1)) * 170;
     const y = 66 - ((point.value - min) / spread) * 56;
     return [x, y];
   });
@@ -294,21 +361,22 @@ function renderIndicators(data) {
     const chipText = item.overridden ? "人工覆盖" : risk === null ? "待接入" : risk >= 80 ? "严重" : risk >= 55 ? "偏高" : risk >= 30 ? "观察" : "温和";
     const index = String(data.indicators.findIndex((source) => source.id === item.id) + 1).padStart(2, "0");
     const manualCapable = manualConfig.some((config) => config.id === item.id);
-    return `<article class="indicator-card" id="indicator-${item.id}" data-category="${item.category}">
+    const status = ["critical", "high", "watch", "low", "unavailable"].includes(item.status) ? item.status : "unavailable";
+    return `<article class="indicator-card" id="indicator-${escapeHtml(item.id)}" data-category="${escapeHtml(item.category)}">
       <div class="card-head">
-        <div><span class="card-index">${index} · ${item.category} · 权重 ${item.weight}</span><h3 class="card-title">${item.title}</h3></div>
-        <span class="risk-chip ${item.status}">${chipText}</span>
+        <div><span class="card-index">${index} · ${escapeHtml(item.category)} · 权重 ${escapeHtml(item.weight)}</span><h3 class="card-title">${escapeHtml(item.title)}</h3></div>
+        <span class="risk-chip ${status}">${chipText}</span>
       </div>
       <div class="card-main">
-        <div><div class="metric-value">${item.value}</div><div class="metric-detail">${item.detail || ""}${item.date ? ` · ${item.date}` : ""}</div></div>
+        <div><div class="metric-value">${escapeHtml(item.value)}</div><div class="metric-detail">${escapeHtml(item.detail || "")}${item.date ? ` · ${escapeHtml(item.date)}` : ""}</div></div>
         ${sparklineSvg(item.sparkline)}
       </div>
       ${item.breakdown?.length ? `<div class="metric-breakdown metric-breakdown-${Math.min(item.breakdown.length, 4)}">${item.breakdown.map((metric) => `<div><span>${escapeHtml(metric.label)}</span><strong>${escapeHtml(metric.value)}</strong><small>${escapeHtml(metric.detail)}</small></div>`).join("")}</div>` : ""}
-      ${item.judgment ? `<div class="indicator-judgment ${escapeHtml(item.judgment.tone)}"><strong>${escapeHtml(item.judgment.label)}</strong><span>${escapeHtml(item.judgment.text)}</span></div>` : ""}
+      ${item.judgment ? `<div class="indicator-judgment ${safeTone(item.judgment.tone)}"><strong>${escapeHtml(item.judgment.label)}</strong><span>${escapeHtml(item.judgment.text)}</span></div>` : ""}
       <div class="score-row"><span>风险强度 ${risk === null ? "--" : Math.round(risk)}</span><div class="risk-bar"><i style="width:${risk ?? 0}%;background:${color}"></i></div><strong class="score-points">${item.points === null ? "--" : item.points.toFixed(1)} / ${item.weight}</strong></div>
-      <p class="card-copy">${item.description}<br /><strong>为什么重要：</strong>${item.why}</p>
-      ${manualCapable ? `<button class="manual-edit" data-manual-id="${item.id}" type="button">${item.overridden ? "修改人工数据" : "录入更准确的数据"}</button>` : ""}
-      <div class="card-foot"><a class="source-link" href="${item.source.url}" target="_blank" rel="noreferrer">查看官方数据 · ${escapeHtml(item.source.label)}</a><span class="cadence">${item.cadence}<span class="confidence">${confidenceLabel(item.confidence)}</span></span></div>
+      <p class="card-copy">${escapeHtml(item.description)}<br /><strong>为什么重要：</strong>${escapeHtml(item.why)}</p>
+      ${manualCapable ? `<button class="manual-edit" data-manual-id="${escapeHtml(item.id)}" type="button">${item.overridden ? "修改人工数据" : "录入更准确的数据"}</button>` : ""}
+      <div class="card-foot"><a class="source-link" href="${safeExternalUrl(item.source?.url)}" target="_blank" rel="noreferrer">查看官方数据 · ${escapeHtml(item.source?.label)}</a><span class="cadence">${escapeHtml(item.cadence)}<span class="confidence">${escapeHtml(confidenceLabel(item.confidence))}</span></span></div>
     </article>`;
   }).join("");
 }
@@ -328,11 +396,22 @@ function render() {
   renderIndicators(data);
   renderAiEarnings(data.aiEarnings, data.aiChainLayers);
   renderReminders(data.reminders);
+  renderCalendarSync(data.calendarSync);
   renderErrors(data.errors);
 }
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let activeLoad = null;
+
+async function fetchDashboard(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 75_000);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function loadData(force = false) {
   if (activeLoad) return activeLoad;
@@ -345,11 +424,22 @@ function loadData(force = false) {
       let response;
       let payload;
       for (let attempt = 0; attempt < 12; attempt += 1) {
-        response = await fetch(`/api/dashboard${force && attempt === 0 ? "?refresh=1" : ""}`);
+        response = await fetchDashboard(`/api/dashboard${force && attempt === 0 ? "?refresh=1" : ""}`);
         payload = await response.json();
-        if (!(response.status === 202 && payload.warming)) break;
-        els.liveText.textContent = `正在同步首批数据 · ${attempt + 1}/12`;
-        await wait(2500);
+        if (response.status === 202 && payload.warming) {
+          els.liveText.textContent = `正在同步首批数据 · ${attempt + 1}/12`;
+          await wait(2500);
+          continue;
+        }
+        if (response.ok && payload.refreshing && !force && attempt < 11) {
+          state.data = payload;
+          els.loading.hidden = true;
+          els.loading.replaceChildren();
+          render();
+          await wait(2500);
+          continue;
+        }
+        break;
       }
       if (response?.status === 202) throw new Error("数据同步时间较长，请稍后再试");
       if (!response?.ok) throw new Error(payload?.detail || payload?.error || "数据请求失败");
@@ -384,6 +474,8 @@ function buildManualFields(focusId = null) {
     field.dataset.id = config.id;
     fragment.querySelector(".manual-label").textContent = config.label;
     fragment.querySelector(".manual-help").textContent = config.help;
+    risk.setAttribute("aria-label", `${config.label}风险值`);
+    note.setAttribute("aria-label", `${config.label}备注`);
     risk.value = state.overrides[config.id]?.risk ?? "";
     note.value = state.overrides[config.id]?.note ?? "";
     if (focusId === config.id) field.dataset.focus = "true";
@@ -403,7 +495,11 @@ els.filters.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-filter]");
   if (!button) return;
   state.filter = button.dataset.filter;
-  els.filters.querySelectorAll("button").forEach((item) => item.classList.toggle("active", item === button));
+  els.filters.querySelectorAll("button").forEach((item) => {
+    const active = item === button;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-pressed", String(active));
+  });
   render();
 });
 els.grid.addEventListener("click", (event) => {
@@ -414,7 +510,11 @@ els.drivers.addEventListener("click", (event) => {
   const button = event.target.closest("[data-driver-id]");
   if (!button) return;
   state.filter = button.dataset.driverCategory;
-  els.filters.querySelectorAll("button").forEach((item) => item.classList.toggle("active", item.dataset.filter === state.filter));
+  els.filters.querySelectorAll("button").forEach((item) => {
+    const active = item.dataset.filter === state.filter;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-pressed", String(active));
+  });
   render();
   requestAnimationFrame(() => document.querySelector(`#indicator-${button.dataset.driverId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
 });
@@ -426,12 +526,16 @@ els.manualForm.addEventListener("submit", (event) => {
     const riskText = field.querySelector(".manual-risk").value.trim();
     const note = field.querySelector(".manual-note").value.trim();
     if (riskText === "") delete next[field.dataset.id];
-    else next[field.dataset.id] = { risk: clamp(Number(riskText)), note };
+    else if (Number.isFinite(Number(riskText))) next[field.dataset.id] = { risk: clamp(Number(riskText)), note };
   });
   state.overrides = next;
-  saveOverrides();
+  const saved = saveOverrides();
   els.manualDialog.close();
   render();
+  if (!saved) {
+    els.error.hidden = false;
+    els.error.textContent = "浏览器未能保存人工数据，本次重算仍然有效，刷新页面后可能恢复原值。";
+  }
 });
 els.clearManual.addEventListener("click", () => {
   state.overrides = {};

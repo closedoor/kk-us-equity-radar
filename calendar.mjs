@@ -349,8 +349,11 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
     if (earningsResult.status === "fulfilled" && Object.keys(earningsResult.value).length) {
       state.earnings = { ...state.earnings, ...earningsResult.value };
       sources.earnings = { mode: "nasdaq-live", url: "https://www.nasdaq.com/market-activity/earnings", lastSuccessAt: attemptedAt, error: null };
-    } else if (earningsResult.status === "rejected") {
-      sources.earnings = { ...sources.earnings, error: earningsResult.reason?.message || "calendar fetch failed" };
+    } else {
+      const error = earningsResult.status === "rejected"
+        ? earningsResult.reason?.message || "calendar fetch failed"
+        : "Nasdaq did not return any usable earnings dates";
+      sources.earnings = { ...sources.earnings, error };
     }
 
     state = { ...state, updatedAt: attemptedAt, sources };
@@ -368,20 +371,26 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
   function resolvedAiEarnings(at = now()) {
     const today = dateInTimeZone(at);
     return (aiEarnings || []).map((company) => {
+      const automatic = state.earnings[company.ticker];
       const snapshotAgeDays = validIsoDate(company.released)
         ? Math.floor((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${company.released}T00:00:00Z`)) / DAY_MS)
         : null;
-      const knownReportPassed = company.nextReportStatus === "confirmed"
-        && validIsoDate(company.nextReportDate)
-        && company.nextReportDate < today
-        && company.nextReportDate > company.released;
-      const snapshotStale = knownReportPassed || (Number.isFinite(snapshotAgeDays) && snapshotAgeDays > 120);
+      const isLaterQuarter = (date) => validIsoDate(date)
+        && validIsoDate(company.released)
+        && Date.parse(`${date}T00:00:00Z`) - Date.parse(`${company.released}T00:00:00Z`) >= 30 * DAY_MS;
+      const confirmedReportPassed = company.nextReportStatus === "confirmed"
+        && isLaterQuarter(company.nextReportDate)
+        && company.nextReportDate < today;
+      const automaticReportPassed = isLaterQuarter(automatic?.date)
+        && automatic.date < today;
+      const snapshotStale = confirmedReportPassed
+        || automaticReportPassed
+        || (Number.isFinite(snapshotAgeDays) && snapshotAgeDays > 120);
       const snapshot = {
         snapshotStale,
         snapshotAgeDays,
         snapshotLabel: snapshotStale ? "财报解读待更新" : `资料截至 ${company.released}`,
       };
-      const automatic = state.earnings[company.ticker];
       const automaticIsFuture = validIsoDate(automatic?.date) && automatic.date >= today;
       const confirmedFallback = company.nextReportStatus === "confirmed"
         && validIsoDate(company.nextReportDate)
@@ -450,7 +459,7 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
           company,
           ticker,
           released,
-          next: nextReportDate || nextReportLabel,
+          next: nextReportLabel || nextReportDate,
           status: nextReportStatus || "estimated",
           source: nextReportSource || null,
         })),
