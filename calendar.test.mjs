@@ -331,3 +331,61 @@ test("retries failed calendar sources sooner than the normal refresh interval", 
   await service.refresh();
   assert.ok(requests > firstAttemptRequests);
 });
+
+test("company-confirmed dates take precedence over conflicting estimates", () => {
+  const service = createCalendarService({ fetchText: async () => "", now: () => new Date("2026-09-06T12:00:00Z"), aiEarnings: [{
+    ticker: "TEST", released: "2026-06-24", nextReportDate: "2026-09-30", nextReportLabel: "2026-09-30 · 盘后", nextReportStatus: "confirmed", nextReportSource: "https://example.com/ir",
+  }] });
+  service.hydrate({ earnings: { TEST: { date: "2026-09-25" } } });
+  const [row] = service.resolvedAiEarnings();
+  assert.equal(row.nextReportDate, "2026-09-30");
+  assert.equal(row.nextReportStatus, "confirmed");
+  assert.equal(row.nextReportSource, "https://example.com/ir");
+  service.hydrate({ earnings: { TEST: { date: "2026-09-03" } } });
+  assert.equal(service.resolvedAiEarnings()[0].snapshotStale, false);
+});
+
+test("rolling to a new earnings estimate cannot revive old financial analysis, including after restart", async () => {
+  const config = {
+    fetchText: async (url) => {
+      if (url.includes("earnings-date")) return JSON.stringify({ data: { announcement: "Dec 3, 2026", reportText: "expected" } });
+      throw new Error("offline");
+    },
+    now: () => new Date("2026-09-06T12:00:00Z"),
+    logger: { warn() {} },
+    aiEarnings: [{ ticker: "TEST", released: "2026-06-03", guidanceTone: "positive" }],
+  };
+  const service = createCalendarService(config);
+  service.hydrate({ earnings: { TEST: { date: "2026-09-03" } } });
+  await service.refresh();
+  assert.equal(service.resolvedAiEarnings()[0].snapshotStale, true);
+  const restarted = createCalendarService(config);
+  restarted.hydrate(service.snapshot());
+  assert.equal(restarted.resolvedAiEarnings()[0].snapshotStale, true);
+  const updated = createCalendarService({ ...config, aiEarnings: [{ ticker: "TEST", released: "2026-09-03", guidanceTone: "positive" }] });
+  updated.hydrate(service.snapshot());
+  assert.equal(updated.resolvedAiEarnings()[0].snapshotStale, false);
+});
+
+test("missing or future release dates are not treated as current financial reports", () => {
+  const service = createCalendarService({ fetchText: async () => "", now: () => new Date("2026-09-06T12:00:00Z"), aiEarnings: [
+    { ticker: "MISSING" }, { ticker: "FUTURE", released: "2026-09-10" }, { ticker: "INVALID", released: "2026-02-31" },
+  ] });
+  assert.ok(service.resolvedAiEarnings().every((row) => row.snapshotStale));
+});
+
+test("partial earnings failures preserve successful dates and report the failed companies", async () => {
+  const service = createCalendarService({
+    fetchText: async (url) => {
+      if (url.includes("/GOOD/")) return JSON.stringify({ data: { announcement: "Oct 15, 2026", reportText: "expected" } });
+      throw new Error("temporary outage");
+    },
+    now: () => new Date("2026-09-06T12:00:00Z"), logger: { warn() {} },
+    aiEarnings: [{ ticker: "GOOD", released: "2026-07-15" }, { ticker: "FAIL", released: "2026-07-15" }],
+  });
+  service.hydrate({ earnings: { FAIL: { date: "2026-10-16" } } });
+  await service.refresh();
+  assert.equal(service.snapshot().earnings.GOOD.date, "2026-10-15");
+  assert.equal(service.snapshot().earnings.FAIL.date, "2026-10-16");
+  assert.match(service.syncStatus().sources.earnings.error, /FAIL/);
+});

@@ -88,7 +88,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .score-breakdown > div { padding: 12px 14px; background: rgba(247,241,226,.055); backdrop-filter: blur(8px); }
 .score-breakdown span, .score-breakdown small { display: block; color: #b3bbcc; font: 8px/1.4 var(--mono); }
 .score-breakdown strong { display: block; margin-top: 6px; font: 500 18px var(--mono); }
-.band-scale { position: relative; display: grid; grid-template-columns: 25fr 15fr 20fr 15fr 25fr; height: 5px; gap: 2px; margin-top: 4px; }
+.band-scale { position: relative; display: grid; grid-template-columns: 20fr 20fr 20fr 15fr 25fr; height: 5px; gap: 2px; margin-top: 4px; }
 .band-scale span { display: block; }.band-low{background:var(--green)}.band-watch{background:#b5ad4c}.band-elevated{background:var(--amber)}.band-high{background:var(--orange)}.band-crisis{background:var(--red)}
 .band-scale i { position: absolute; top: -5px; left: 0; width: 2px; height: 15px; background: white; transition: left 1s ease; }
 .band-labels { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-top: 8px; color: #777a74; font: 8px var(--mono); text-align: center; }

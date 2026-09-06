@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createCalendarService } from "./calendar.mjs";
 import { parseFredCsv, parseNasdaqRows, requireFreshSeries, monthlyPercentChange, monthlyAnnualizedChange, monthlyDifference, nearestPrior } from "./market-data.mjs";
 import { computeScores, actionFor } from "./public/risk-model.js";
+import { projectDashboard, resolveAiIndicator, shouldReplaceDashboard, isDashboardSnapshot } from "./public/dashboard-state.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
@@ -13,8 +14,6 @@ const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const FORCE_REFRESH_COOLDOWN_MS = 60 * 1000;
-const MAX_STALE_CACHE_MS = 24 * 60 * 60 * 1000;
-const MIN_PARTIAL_COVERAGE = 60;
 const REQUEST_TIMEOUT_MS = 25_000;
 const SECURITY_HEADERS = {
   "content-security-policy": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'",
@@ -520,15 +519,6 @@ async function buildDashboard() {
   const ratesRisk = Number.isFinite(realYieldRisk) && Number.isFinite(yieldCurveRisk)
     ? clamp(realYieldRisk * 0.72 + yieldCurveRisk * 0.28)
     : realYieldRisk;
-  const aiToneRisk = { positive: 0.12, mixed: 0.34, negative: 0.75 };
-  const currentAiSnapshots = currentAiEarnings.filter((row) => !row.snapshotStale);
-  const aiRiskAverage = average(currentAiSnapshots.map((row) => aiToneRisk[row.guidanceTone] ?? 0.5));
-  const aiRisk = Number.isFinite(aiRiskAverage) ? clamp(aiRiskAverage + 0.03) : null;
-  const aiLatestRelease = currentAiSnapshots
-    .map((row) => row.released)
-    .filter(Boolean)
-    .sort()
-    .at(-1);
 
   const vix = getFred("VIXCLS");
   const vixLast = latest(vix);
@@ -689,12 +679,12 @@ async function buildDashboard() {
       date: payrollLast?.date, description: "观察三个月平均、历史修正、平均工时和就业是否只集中于少数行业。", why: "单月数据噪声很大，持续转弱才意味着需求与企业盈利下行。",
       source: { label: "BLS / FRED · Nonfarm Payrolls", url: sourceUrl("PAYEMS") }, cadence: "月度", confidence: "high", sparkline: spark(payrolls, 24), methodology: "取三个月就业恶化与高通胀下的政策约束风险中较高值。",
     }),
-    indicator({
-      id: "aiEarnings", title: "AI 产业链财报与指引", category: "盈利与AI", weight: weights.aiEarnings, risk: aiRisk,
-      value: `${currentAiSnapshots.length} / ${currentAiEarnings.length} 家`, detail: "仅让仍在有效期内的财报解读参与评分；下次财报日期单独自动同步",
-      date: aiLatestRelease, description: "按算力与互连、晶圆与先进封装、云资本开支、HBM 与存储四层监测行业巨头。过期解读会明确标记并退出自动评分。", why: "这些公司的指引能同时改变 AI 需求、供给、带宽和资本开支预期，比单纯按市值选股更接近产业链真实风险。",
-      source: { label: "公司 IR / SEC 原始文件", url: aiEarnings[1].source }, cadence: "季度", confidence: "medium", sparkline: [], available: currentAiSnapshots.length >= 3, methodology: "仅使用尚未跨过公司确认或自动抓取的下一次财报日、且资料期不超过 120 天的公司指引；加入 3 分产业集中度溢价，支持人工覆盖。",
-    }),
+    resolveAiIndicator(indicator({
+      id: "aiEarnings", title: "AI 产业链财报与指引", category: "盈利与AI", weight: weights.aiEarnings, risk: null,
+      value: "", detail: "仅让仍在有效期内的财报解读参与评分；下次财报日期单独自动同步",
+      date: null, description: "按算力与互连、晶圆与先进封装、云资本开支、HBM 与存储四层监测行业巨头。过期解读会明确标记并退出自动评分。", why: "这些公司的指引能同时改变 AI 需求、供给、带宽和资本开支预期，比单纯按市值选股更接近产业链真实风险。",
+      source: { label: "公司 IR / SEC 原始文件", url: aiEarnings[1].source }, cadence: "季度", confidence: "medium", sparkline: [], methodology: "仅使用尚未跨过公司确认或自动抓取的下一次财报日、且资料期不超过 120 天的公司指引；加入 3 分产业集中度溢价，支持人工覆盖。",
+    }), currentAiEarnings),
     indicator({
       id: "credit", title: "信用利差与银行信贷", category: "信用", weight: weights.credit, risk: creditComposite,
       value: creditLast ? `${round(creditLast.value * 100, 0)} bp` : "暂无数据", detail: `高收益债 OAS；SLOOS 净收紧 ${lendingLast ? `${round(lendingLast.value, 1)}%` : "--"}；NFCI ${nfciLast ? round(nfciLast.value, 2) : "--"}`,
@@ -734,7 +724,7 @@ async function buildDashboard() {
     generatedAt: new Date().toISOString(),
     ...model,
     scoringContext,
-    action: actionFor(model.score),
+    action: actionFor(model.score, model.coverage),
     categories,
     indicators,
     aiEarnings: currentAiEarnings,
@@ -743,7 +733,7 @@ async function buildDashboard() {
     calendarSchedule: calendarService.snapshot(),
     calendarSync: calendarService.syncStatus(),
     methodology: {
-      version: "4.6.3",
+      version: "4.6.4",
       note: "先计算 12 项基础加权分，再用 30% 的主导风险链和最多 14 分的同向共振修正，避免油价、通胀、政策与利率同时恶化时被低风险项过度稀释。基础分与修正项均单独展示。",
       bands: [
         { min: 0, max: 20, label: "健康、风险较低" },
@@ -782,13 +772,12 @@ function refreshDashboard(force = false) {
     .then(() => buildDashboard())
     .then((next) => {
       lastRefreshErrors = next.errors;
-      const cacheAgeMs = dashboardCachedAt ? Date.now() - dashboardCachedAt : Infinity;
-      const usablePartialRefresh = cacheAgeMs >= MAX_STALE_CACHE_MS && next.coverage >= MIN_PARTIAL_COVERAGE;
-      if (!dashboardCache || next.errors.length === 0 || next.coverage >= dashboardCache.coverage || usablePartialRefresh) {
+      if (shouldReplaceDashboard(dashboardCache, next)) {
         dashboardCache = next;
         dashboardCachedAt = Date.now();
-        writeFile(dashboardCacheFile, JSON.stringify(next)).catch((error) => console.warn(`[cache] write failed: ${error.message}`));
       }
+      dashboardCache = { ...dashboardCache, calendarSchedule: calendarService.snapshot(), calendarSync: calendarService.syncStatus() };
+      writeFile(dashboardCacheFile, JSON.stringify(dashboardCache)).catch((error) => console.warn(`[cache] write failed: ${error.message}`));
       return dashboardCache;
     })
     .catch((error) => {
@@ -813,7 +802,7 @@ const server = http.createServer(async (req, res) => {
     if (force) await refreshDashboard(true);
     else if (!fresh) refreshDashboard();
     const cacheAgeMs = Math.max(0, Date.now() - dashboardCachedAt);
-    return sendJson(res, 200, {
+    return sendJson(res, 200, projectDashboard({
       ...dashboardCache,
       reminders: calendarService.buildReminders(),
       aiEarnings: calendarService.resolvedAiEarnings(),
@@ -824,7 +813,7 @@ const server = http.createServer(async (req, res) => {
       stale: cacheAgeMs >= CACHE_TTL_MS,
       refreshing: Boolean(refreshPromise),
       cacheAgeMs,
-    });
+    }));
   }
 
   const requested = url.pathname === "/" ? "/index.html" : url.pathname;
@@ -846,6 +835,7 @@ const server = http.createServer(async (req, res) => {
 
 try {
   dashboardCache = JSON.parse(await readFile(dashboardCacheFile, "utf8"));
+  if (!isDashboardSnapshot(dashboardCache)) throw new Error("Invalid dashboard cache");
   dashboardCachedAt = Math.min(Date.now(), Date.parse(dashboardCache.generatedAt) || 0);
   lastRefreshErrors = Array.isArray(dashboardCache.errors) ? dashboardCache.errors : [];
   calendarService.hydrate(dashboardCache.calendarSchedule);

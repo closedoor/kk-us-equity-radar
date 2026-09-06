@@ -13,6 +13,8 @@
 - `market-data.mjs`
 - `market-data.test.mjs`
 - `risk-model.test.mjs`
+- `dashboard-state.test.mjs`
+- `server.test.mjs`
 - `package.json`
 - `dashboard-cache.json`
 - `README.md`

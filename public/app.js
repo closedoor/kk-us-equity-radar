@@ -1,4 +1,5 @@
-import { computeScores, actionFor } from "./risk-model.js";
+import { computeScores, actionFor, MIN_SCORE_COVERAGE } from "./risk-model.js";
+import { projectDashboard, cacheExpired } from "./dashboard-state.js";
 
 const manualConfig = [
   { id: "aiEarnings", label: "AI 产业链财报风险", help: "当云资本开支、芯片指引或库存出现新变化时，可调整风险值。" },
@@ -11,6 +12,7 @@ const state = {
   overrides: loadOverrides(),
   lastLoadedAt: 0,
   loadError: null,
+  displayValidity: null,
 };
 
 const els = {
@@ -126,7 +128,7 @@ function applyOverrides(data) {
     const points = items.reduce((sum, item) => sum + item.points, 0);
     return { ...category, weight, score: weight ? (points / weight) * 100 : null };
   });
-  return { ...data, indicators, ...model, coverage: model.availableWeight, categories, heatScore: model.stagflationScore, action: actionFor(model.score) };
+  return { ...data, indicators, ...model, coverage: model.availableWeight, categories, heatScore: model.stagflationScore, action: actionFor(model.score, model.coverage) };
 }
 
 function formatDate(date) {
@@ -151,13 +153,14 @@ function scoreColor(score) {
 function renderSummary(data) {
   const score = Number.isFinite(data.score) ? Math.round(data.score * 10) / 10 : null;
   const meta = score === null
-    ? { label: "数据不足", color: "#777a74", description: "当前有效数据不足，系统不会把缺失值当成低风险。" }
+    ? { label: "数据不足", color: "#777a74", description: `当前有效数据覆盖率为 ${data.coverage}%，低于 ${MIN_SCORE_COVERAGE}% 评分门槛。` }
     : riskMeta(score);
   const circumference = 2 * Math.PI * 103;
   els.score.textContent = score === null ? "--" : score.toFixed(1);
   els.gauge.style.strokeDasharray = `${circumference}`;
   els.gauge.style.strokeDashoffset = `${circumference * (1 - (score ?? 0) / 100)}`;
   els.gauge.style.stroke = meta.color;
+  els.gauge.style.visibility = score === null ? "hidden" : "visible";
   els.marker.hidden = score === null;
   els.marker.style.left = `calc(${clamp(score ?? 0)}% - 1px)`;
   els.scoreGauge?.setAttribute("aria-label", score === null ? "综合市场风险分暂不可用" : `综合市场风险分 ${score.toFixed(1)} 分`);
@@ -180,7 +183,7 @@ function renderSummary(data) {
   els.recession.textContent = Number.isFinite(data.recessionScore) ? data.recessionScore.toFixed(1) : "--";
   els.uplift.textContent = Number.isFinite(data.riskUplift) ? `+${data.riskUplift.toFixed(0)}` : "--";
   const cacheAge = formatCacheAge(data.cacheAgeMs);
-  els.liveText.textContent = state.loadError ? "连接失败" : data.refreshing
+  els.liveText.textContent = state.loadError ? "连接失败" : data.cacheExpired ? "缓存已过期 · 等待新数据" : data.refreshing
     ? `后台更新中 · 暂用${cacheAge}缓存`
     : data.stale
       ? `更新暂缓 · 暂用${cacheAge}缓存`
@@ -330,7 +333,7 @@ function renderIndicators(data) {
   els.grid.innerHTML = filtered.map((item) => {
     const risk = Number.isFinite(item.risk) ? item.risk : null;
     const color = risk === null ? "#a1a39c" : scoreColor(risk);
-    const chipText = item.overridden ? "人工覆盖" : risk === null ? "待接入" : risk >= 80 ? "严重" : risk >= 55 ? "偏高" : risk >= 30 ? "观察" : "温和";
+    const chipText = item.overridden ? "人工覆盖" : risk === null ? (item.unavailableReason || "待接入") : risk >= 80 ? "严重" : risk >= 55 ? "偏高" : risk >= 30 ? "观察" : "温和";
     const index = String(data.indicators.findIndex((source) => source.id === item.id) + 1).padStart(2, "0");
     const manualCapable = manualConfig.some((config) => config.id === item.id);
     const status = ["critical", "high", "watch", "low", "unavailable"].includes(item.status) ? item.status : "unavailable";
@@ -374,7 +377,8 @@ function renderErrors(errors = []) {
 
 function render() {
   if (!state.data) return;
-  const data = applyOverrides(state.data);
+  const data = applyOverrides(projectDashboard(state.data));
+  state.displayValidity = `${dateInTimeZone()}:${data.cacheExpired}`;
   renderSummary(data);
   renderCategories(data.categories);
   renderDrivers(data);
@@ -438,6 +442,7 @@ function loadData(force = false) {
       render();
     } catch (error) {
       state.loadError = error.message;
+      render();
       els.liveText.textContent = "连接失败";
       els.loading.hidden = true;
       els.loading.replaceChildren();
@@ -546,6 +551,10 @@ function refreshAfterInactivity() {
 
 document.addEventListener("visibilitychange", refreshAfterInactivity);
 window.addEventListener("online", refreshAfterInactivity);
+
+setInterval(() => {
+  if (state.data && state.displayValidity !== `${dateInTimeZone()}:${cacheExpired(state.data)}`) render();
+}, 60_000);
 
 loadData();
 setInterval(() => loadData(), 15 * 60 * 1000);

@@ -265,6 +265,7 @@ export function createCalendarService({
     employment: fallbackEmploymentCalendar,
     fomc: fallbackFomcCalendar,
     earnings: {},
+    pastEarnings: {},
     updatedAt: null,
     sources: {
       bls: { mode: "built-in", url: BLS_CPI_URL, cpiUrl: BLS_CPI_URL, employmentUrl: BLS_EMPLOYMENT_URL, lastSuccessAt: null, error: null },
@@ -281,9 +282,20 @@ export function createCalendarService({
       employment: validCalendar(snapshot.employment) ? uniqueSortedEvents(snapshot.employment) : state.employment,
       fomc: validCalendar(snapshot.fomc) ? uniqueSortedEvents(snapshot.fomc) : state.fomc,
       earnings: snapshot.earnings && typeof snapshot.earnings === "object" ? snapshot.earnings : state.earnings,
+      pastEarnings: Object.fromEntries(Object.entries(snapshot.pastEarnings || {}).filter(([, date]) => validIsoDate(date))),
       updatedAt: snapshot.updatedAt || state.updatedAt,
       sources: { ...state.sources, ...(snapshot.sources || {}) },
     };
+    rememberPastEarnings();
+  }
+
+  function rememberPastEarnings(at = now()) {
+    const today = dateInTimeZone(at);
+    for (const [ticker, event] of Object.entries(state.earnings)) {
+      if (validIsoDate(event?.date) && event.date < today && (!state.pastEarnings[ticker] || event.date > state.pastEarnings[ticker])) {
+        state.pastEarnings[ticker] = event.date;
+      }
+    }
   }
 
   async function fetchBlsCalendars() {
@@ -338,13 +350,16 @@ export function createCalendarService({
           accept: "application/json,text/plain,*/*",
           referer: `https://www.nasdaq.com/market-activity/stocks/${symbol.toLowerCase()}/earnings`,
         });
-        return [company.ticker, parseNasdaqEarningsDate(payload)];
+        return { ticker: company.ticker, event: parseNasdaqEarningsDate(payload) };
       } catch (error) {
         logger.warn?.(`[calendar] ${company.ticker} earnings: ${error.message}`);
-        return [company.ticker, null];
+        return { ticker: company.ticker, event: null, error: error.message };
       }
     }));
-    return Object.fromEntries(rows.filter(([, event]) => event));
+    return {
+      events: Object.fromEntries(rows.filter((row) => row.event).map((row) => [row.ticker, row.event])),
+      failed: rows.filter((row) => row.error).map((row) => row.ticker),
+    };
   }
 
   async function runRefresh() {
@@ -378,9 +393,13 @@ export function createCalendarService({
       sources.fomc = { ...sources.fomc, error: fomcResult.reason?.message || "calendar fetch failed" };
     }
 
-    if (earningsResult.status === "fulfilled" && Object.keys(earningsResult.value).length) {
-      state.earnings = { ...state.earnings, ...earningsResult.value };
-      sources.earnings = { mode: "nasdaq-live", url: "https://www.nasdaq.com/market-activity/earnings", lastSuccessAt: attemptedAt, error: null };
+    if (earningsResult.status === "fulfilled" && Object.keys(earningsResult.value.events).length) {
+      // Keep passed dates before the provider rolls its feed to the next quarter.
+      rememberPastEarnings();
+      state.earnings = { ...state.earnings, ...earningsResult.value.events };
+      rememberPastEarnings();
+      const failed = earningsResult.value.failed;
+      sources.earnings = { mode: "nasdaq-live", url: "https://www.nasdaq.com/market-activity/earnings", lastSuccessAt: attemptedAt, error: failed.length ? `财报日程暂不可用：${failed.join("、")}` : null };
     } else {
       const error = earningsResult.status === "rejected"
         ? earningsResult.reason?.message || "calendar fetch failed"
@@ -405,6 +424,7 @@ export function createCalendarService({
 
   function resolvedAiEarnings(at = now()) {
     const today = dateInTimeZone(at);
+    rememberPastEarnings(at);
     return (aiEarnings || []).map((company) => {
       const automatic = state.earnings[company.ticker];
       const snapshotAgeDays = validIsoDate(company.released)
@@ -413,23 +433,27 @@ export function createCalendarService({
       const isLaterQuarter = (date) => validIsoDate(date)
         && validIsoDate(company.released)
         && Date.parse(`${date}T00:00:00Z`) - Date.parse(`${company.released}T00:00:00Z`) >= 30 * DAY_MS;
-      const confirmedReportPassed = company.nextReportStatus === "confirmed"
-        && isLaterQuarter(company.nextReportDate)
-        && company.nextReportDate < today;
-      const automaticReportPassed = isLaterQuarter(automatic?.date)
-        && automatic.date < today;
-      const snapshotStale = confirmedReportPassed
-        || automaticReportPassed
-        || (Number.isFinite(snapshotAgeDays) && snapshotAgeDays > 120);
+      const confirmedSchedule = company.nextReportStatus === "confirmed" && isLaterQuarter(company.nextReportDate);
+      const reportDates = (confirmedSchedule ? [company.nextReportDate] : [automatic?.date, state.pastEarnings[company.ticker]])
+        .filter(isLaterQuarter);
+      const validThroughDates = validIsoDate(company.released)
+        ? [new Date(Date.parse(`${company.released}T00:00:00Z`) + 120 * DAY_MS).toISOString().slice(0, 10), ...reportDates]
+        : [];
+      const snapshotValidThrough = validThroughDates.sort()[0] || null;
+      const snapshotStale = !Number.isFinite(snapshotAgeDays) || snapshotAgeDays < 0
+        || Boolean(snapshotValidThrough && snapshotValidThrough < today);
       const snapshot = {
         snapshotStale,
         snapshotAgeDays,
+        snapshotValidThrough,
         snapshotLabel: snapshotStale ? "财报解读待更新" : `资料截至 ${company.released}`,
       };
       const automaticIsFuture = validIsoDate(automatic?.date) && automatic.date >= today;
       const confirmedFallback = company.nextReportStatus === "confirmed"
         && validIsoDate(company.nextReportDate)
         && company.nextReportDate >= today;
+
+      if (confirmedFallback && (!automaticIsFuture || automatic.date !== company.nextReportDate)) return { ...company, ...snapshot };
 
       if (automaticIsFuture) {
         const confirmed = confirmedFallback && company.nextReportDate === automatic.date;

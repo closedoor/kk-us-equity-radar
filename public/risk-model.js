@@ -1,5 +1,6 @@
 const clamp = (value) => Math.min(100, Math.max(0, value));
 const round = (value, digits = 1) => Number.isFinite(value) ? Math.round(value * 10 ** digits) / 10 ** digits : null;
+export const MIN_SCORE_COVERAGE = 60;
 
 export function computeScores(indicators, context = {}) {
   const available = indicators.filter((item) => item.available && Number.isFinite(item.risk) && Number.isFinite(item.points) && Number.isFinite(item.weight) && item.weight > 0);
@@ -35,7 +36,7 @@ export function computeScores(indicators, context = {}) {
     coverage: availableWeight,
     rawPoints: round(rawPoints, 2),
     baseScore: round(baseScore),
-    score: round(score),
+    score: availableWeight >= MIN_SCORE_COVERAGE ? round(score) : null,
     heatScore: round(stagflationScore),
     stagflationScore: round(stagflationScore),
     recessionScore: round(recessionScore),
@@ -46,8 +47,8 @@ export function computeScores(indicators, context = {}) {
   };
 }
 
-export function actionFor(score) {
-  if (!Number.isFinite(score)) return { key: "unavailable", label: "数据不足：暂不提供仓位动作", detail: "等待有效数据后再判断风险，不把缺失数据误判为低风险。" };
+export function actionFor(score, coverage = 0) {
+  if (!Number.isFinite(score)) return { key: "unavailable", label: "数据不足：暂不提供仓位动作", detail: `有效数据覆盖率为 ${coverage}%，达到 ${MIN_SCORE_COVERAGE}% 后恢复综合评分。` };
   if (score <= 20) return { key: "add", label: "风险较低：可考虑分批增加风险敞口", detail: "适合按既定资产配置逐步投入，不代表短期不会回调。" };
   if (score <= 40) return { key: "hold", label: "正常波动：以持有和再平衡为主", detail: "不追涨，也不因单项噪声急于减仓，等待风险是否跨指标扩散。" };
   if (score <= 60) return { key: "caution", label: "黄色警戒：保持仓位，暂停加仓", detail: "当前不支持全面卖出；保留现金，优先降低高估值、高波动或带杠杆仓位，等待信用、盈利或市场宽度改善。" };

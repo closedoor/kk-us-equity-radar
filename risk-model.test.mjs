@@ -18,11 +18,11 @@ test("unavailable indicators cannot contribute to either synergy adjustment", ()
 });
 
 test("manual data reuses the same model and zero is a valid risk", () => {
-  const indicators = [item("oil", 80), item("inflation", 80), item("fed", 80)];
+  const indicators = [item("oil", 80, 30), item("inflation", 80, 30), item("fed", 80, 30)];
   const before = computeScores(indicators);
   const after = computeScores([...indicators, item("earningsBreadth", 0)]);
   assert.equal(before.riskUplift, 7);
-  assert.equal(after.availableWeight, 40);
+  assert.equal(after.availableWeight, 100);
   assert.ok(after.score < before.score);
 });
 
@@ -35,12 +35,20 @@ test("empty data stays unavailable and all numeric outputs are finite or null", 
 });
 
 test("score and action use the same displayed rounding at alert boundaries", () => {
-  const model = computeScores([item("oil", 40.04)]);
+  const model = computeScores([item("oil", 40.04, 60)]);
   assert.equal(model.score, 40);
   assert.equal(actionFor(model.score).key, "hold");
   for (const [score, key] of [[20, "add"], [20.1, "hold"], [40.1, "caution"], [60.1, "reduce"], [75.1, "defend"]]) {
     assert.equal(actionFor(score).key, key);
   }
+});
+
+test("less than 60 percent coverage cannot produce an aggregate score or allocation prompt", () => {
+  const partial = computeScores([item("oil", 0, 59)]);
+  assert.equal(partial.baseScore, 0);
+  assert.equal(partial.score, null);
+  assert.equal(actionFor(partial.score, partial.coverage).key, "unavailable");
+  assert.equal(computeScores([item("oil", 0, 60)]).score, 0);
 });
 
 test("scores remain bounded when both adjustments are active", () => {
