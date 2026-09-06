@@ -8,6 +8,8 @@
 
 - `public/`
 - `server.mjs`
+- `calendar.mjs`
+- `calendar.test.mjs`
 - `package.json`
 - `dashboard-cache.json`
 - `README.md`
@@ -46,7 +48,7 @@ https://github.com/你的用户名/kk-us-equity-radar.git
 打开 macOS 终端，执行：
 
 ```bash
-cd "/Users/iscream/Desktop/美股"
+cd "/Users/iscream/Desktop/美股雷达"
 git init -b main
 git add .
 git status

@@ -52,7 +52,8 @@ function isoDate(year, month, day) {
 }
 
 function validIsoDate(value) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return Boolean(match && isoDate(Number(match[1]), Number(match[2]), Number(match[3])) === match[0]);
 }
 
 function uniqueSortedEvents(events) {
@@ -224,15 +225,29 @@ function nextEvent(events, now) {
 
 function estimatedQuarterDate(released, now) {
   const today = dateInTimeZone(now);
-  const base = validIsoDate(released) ? new Date(`${released}T12:00:00Z`) : new Date(now);
-  let candidate = new Date(base);
-  candidate.setUTCMonth(candidate.getUTCMonth() + 3);
-  while (candidate.toISOString().slice(0, 10) < today) candidate.setUTCMonth(candidate.getUTCMonth() + 3);
-  return candidate.toISOString().slice(0, 10);
+  const baseDate = validIsoDate(released) ? released : today;
+  const [year, month, day] = baseDate.split("-").map(Number);
+  let offset = 3;
+  while (true) {
+    const target = addMonth(year, month, offset);
+    const lastDay = new Date(Date.UTC(target.year, target.month, 0)).getUTCDate();
+    const candidate = isoDate(target.year, target.month, Math.min(day, lastDay));
+    if (candidate >= today) return candidate;
+    offset += 3;
+  }
 }
 
 function validCalendar(value) {
   return Array.isArray(value) && value.some((event) => validIsoDate(event?.date));
+}
+
+function hasUpcomingEvent(value, at) {
+  const today = dateInTimeZone(at);
+  return validCalendar(value) && value.some((event) => validIsoDate(event?.date) && event.date >= today);
+}
+
+function nasdaqSymbol(company) {
+  return company.nasdaqTicker || (company.ticker === "000660.KS" ? "SKHY" : company.ticker);
 }
 
 export function createCalendarService({ fetchText, aiEarnings, now = () => new Date(), logger = console, cacheTtlMs = 6 * 60 * 60 * 1000 }) {
@@ -245,7 +260,7 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
     earnings: {},
     updatedAt: null,
     sources: {
-      bls: { mode: "built-in", url: BLS_CPI_URL, lastSuccessAt: null, error: null },
+      bls: { mode: "built-in", url: BLS_CPI_URL, cpiUrl: BLS_CPI_URL, employmentUrl: BLS_EMPLOYMENT_URL, lastSuccessAt: null, error: null },
       fomc: { mode: "built-in", url: FOMC_URL, lastSuccessAt: null, error: null },
       earnings: { mode: "built-in", url: "https://www.nasdaq.com/market-activity/earnings", lastSuccessAt: null, error: null },
     },
@@ -267,10 +282,10 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
   async function fetchBlsCalendars() {
     try {
       const parsed = parseBlsIcs(await fetchText(BLS_ICS_URL, { accept: "text/calendar,text/plain,*/*" }));
-      if (validCalendar(parsed.cpi) && validCalendar(parsed.employment)) {
-        return { ...parsed, mode: "bls-live", url: BLS_ICS_URL };
+      if (hasUpcomingEvent(parsed.cpi, now()) && hasUpcomingEvent(parsed.employment, now())) {
+        return { ...parsed, mode: "bls-live", url: BLS_ICS_URL, cpiUrl: BLS_ICS_URL, employmentUrl: BLS_ICS_URL };
       }
-      throw new Error("BLS calendar did not contain CPI and Employment Situation dates");
+      throw new Error("BLS calendar did not contain future CPI and Employment Situation dates");
     } catch (icsError) {
       try {
         const [cpiHtml, employmentHtml] = await Promise.all([
@@ -279,10 +294,10 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
         ]);
         const cpi = parseBlsReleasePage(cpiHtml);
         const employment = parseBlsReleasePage(employmentHtml);
-        if (!validCalendar(cpi) || !validCalendar(employment)) throw new Error("BLS release pages did not contain future dates");
-        return { cpi, employment, mode: "bls-live", url: BLS_CPI_URL };
+        if (!hasUpcomingEvent(cpi, now()) || !hasUpcomingEvent(employment, now())) throw new Error("BLS release pages did not contain future dates");
+        return { cpi, employment, mode: "bls-live", url: BLS_CPI_URL, cpiUrl: BLS_CPI_URL, employmentUrl: BLS_EMPLOYMENT_URL };
       } catch (pageError) {
-        const currentYear = now().getUTCFullYear();
+        const currentYear = Number(dateInTimeZone(now()).slice(0, 4));
         const years = [currentYear, currentYear + 1];
         const [cpiPages, employmentPages] = await Promise.all([
           Promise.all(years.map((year) => fetchText(`${FRED_CPI_URL}&y=${year}`))),
@@ -290,23 +305,23 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
         ]);
         const cpi = uniqueSortedEvents(cpiPages.flatMap(parseFredReleaseCalendar));
         const employment = uniqueSortedEvents(employmentPages.flatMap(parseFredReleaseCalendar));
-        if (!validCalendar(cpi) || !validCalendar(employment)) {
+        if (!hasUpcomingEvent(cpi, now()) || !hasUpcomingEvent(employment, now())) {
           throw new Error(`BLS and FRED calendars unavailable: ${icsError.message}; ${pageError.message}`);
         }
-        return { cpi, employment, mode: "fred-fallback", url: `${FRED_CPI_URL}&y=${currentYear}` };
+        return { cpi, employment, mode: "fred-fallback", url: FRED_CPI_URL, cpiUrl: FRED_CPI_URL, employmentUrl: FRED_EMPLOYMENT_URL };
       }
     }
   }
 
   async function fetchFomcCalendar() {
     const events = parseFomcCalendar(await fetchText(FOMC_URL));
-    if (!validCalendar(events)) throw new Error("FOMC page did not contain meeting dates");
+    if (!hasUpcomingEvent(events, now())) throw new Error("FOMC page did not contain future meeting dates");
     return events;
   }
 
   async function fetchEarningsCalendar() {
     const rows = await Promise.all((aiEarnings || []).map(async (company) => {
-      const symbol = company.nasdaqTicker || (company.ticker === "000660.KS" ? "SKHY" : company.ticker);
+      const symbol = nasdaqSymbol(company);
       try {
         const url = `${NASDAQ_EARNINGS_URL}/${encodeURIComponent(symbol)}/earnings-date`;
         const payload = await fetchText(url, {
@@ -323,7 +338,7 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
   }
 
   async function runRefresh() {
-    const attemptedAt = new Date().toISOString();
+    const attemptedAt = now().toISOString();
     const [blsResult, fomcResult, earningsResult] = await Promise.allSettled([
       fetchBlsCalendars(),
       fetchFomcCalendar(),
@@ -334,7 +349,14 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
     if (blsResult.status === "fulfilled") {
       state.cpi = blsResult.value.cpi;
       state.employment = blsResult.value.employment;
-      sources.bls = { mode: blsResult.value.mode, url: blsResult.value.url, lastSuccessAt: attemptedAt, error: null };
+      sources.bls = {
+        mode: blsResult.value.mode,
+        url: blsResult.value.url,
+        cpiUrl: blsResult.value.cpiUrl,
+        employmentUrl: blsResult.value.employmentUrl,
+        lastSuccessAt: attemptedAt,
+        error: null,
+      };
     } else {
       sources.bls = { ...sources.bls, error: blsResult.reason?.message || "calendar fetch failed" };
     }
@@ -406,7 +428,7 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
           nextReportStatus: confirmed ? "confirmed" : "estimated",
           nextReportSource: confirmed
             ? company.nextReportSource
-            : `https://www.nasdaq.com/market-activity/stocks/${(company.nasdaqTicker || company.ticker).toLowerCase()}/earnings`,
+            : `https://www.nasdaq.com/market-activity/stocks/${nasdaqSymbol(company).toLowerCase()}/earnings`,
         };
       }
 
@@ -428,13 +450,19 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
     const employment = nextEvent(state.employment, at);
     const fomc = nextEvent(state.fomc, at);
     const earnings = resolvedAiEarnings(at);
-    const blsSource = state.sources.bls?.url || BLS_CPI_URL;
+    const blsMode = state.sources.bls?.mode;
+    const cpiSource = blsMode === "fred-fallback"
+      ? `${FRED_CPI_URL}${cpi?.date ? `&y=${cpi.date.slice(0, 4)}` : ""}`
+      : state.sources.bls?.cpiUrl || state.sources.bls?.url || BLS_CPI_URL;
+    const employmentSource = blsMode === "fred-fallback"
+      ? `${FRED_EMPLOYMENT_URL}${employment?.date ? `&y=${employment.date.slice(0, 4)}` : ""}`
+      : state.sources.bls?.employmentUrl || state.sources.bls?.url || BLS_EMPLOYMENT_URL;
 
     return [
       {
         indicatorId: "inflation", label: "CPI 公布", date: cpi?.date || null,
         event: cpi ? `美国 ${cpi.period} CPI / 核心 CPI，08:30 ET` : "正在等待官方发布下一期日程",
-        source: blsSource, linkLabel: "查看自动同步日程", scheduleStatus: cpi ? "confirmed" : "pending",
+        source: cpiSource, linkLabel: "查看自动同步日程", scheduleStatus: cpi ? "confirmed" : "pending",
       },
       {
         indicatorId: "fed", label: "FOMC 利率决议", date: fomc?.date || null,
@@ -444,12 +472,12 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
       {
         indicatorId: "unemployment", label: "失业率", date: employment?.date || null,
         event: employment ? `${employment.period}就业报告·失业率，08:30 ET` : "正在等待官方发布下一期日程",
-        source: blsSource, linkLabel: "查看自动同步日程", scheduleStatus: employment ? "confirmed" : "pending",
+        source: employmentSource, linkLabel: "查看自动同步日程", scheduleStatus: employment ? "confirmed" : "pending",
       },
       {
         indicatorId: "payrolls", label: "非农就业", date: employment?.date || null,
         event: employment ? `${employment.period}就业报告·非农就业，08:30 ET` : "正在等待官方发布下一期日程",
-        source: blsSource, linkLabel: "查看自动同步日程", scheduleStatus: employment ? "confirmed" : "pending",
+        source: employmentSource, linkLabel: "查看自动同步日程", scheduleStatus: employment ? "confirmed" : "pending",
       },
       {
         indicatorId: "aiEarnings", label: "八家 AI 巨头财报", date: null,

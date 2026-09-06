@@ -10,6 +10,9 @@ const dashboardCacheFile = path.join(__dirname, "dashboard-cache.json");
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";
 const CACHE_TTL_MS = 15 * 60 * 1000;
+const FORCE_REFRESH_COOLDOWN_MS = 60 * 1000;
+const MAX_STALE_CACHE_MS = 24 * 60 * 60 * 1000;
+const MIN_PARTIAL_COVERAGE = 60;
 const REQUEST_TIMEOUT_MS = 25_000;
 const SECURITY_HEADERS = {
   "content-security-policy": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'",
@@ -21,6 +24,7 @@ let dashboardCache = null;
 let dashboardCachedAt = 0;
 let lastDashboardAttemptAt = 0;
 let refreshPromise = null;
+let lastRefreshErrors = [];
 
 const weights = {
   oil: 5,
@@ -311,19 +315,39 @@ function parseFredCsv(csv) {
   if (lines.length < 2) return [];
   return lines.slice(1).map((line) => {
     const comma = line.indexOf(",");
+    if (comma <= 0) return null;
     const date = line.slice(0, comma);
     const raw = line.slice(comma + 1).trim();
-    if (!raw || raw === "." || raw.toLowerCase() === "na") return null;
+    if (!validIsoDate(date) || !raw || raw === "." || raw.toLowerCase() === "na") return null;
     const value = Number(raw);
     return Number.isFinite(value) ? { date, value } : null;
   }).filter(Boolean);
+}
+
+function isoDate(year, month, day) {
+  if (![year, month, day].every(Number.isInteger)) return null;
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+  if (candidate.getUTCFullYear() !== year || candidate.getUTCMonth() + 1 !== month || candidate.getUTCDate() !== day) return null;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function validIsoDate(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return Boolean(match && isoDate(Number(match[1]), Number(match[2]), Number(match[3])) === match[0]);
+}
+
+function parseNasdaqDate(value) {
+  const match = String(value || "").trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  return match ? isoDate(Number(match[3]), Number(match[1]), Number(match[2])) : null;
 }
 
 async function fetchFred(id) {
   const start = new Date();
   start.setUTCFullYear(start.getUTCFullYear() - 3);
   const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${encodeURIComponent(id)}&cosd=${start.toISOString().slice(0, 10)}`;
-  return parseFredCsv(await fetchText(url));
+  const series = parseFredCsv(await fetchText(url));
+  if (!series.length) throw new Error(`No usable observations for ${id}`);
+  return series;
 }
 
 async function fetchNasdaq(symbol, assetClass) {
@@ -334,11 +358,13 @@ async function fetchNasdaq(symbol, assetClass) {
   const json = await fetchJson(url);
   const rows = json?.data?.tradesTable?.rows;
   if (!Array.isArray(rows)) throw new Error(json?.status?.bCodeMessage?.[0]?.errorMessage || `No data for ${symbol}`);
-  return rows.map((row) => {
-    const [month, day, year] = String(row.date).split("/");
+  const series = rows.map((row) => {
+    const date = parseNasdaqDate(row.date);
     const value = Number(String(row.close).replace(/[$,]/g, ""));
-    return Number.isFinite(value) ? { date: `${year}-${month}-${day}`, value } : null;
-  }).filter(Boolean).reverse();
+    return date && Number.isFinite(value) ? { date, value } : null;
+  }).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date));
+  if (!series.length) throw new Error(`No usable historical rows for ${symbol}`);
+  return series;
 }
 
 async function mapLimit(items, limit, worker) {
@@ -424,7 +450,7 @@ async function buildDashboard() {
 
   const brent = getFred("DCOILBRENTEU");
   const brentLast = latest(brent);
-  const brent20 = average(brent.slice(-20).map((point) => point.value));
+  const brent20 = brent.length >= 20 ? average(brent.slice(-20).map((point) => point.value)) : null;
   const oilRisk = Number.isFinite(brent20)
     ? clamp(scale(brent20, 80, 110) * 0.75 + scale(brentLast?.value, 85, 115) * 0.25)
     : null;
@@ -550,7 +576,7 @@ async function buildDashboard() {
 
   const vix = getFred("VIXCLS");
   const vixLast = latest(vix);
-  const vix20 = average(vix.slice(-20).map((point) => point.value));
+  const vix20 = vix.length >= 20 ? average(vix.slice(-20).map((point) => point.value)) : null;
   const vixRisk = Number.isFinite(vix20)
     ? clamp(scale(vix20, 16, 32) * 0.7 + scale(vixLast?.value, 18, 38) * 0.3)
     : null;
@@ -558,11 +584,11 @@ async function buildDashboard() {
   const sp500 = getFred("SP500");
   const spLast = latest(sp500);
   const oneYear = sp500.slice(-252);
-  const high52 = oneYear.length ? Math.max(...oneYear.map((point) => point.value)) : null;
+  const high52 = oneYear.length >= 252 ? Math.max(...oneYear.map((point) => point.value)) : null;
   const drawdown = spLast && high52 ? (1 - spLast.value / high52) * 100 : null;
-  const spMa200 = average(sp500.slice(-200).map((point) => point.value));
-  const below200 = spLast && Number.isFinite(spMa200) ? spLast.value < spMa200 : false;
-  const spRisk = Number.isFinite(drawdown)
+  const spMa200 = sp500.length >= 200 ? average(sp500.slice(-200).map((point) => point.value)) : null;
+  const below200 = spLast && Number.isFinite(spMa200) ? spLast.value < spMa200 : null;
+  const spRisk = Number.isFinite(drawdown) && Number.isFinite(spMa200)
     ? clamp(
       (drawdown <= 5 ? 0.12 + scale(drawdown, 0, 5) * 0.13 : 0.25 + scale(drawdown, 5, 20) * 0.55)
       + (below200 ? 0.20 : 0),
@@ -584,8 +610,8 @@ async function buildDashboard() {
   const sahm = getFred("SAHMREALTIME");
   const claims = getFred("ICSA");
   const sahmLast = latest(sahm);
-  const claims4 = average(claims.slice(-4).map((point) => point.value));
-  const claims52Low = claims.length ? Math.min(...claims.slice(-52).map((point) => point.value)) : null;
+  const claims4 = claims.length >= 4 ? average(claims.slice(-4).map((point) => point.value)) : null;
+  const claims52Low = claims.length >= 52 ? Math.min(...claims.slice(-52).map((point) => point.value)) : null;
   const claimsRise = Number.isFinite(claims4) && Number.isFinite(claims52Low) ? pctChange(claims4, claims52Low) : null;
   const laborRisk = sahmLast && Number.isFinite(claimsRise)
     ? clamp(scale(sahmLast.value, 0.15, 0.5) * 0.7 + scale(claimsRise, 8, 30) * 0.3)
@@ -615,15 +641,21 @@ async function buildDashboard() {
   const rsp60 = pctChange(latest(rsp)?.value, rsp.at(-61)?.value);
   const relative60 = Number.isFinite(rsp60) && Number.isFinite(spy60) ? rsp60 - spy60 : null;
   const sectorSymbols = ["XLK", "XLF", "XLY", "XLC", "XLI", "XLV", "XLP", "XLE", "XLU", "XLRE", "XLB"];
-  const belowSectorCount = sectorSymbols.reduce((count, symbol) => {
+  const sectorTrends = sectorSymbols.map((symbol) => {
     const series = getMarket(symbol);
-    const now = latest(series)?.value;
-    const ma = average(series.slice(-200).map((point) => point.value));
-    return count + (Number.isFinite(now) && Number.isFinite(ma) && now < ma ? 1 : 0);
-  }, 0);
-  const breadthRisk = Number.isFinite(relative60)
-    ? clamp(scale(-relative60, 0, 8) * 0.45 + (belowSectorCount / sectorSymbols.length) * 0.55)
+    if (series.length < 200) return null;
+    const current = latest(series)?.value;
+    const ma200 = average(series.slice(-200).map((point) => point.value));
+    return Number.isFinite(current) && Number.isFinite(ma200) ? { symbol, below200: current < ma200 } : null;
+  }).filter(Boolean);
+  const availableSectorCount = sectorTrends.length;
+  const belowSectorCount = sectorTrends.filter((item) => item.below200).length;
+  const breadthRisk = Number.isFinite(relative60) && availableSectorCount >= 8
+    ? clamp(scale(-relative60, 0, 8) * 0.45 + (belowSectorCount / availableSectorCount) * 0.55)
     : null;
+  const breadthDetail = availableSectorCount >= 8
+    ? `RSP 相对 SPY 60 日表现；${availableSectorCount} 个可用行业中 ${belowSectorCount} 个低于 200 日线`
+    : `RSP 相对 SPY 60 日表现；仅 ${availableSectorCount}/11 个行业有足够历史，暂不计分`;
 
   const nfci = getFred("NFCI");
   const nfciLast = latest(nfci);
@@ -721,13 +753,13 @@ async function buildDashboard() {
     }),
     indicator({
       id: "breadth", title: "市场宽度", category: "市场确认", weight: weights.breadth, risk: breadthRisk,
-      value: Number.isFinite(relative60) ? `${relative60 >= 0 ? "+" : ""}${round(relative60, 1)}%` : "暂无数据", detail: `RSP 相对 SPY 60 日表现；11 个行业中 ${belowSectorCount} 个低于 200 日线`,
+      value: Number.isFinite(relative60) ? `${relative60 >= 0 ? "+" : ""}${round(relative60, 1)}%` : "暂无数据", detail: breadthDetail,
       date: latest(spy)?.date, description: "用等权指数、行业趋势和 200 日均线判断上涨是否只靠少数巨头。", why: "指数创新高而多数股票走弱，说明内部结构已经脆化。",
       source: { label: "Nasdaq · SPY / RSP / Sector ETFs", url: "https://www.nasdaq.com/market-activity/etf/rsp/historical" }, cadence: "交易日", confidence: "proxy", sparkline: spark(rsp, 60), methodology: "RSP 相对 SPY 落后幅度占 45%，行业跌破 200 日线比例占 55%。",
     }),
     indicator({
       id: "sp500", title: "标普 500 距历史高点跌幅", category: "市场确认", weight: weights.sp500, risk: spRisk,
-      value: Number.isFinite(drawdown) ? `-${round(drawdown, 1)}%` : "暂无数据", detail: `${spLast ? round(spLast.value, 2).toLocaleString("en-US") : "--"}；${below200 ? "低于" : "高于"} 200 日线`,
+      value: Number.isFinite(drawdown) ? `-${round(drawdown, 1)}%` : "暂无数据", detail: `${spLast ? round(spLast.value, 2).toLocaleString("en-US") : "--"}；${below200 === null ? "200 日历史不足" : below200 ? "低于 200 日线" : "高于 200 日线"}`,
       date: spLast?.date, description: "0%-5% 为正常高位，10%-15% 为明显调整，20% 以上确认技术性熊市。", why: "这是结果确认指标，因此权重低于信用、通胀和盈利。",
       source: { label: "FRED · S&P 500", url: sourceUrl("SP500") }, cadence: "交易日", confidence: "high", sparkline: spark(sp500, 60), methodology: "高位 0%-5% 先计 12%-25% 脆弱风险，5%-20% 逐步升高；跌破 200 日线额外确认。",
     }),
@@ -803,7 +835,7 @@ async function buildDashboard() {
     calendarSchedule: calendarService.snapshot(),
     calendarSync: calendarService.syncStatus(),
     methodology: {
-      version: "4.6.0",
+      version: "4.6.1",
       note: "先计算 12 项基础加权分，再用 30% 的主导风险链和最多 14 分的同向共振修正，避免油价、通胀、政策与利率同时恶化时被低风险项过度稀释。基础分与修正项均单独展示。",
       bands: [
         { min: 0, max: 20, label: "健康、风险较低" },
@@ -832,7 +864,8 @@ function sendJson(res, status, payload) {
 
 function refreshDashboard(force = false) {
   if (refreshPromise) return refreshPromise;
-  if (!force && lastDashboardAttemptAt && Date.now() - lastDashboardAttemptAt < CACHE_TTL_MS) {
+  const cooldownMs = force ? FORCE_REFRESH_COOLDOWN_MS : CACHE_TTL_MS;
+  if (lastDashboardAttemptAt && Date.now() - lastDashboardAttemptAt < cooldownMs) {
     return Promise.resolve(dashboardCache);
   }
   lastDashboardAttemptAt = Date.now();
@@ -840,7 +873,10 @@ function refreshDashboard(force = false) {
     .catch((error) => console.warn(`[calendar] refresh failed: ${error.message}`))
     .then(() => buildDashboard())
     .then((next) => {
-      if (!dashboardCache || next.errors.length === 0 || next.coverage >= dashboardCache.coverage) {
+      lastRefreshErrors = next.errors;
+      const cacheAgeMs = dashboardCachedAt ? Date.now() - dashboardCachedAt : Infinity;
+      const usablePartialRefresh = cacheAgeMs >= MAX_STALE_CACHE_MS && next.coverage >= MIN_PARTIAL_COVERAGE;
+      if (!dashboardCache || next.errors.length === 0 || next.coverage >= dashboardCache.coverage || usablePartialRefresh) {
         dashboardCache = next;
         dashboardCachedAt = Date.now();
         writeFile(dashboardCacheFile, JSON.stringify(next)).catch((error) => console.warn(`[cache] write failed: ${error.message}`));
@@ -849,6 +885,7 @@ function refreshDashboard(force = false) {
     })
     .catch((error) => {
       console.warn(`[dashboard] refresh failed: ${error.message}`);
+      lastRefreshErrors = [error.message];
       return dashboardCache;
     })
     .finally(() => { refreshPromise = null; });
@@ -874,6 +911,7 @@ const server = http.createServer(async (req, res) => {
       aiEarnings: calendarService.resolvedAiEarnings(),
       calendarSchedule: calendarService.snapshot(),
       calendarSync: calendarService.syncStatus(),
+      errors: lastRefreshErrors.length ? lastRefreshErrors : dashboardCache.errors,
       cache: !force && cacheAgeMs < CACHE_TTL_MS,
       stale: cacheAgeMs >= CACHE_TTL_MS,
       refreshing: Boolean(refreshPromise),
@@ -901,6 +939,7 @@ const server = http.createServer(async (req, res) => {
 try {
   dashboardCache = JSON.parse(await readFile(dashboardCacheFile, "utf8"));
   dashboardCachedAt = Math.min(Date.now(), Date.parse(dashboardCache.generatedAt) || 0);
+  lastRefreshErrors = Array.isArray(dashboardCache.errors) ? dashboardCache.errors : [];
   calendarService.hydrate(dashboardCache.calendarSchedule);
 } catch {
   dashboardCache = null;

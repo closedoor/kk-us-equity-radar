@@ -2,6 +2,7 @@ const state = {
   data: null,
   filter: "全部",
   overrides: loadOverrides(),
+  lastLoadedAt: 0,
 };
 
 const els = {
@@ -176,6 +177,14 @@ function formatDate(date) {
   return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(parsed);
 }
 
+function formatCacheAge(value) {
+  const milliseconds = Number(value);
+  if (!Number.isFinite(milliseconds) || milliseconds < 60_000) return "刚刚的";
+  if (milliseconds < 3_600_000) return `${Math.floor(milliseconds / 60_000)} 分钟前的`;
+  if (milliseconds < 86_400_000) return `${Math.floor(milliseconds / 3_600_000)} 小时前的`;
+  return `${Math.floor(milliseconds / 86_400_000)} 天前的`;
+}
+
 function scoreColor(score) {
   return riskMeta(score).color;
 }
@@ -209,10 +218,11 @@ function renderSummary(data) {
   els.heat.textContent = Number.isFinite(data.heatScore) ? data.heatScore.toFixed(1) : "--";
   els.recession.textContent = Number.isFinite(data.recessionScore) ? data.recessionScore.toFixed(1) : "--";
   els.uplift.textContent = Number.isFinite(data.riskUplift) ? `+${data.riskUplift.toFixed(0)}` : "--";
+  const cacheAge = formatCacheAge(data.cacheAgeMs);
   els.liveText.textContent = data.refreshing
-    ? "后台更新中 · 暂用缓存"
+    ? `后台更新中 · 暂用${cacheAge}缓存`
     : data.stale
-      ? "更新暂缓 · 最近缓存"
+      ? `更新暂缓 · 暂用${cacheAge}缓存`
       : "已连接 · 数据已更新";
   els.actionLabel.textContent = data.action?.label || "等待数据";
   els.actionDetail.textContent = data.action?.detail || "";
@@ -444,6 +454,7 @@ function loadData(force = false) {
       if (response?.status === 202) throw new Error("数据同步时间较长，请稍后再试");
       if (!response?.ok) throw new Error(payload?.detail || payload?.error || "数据请求失败");
       state.data = payload;
+      state.lastLoadedAt = Date.now();
       els.loading.hidden = true;
       els.loading.replaceChildren();
       els.error.hidden = true;
@@ -543,6 +554,15 @@ els.clearManual.addEventListener("click", () => {
   buildManualFields();
   render();
 });
+
+function refreshAfterInactivity() {
+  if (document.visibilityState !== "visible" || activeLoad) return;
+  const inactiveFor = Date.now() - state.lastLoadedAt;
+  if (!state.lastLoadedAt || state.data?.stale || inactiveFor >= 15 * 60 * 1000) loadData();
+}
+
+document.addEventListener("visibilitychange", refreshAfterInactivity);
+window.addEventListener("online", refreshAfterInactivity);
 
 loadData();
 setInterval(() => loadData(), 15 * 60 * 1000);
