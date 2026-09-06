@@ -286,3 +286,48 @@ test("uses New York year and the matching FRED calendar link across year-end", a
   assert.match(reminders[0].source, /rid=10.*y=2027/);
   assert.match(reminders[2].source, /rid=50.*y=2027/);
 });
+
+test("keeps usable next-year FRED dates when the current-year page fails", async () => {
+  const fetchText = async (url) => {
+    if (url.includes("bls.gov")) throw new Error("BLS unavailable");
+    if (url.includes("y=2026")) throw new Error("current-year page unavailable");
+    if (url.includes("rid=10")) return `<span style="font-weight: bold;">Wednesday January 13, 2027</span>`;
+    if (url.includes("rid=50")) return `<span style="font-weight: bold;">Friday January 8, 2027</span>`;
+    if (url.includes("fomccalendars")) return `<h4><a>2027 FOMC Meetings</a></h4><div class="fomc-meeting__month"><strong>January</strong></div><div class="fomc-meeting__date">26-27</div>`;
+    throw new Error(`unexpected URL ${url}`);
+  };
+  const service = createCalendarService({
+    fetchText,
+    aiEarnings: [],
+    now: () => new Date("2027-01-01T01:00:00Z"),
+  });
+
+  await service.refresh({ force: true });
+  const reminders = service.buildReminders();
+  assert.equal(reminders[0].date, "2027-01-13");
+  assert.equal(reminders[2].date, "2027-01-08");
+});
+
+test("retries failed calendar sources sooner than the normal refresh interval", async () => {
+  let current = new Date("2026-09-06T12:00:00Z");
+  let requests = 0;
+  const service = createCalendarService({
+    fetchText: async () => {
+      requests += 1;
+      throw new Error("temporary outage");
+    },
+    aiEarnings: [],
+    now: () => current,
+    cacheTtlMs: 6 * 60 * 60 * 1000,
+    failureRetryMs: 30 * 60 * 1000,
+  });
+
+  await service.refresh();
+  const firstAttemptRequests = requests;
+  current = new Date("2026-09-06T12:10:00Z");
+  await service.refresh();
+  assert.equal(requests, firstAttemptRequests);
+  current = new Date("2026-09-06T12:31:00Z");
+  await service.refresh();
+  assert.ok(requests > firstAttemptRequests);
+});

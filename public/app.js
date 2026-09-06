@@ -336,8 +336,9 @@ function renderCalendarSync(sync) {
   const sources = Object.values(sync.sources || {});
   const failed = sources.filter((source) => source?.error).length;
   const cadence = Number.isFinite(sync.refreshEveryHours) ? ` · 每 ${sync.refreshEveryHours} 小时自动核对` : "";
+  const failureRetry = Number.isFinite(sync.retryAfterFailureMinutes) ? ` · 失败后每 ${sync.retryAfterFailureMinutes} 分钟重试` : cadence;
   els.calendarSyncStatus.textContent = failed
-    ? `日程最近核对 ${formatDate(sync.updatedAt)} · ${failed} 个来源暂不可用，已保留最近成功日程${cadence}`
+    ? `日程最近核对 ${formatDate(sync.updatedAt)} · ${failed} 个来源暂不可用，已保留最近成功日程${failureRetry}`
     : `日程自动同步 · 最近核对 ${formatDate(sync.updatedAt)}${cadence}`;
 }
 
@@ -392,9 +393,16 @@ function renderIndicators(data) {
 }
 
 function renderErrors(errors = []) {
-  if (!errors.length) { els.error.hidden = true; return; }
+  if (!errors.length) {
+    els.error.hidden = true;
+    els.error.removeAttribute("title");
+    return;
+  }
+  const visibleErrors = errors.slice(0, 3);
+  const remaining = errors.length - visibleErrors.length;
   els.error.hidden = false;
-  els.error.textContent = `部分数据源暂时不可用，页面已使用可用数据计算并降低覆盖率：${errors.join("；")}`;
+  els.error.textContent = `部分数据源暂时不可用，页面已使用可用数据计算并降低覆盖率：${visibleErrors.join("；")}${remaining ? `；另有 ${remaining} 个来源` : ""}`;
+  els.error.title = errors.join("\n");
 }
 
 function render() {

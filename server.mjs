@@ -3,6 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCalendarService } from "./calendar.mjs";
+import { parseFredCsv, parseNasdaqRows, requireFreshSeries } from "./market-data.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
@@ -196,6 +197,31 @@ const fredMeta = {
   CFNAIMA3: ["芝加哥联储经济活动三个月均值", "月度"],
 };
 
+const fredMaxAgeDays = {
+  DCOILBRENTEU: 14,
+  CPIAUCSL: 75,
+  CPIAUCNS: 75,
+  CPILFESL: 75,
+  CPILFENS: 75,
+  PCEPI: 75,
+  PCEPILFE: 75,
+  DFEDTARL: 14,
+  DFEDTARU: 14,
+  DGS2: 14,
+  DGS10: 14,
+  DFII10: 14,
+  T10Y3M: 14,
+  VIXCLS: 14,
+  SP500: 14,
+  BAMLH0A0HYM2: 14,
+  DRTSCILM: 180,
+  SAHMREALTIME: 75,
+  ICSA: 21,
+  NFCI: 21,
+  UNRATE: 75,
+  PAYEMS: 75,
+};
+
 function clamp(value, min = 0, max = 1) {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
 }
@@ -310,44 +336,12 @@ async function fetchJson(url, headers) {
   return JSON.parse(text);
 }
 
-function parseFredCsv(csv) {
-  const lines = csv.trim().split(/\r?\n/);
-  if (lines.length < 2) return [];
-  return lines.slice(1).map((line) => {
-    const comma = line.indexOf(",");
-    if (comma <= 0) return null;
-    const date = line.slice(0, comma);
-    const raw = line.slice(comma + 1).trim();
-    if (!validIsoDate(date) || !raw || raw === "." || raw.toLowerCase() === "na") return null;
-    const value = Number(raw);
-    return Number.isFinite(value) ? { date, value } : null;
-  }).filter(Boolean);
-}
-
-function isoDate(year, month, day) {
-  if (![year, month, day].every(Number.isInteger)) return null;
-  const candidate = new Date(Date.UTC(year, month - 1, day));
-  if (candidate.getUTCFullYear() !== year || candidate.getUTCMonth() + 1 !== month || candidate.getUTCDate() !== day) return null;
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
-function validIsoDate(value) {
-  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  return Boolean(match && isoDate(Number(match[1]), Number(match[2]), Number(match[3])) === match[0]);
-}
-
-function parseNasdaqDate(value) {
-  const match = String(value || "").trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  return match ? isoDate(Number(match[3]), Number(match[1]), Number(match[2])) : null;
-}
-
 async function fetchFred(id) {
   const start = new Date();
   start.setUTCFullYear(start.getUTCFullYear() - 3);
   const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${encodeURIComponent(id)}&cosd=${start.toISOString().slice(0, 10)}`;
   const series = parseFredCsv(await fetchText(url));
-  if (!series.length) throw new Error(`No usable observations for ${id}`);
-  return series;
+  return requireFreshSeries(series, { name: fredMeta[id]?.[0] || id, maxAgeDays: fredMaxAgeDays[id] || 120 });
 }
 
 async function fetchNasdaq(symbol, assetClass) {
@@ -358,13 +352,8 @@ async function fetchNasdaq(symbol, assetClass) {
   const json = await fetchJson(url);
   const rows = json?.data?.tradesTable?.rows;
   if (!Array.isArray(rows)) throw new Error(json?.status?.bCodeMessage?.[0]?.errorMessage || `No data for ${symbol}`);
-  const series = rows.map((row) => {
-    const date = parseNasdaqDate(row.date);
-    const value = Number(String(row.close).replace(/[$,]/g, ""));
-    return date && Number.isFinite(value) ? { date, value } : null;
-  }).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date));
-  if (!series.length) throw new Error(`No usable historical rows for ${symbol}`);
-  return series;
+  const series = parseNasdaqRows(rows);
+  return requireFreshSeries(series, { name: symbol, maxAgeDays: 14 });
 }
 
 async function mapLimit(items, limit, worker) {
@@ -835,7 +824,7 @@ async function buildDashboard() {
     calendarSchedule: calendarService.snapshot(),
     calendarSync: calendarService.syncStatus(),
     methodology: {
-      version: "4.6.1",
+      version: "4.6.2",
       note: "先计算 12 项基础加权分，再用 30% 的主导风险链和最多 14 分的同向共振修正，避免油价、通胀、政策与利率同时恶化时被低风险项过度稀释。基础分与修正项均单独展示。",
       bands: [
         { min: 0, max: 20, label: "健康、风险较低" },

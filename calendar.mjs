@@ -250,7 +250,14 @@ function nasdaqSymbol(company) {
   return company.nasdaqTicker || (company.ticker === "000660.KS" ? "SKHY" : company.ticker);
 }
 
-export function createCalendarService({ fetchText, aiEarnings, now = () => new Date(), logger = console, cacheTtlMs = 6 * 60 * 60 * 1000 }) {
+export function createCalendarService({
+  fetchText,
+  aiEarnings,
+  now = () => new Date(),
+  logger = console,
+  cacheTtlMs = 6 * 60 * 60 * 1000,
+  failureRetryMs = 30 * 60 * 1000,
+}) {
   let lastAttemptAt = 0;
   let refreshPromise = null;
   let state = {
@@ -299,10 +306,13 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
       } catch (pageError) {
         const currentYear = Number(dateInTimeZone(now()).slice(0, 4));
         const years = [currentYear, currentYear + 1];
-        const [cpiPages, employmentPages] = await Promise.all([
-          Promise.all(years.map((year) => fetchText(`${FRED_CPI_URL}&y=${year}`))),
-          Promise.all(years.map((year) => fetchText(`${FRED_EMPLOYMENT_URL}&y=${year}`))),
+        const [cpiResults, employmentResults] = await Promise.all([
+          Promise.allSettled(years.map((year) => fetchText(`${FRED_CPI_URL}&y=${year}`))),
+          Promise.allSettled(years.map((year) => fetchText(`${FRED_EMPLOYMENT_URL}&y=${year}`))),
         ]);
+        const usablePages = (results) => results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+        const cpiPages = usablePages(cpiResults);
+        const employmentPages = usablePages(employmentResults);
         const cpi = uniqueSortedEvents(cpiPages.flatMap(parseFredReleaseCalendar));
         const employment = uniqueSortedEvents(employmentPages.flatMap(parseFredReleaseCalendar));
         if (!hasUpcomingEvent(cpi, now()) || !hasUpcomingEvent(employment, now())) {
@@ -384,8 +394,11 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
 
   function refresh({ force = false } = {}) {
     if (refreshPromise) return refreshPromise;
-    if (!force && lastAttemptAt && Date.now() - lastAttemptAt < cacheTtlMs) return Promise.resolve(snapshot());
-    lastAttemptAt = Date.now();
+    const timestamp = now().getTime();
+    const hasErrors = Object.values(state.sources).some((source) => source?.error);
+    const refreshAfterMs = hasErrors ? Math.min(cacheTtlMs, failureRetryMs) : cacheTtlMs;
+    if (!force && lastAttemptAt && timestamp - lastAttemptAt < refreshAfterMs) return Promise.resolve(snapshot());
+    lastAttemptAt = timestamp;
     refreshPromise = runRefresh().finally(() => { refreshPromise = null; });
     return refreshPromise;
   }
@@ -503,6 +516,7 @@ export function createCalendarService({ fetchText, aiEarnings, now = () => new D
     return {
       updatedAt: state.updatedAt,
       refreshEveryHours: cacheTtlMs / 3_600_000,
+      retryAfterFailureMinutes: failureRetryMs / 60_000,
       sources: state.sources,
     };
   }

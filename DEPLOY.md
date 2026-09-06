@@ -10,6 +10,8 @@
 - `server.mjs`
 - `calendar.mjs`
 - `calendar.test.mjs`
+- `market-data.mjs`
+- `market-data.test.mjs`
 - `package.json`
 - `dashboard-cache.json`
 - `README.md`
