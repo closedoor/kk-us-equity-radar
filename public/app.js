@@ -1,8 +1,16 @@
+import { computeScores, actionFor } from "./risk-model.js";
+
+const manualConfig = [
+  { id: "aiEarnings", label: "AI 产业链财报风险", help: "当云资本开支、芯片指引或库存出现新变化时，可调整风险值。" },
+  { id: "earningsBreadth", label: "标普盈利下调广度", help: "用未来 12 个月 EPS 修正广度补充盈利风险判断。" },
+];
+
 const state = {
   data: null,
   filter: "全部",
   overrides: loadOverrides(),
   lastLoadedAt: 0,
+  loadError: null,
 };
 
 const els = {
@@ -43,15 +51,20 @@ const els = {
   calendarSyncStatus: document.querySelector("#calendarSyncStatus"),
 };
 
-const manualConfig = [
-  { id: "aiEarnings", label: "AI 产业链财报风险", help: "当云资本开支、芯片指引或库存出现新变化时，可调整风险值。" },
-  { id: "earningsBreadth", label: "标普盈利下调广度", help: "用未来 12 个月 EPS 修正广度替换企业利润周期代理。" },
-];
-
 function loadOverrides() {
   try {
     const parsed = JSON.parse(localStorage.getItem("bearRadarOverrides") || "{}");
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(manualConfig.flatMap(({ id }) => {
+      const entry = parsed[id];
+      if (!entry || !Number.isFinite(entry.risk) || entry.risk < 0 || entry.risk > 100) return [];
+      const timestamp = typeof entry.updatedAt === "string" ? Date.parse(entry.updatedAt) : NaN;
+      return [[id, {
+        risk: entry.risk,
+        note: typeof entry.note === "string" ? entry.note.slice(0, 80) : "",
+        updatedAt: Number.isFinite(timestamp) && timestamp <= Date.now() ? new Date(timestamp).toISOString() : null,
+      }]];
+    }));
   }
   catch { return {}; }
 }
@@ -88,79 +101,25 @@ function riskMeta(score) {
   return { label: "健康、风险较低", color: "#4b9b67", description: "目前没有看到多条风险链同步恶化，但低分不代表短期不会回调。" };
 }
 
-function computeScores(indicators) {
-  const available = indicators.filter((item) => item.available && Number.isFinite(item.points));
-  const availableWeight = available.reduce((sum, item) => sum + item.weight, 0);
-  const rawPoints = available.reduce((sum, item) => sum + item.points, 0);
-  const baseScore = availableWeight ? (rawPoints / availableWeight) * 100 : null;
-  const confirmationIds = new Set(["vix", "sp500", "credit", "breadth", "earningsBreadth"]);
-  const confirmationItems = available.filter((item) => confirmationIds.has(item.id));
-  const confirmationWeight = confirmationItems.reduce((sum, item) => sum + item.weight, 0);
-  const confirmationPoints = confirmationItems.reduce((sum, item) => sum + item.points, 0);
-  const subset = (ids) => {
-    const items = available.filter((item) => ids.includes(item.id));
-    const weight = items.reduce((sum, item) => sum + item.weight, 0);
-    return weight ? (items.reduce((sum, item) => sum + item.points, 0) / weight) * 100 : null;
-  };
-  const stagflationScore = subset(["oil", "inflation", "fed", "rates"]);
-  const recessionScore = subset(["unemployment", "payrolls", "credit", "earningsBreadth"]);
-  const marketBreakScore = subset(["vix", "breadth", "sp500"]);
-  const regimeScores = [stagflationScore, recessionScore, marketBreakScore].filter(Number.isFinite);
-  const dominantRegimeScore = regimeScores.length ? Math.max(...regimeScores) : null;
-  const stagflationHighCount = indicators.filter((item) => ["oil", "inflation", "fed", "rates"].includes(item.id) && Number(item.risk) >= 60).length;
-  const macroSynergyUplift = stagflationHighCount >= 4 ? 10 : stagflationHighCount >= 3 ? 7 : 0;
-  const breadthRisk = indicators.find((item) => item.id === "breadth")?.risk;
-  const spRisk = indicators.find((item) => item.id === "sp500")?.risk;
-  const fragileHighUplift = Number(spRisk) >= 12 && Number(spRisk) <= 25 && Number(breadthRisk) >= 20 ? 4 : 0;
-  const riskUplift = macroSynergyUplift + fragileHighUplift;
-  const score = Number.isFinite(baseScore)
-    ? Number.isFinite(dominantRegimeScore)
-      ? clamp(baseScore * 0.70 + dominantRegimeScore * 0.30 + riskUplift)
-      : baseScore
-    : null;
-  return {
-    available,
-    availableWeight,
-    rawPoints,
-    baseScore,
-    score,
-    stagflationScore,
-    recessionScore,
-    marketBreakScore,
-    dominantRegimeScore,
-    riskUplift,
-    confirmationScore: confirmationWeight ? (confirmationPoints / confirmationWeight) * 100 : null,
-  };
-}
-
-function actionFor(score) {
-  if (!Number.isFinite(score)) return { key: "unavailable", label: "数据不足：暂不提供仓位动作", detail: "等待至少一项有效数据后再判断风险，不把缺失数据误判为低风险。" };
-  if (score <= 20) return { key: "add", label: "风险较低：可考虑分批增加风险敞口", detail: "适合按既定资产配置逐步投入，不代表短期不会回调。" };
-  if (score <= 40) return { key: "hold", label: "正常波动：以持有和再平衡为主", detail: "不追涨，也不因单项噪声急于减仓，等待风险是否跨指标扩散。" };
-  if (score <= 60) return { key: "caution", label: "黄色警戒：保持仓位，暂停加仓", detail: "当前不支持全面卖出；保留现金，优先降低高估值、高波动或带杠杆仓位，等待信用、盈利或市场宽度改善。" };
-  if (score <= 75) return { key: "reduce", label: "橙色警报：考虑降低高波动仓位", detail: "风险链已明显共振，重点控制回撤、杠杆与流动性。" };
-  return { key: "defend", label: "红色警报：优先防守与控制回撤", detail: "系统性风险较高，应优先处理杠杆和流动性暴露。" };
-}
-
 function applyOverrides(data) {
   const indicators = data.indicators.map((item) => {
     const override = state.overrides[item.id];
-    if (!override || !Number.isFinite(Number(override.risk))) return { ...item };
-    const risk = clamp(Number(override.risk));
+    if (!override || !Number.isFinite(override.risk)) return { ...item };
+    const risk = clamp(override.risk);
     return {
       ...item,
       risk,
       points: Math.round((risk / 100) * item.weight * 100) / 100,
       value: `${risk}/100`,
-      detail: override.note || "人工风险判断",
-      date: dateInTimeZone(),
+      detail: `${override.note || "人工风险判断"}${override.updatedAt ? " · 录入于" : " · 录入日期未记录"}`,
+      date: override.updatedAt ? dateInTimeZone(new Date(override.updatedAt)) : null,
       status: risk >= 80 ? "critical" : risk >= 55 ? "high" : risk >= 30 ? "watch" : "low",
       confidence: "manual",
       available: true,
       overridden: true,
     };
   });
-  const model = computeScores(indicators);
+  const model = computeScores(indicators, data.scoringContext);
   const categories = data.categories.map((category) => {
     const items = model.available.filter((item) => item.category === category.name);
     const weight = items.reduce((sum, item) => sum + item.weight, 0);
@@ -204,6 +163,8 @@ function renderSummary(data) {
   els.scoreGauge?.setAttribute("aria-label", score === null ? "综合市场风险分暂不可用" : `综合市场风险分 ${score.toFixed(1)} 分`);
   els.verdict.textContent = meta.label;
   const stagflationDominant = Number.isFinite(data.stagflationScore)
+    && data.stagflationScore > 40
+    && Number.isFinite(data.recessionScore) && data.recessionScore <= 40
     && Number.isFinite(data.dominantRegimeScore)
     && Math.abs(data.stagflationScore - data.dominantRegimeScore) < 0.05;
   els.verdictDescription.textContent = score !== null && stagflationDominant
@@ -219,7 +180,7 @@ function renderSummary(data) {
   els.recession.textContent = Number.isFinite(data.recessionScore) ? data.recessionScore.toFixed(1) : "--";
   els.uplift.textContent = Number.isFinite(data.riskUplift) ? `+${data.riskUplift.toFixed(0)}` : "--";
   const cacheAge = formatCacheAge(data.cacheAgeMs);
-  els.liveText.textContent = data.refreshing
+  els.liveText.textContent = state.loadError ? "连接失败" : data.refreshing
     ? `后台更新中 · 暂用${cacheAge}缓存`
     : data.stale
       ? `更新暂缓 · 暂用${cacheAge}缓存`
@@ -393,6 +354,12 @@ function renderIndicators(data) {
 }
 
 function renderErrors(errors = []) {
+  if (state.loadError) {
+    els.error.hidden = false;
+    els.error.removeAttribute("title");
+    els.error.textContent = `无法更新数据：${state.loadError}。${state.data ? "已保留上次显示的数据，" : ""}请稍后重试。`;
+    return;
+  }
   if (!errors.length) {
     els.error.hidden = true;
     els.error.removeAttribute("title");
@@ -401,7 +368,7 @@ function renderErrors(errors = []) {
   const visibleErrors = errors.slice(0, 3);
   const remaining = errors.length - visibleErrors.length;
   els.error.hidden = false;
-  els.error.textContent = `部分数据源暂时不可用，页面已使用可用数据计算并降低覆盖率：${visibleErrors.join("；")}${remaining ? `；另有 ${remaining} 个来源` : ""}`;
+  els.error.textContent = `部分数据源暂时不可用，当前显示的数据可能不完整或来自缓存：${visibleErrors.join("；")}${remaining ? `；另有 ${remaining} 个来源` : ""}`;
   els.error.title = errors.join("\n");
 }
 
@@ -451,6 +418,7 @@ function loadData(force = false) {
         }
         if (response.ok && payload.refreshing && !force && attempt < 11) {
           state.data = payload;
+          state.loadError = null;
           els.loading.hidden = true;
           els.loading.replaceChildren();
           render();
@@ -462,17 +430,18 @@ function loadData(force = false) {
       if (response?.status === 202) throw new Error("数据同步时间较长，请稍后再试");
       if (!response?.ok) throw new Error(payload?.detail || payload?.error || "数据请求失败");
       state.data = payload;
+      state.loadError = null;
       state.lastLoadedAt = Date.now();
       els.loading.hidden = true;
       els.loading.replaceChildren();
       els.error.hidden = true;
       render();
     } catch (error) {
+      state.loadError = error.message;
       els.liveText.textContent = "连接失败";
       els.loading.hidden = true;
       els.loading.replaceChildren();
-      els.error.hidden = false;
-      els.error.textContent = `无法更新数据：${error.message}。请稍后重试。`;
+      renderErrors();
     } finally {
       els.refresh.classList.remove("loading");
       els.refresh.disabled = false;
@@ -545,7 +514,13 @@ els.manualForm.addEventListener("submit", (event) => {
     const riskText = field.querySelector(".manual-risk").value.trim();
     const note = field.querySelector(".manual-note").value.trim();
     if (riskText === "") delete next[field.dataset.id];
-    else if (Number.isFinite(Number(riskText))) next[field.dataset.id] = { risk: clamp(Number(riskText)), note };
+    else if (Number.isFinite(Number(riskText))) {
+      const risk = clamp(Number(riskText));
+      const previous = state.overrides[field.dataset.id];
+      next[field.dataset.id] = previous?.risk === risk && previous?.note === note
+        ? previous
+        : { risk, note, updatedAt: new Date().toISOString() };
+    }
   });
   state.overrides = next;
   const saved = saveOverrides();
@@ -566,7 +541,7 @@ els.clearManual.addEventListener("click", () => {
 function refreshAfterInactivity() {
   if (document.visibilityState !== "visible" || activeLoad) return;
   const inactiveFor = Date.now() - state.lastLoadedAt;
-  if (!state.lastLoadedAt || state.data?.stale || inactiveFor >= 15 * 60 * 1000) loadData();
+  if (!state.lastLoadedAt || state.loadError || state.data?.stale || inactiveFor >= 15 * 60 * 1000) loadData();
 }
 
 document.addEventListener("visibilitychange", refreshAfterInactivity);

@@ -3,7 +3,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCalendarService } from "./calendar.mjs";
-import { parseFredCsv, parseNasdaqRows, requireFreshSeries } from "./market-data.mjs";
+import { parseFredCsv, parseNasdaqRows, requireFreshSeries, monthlyPercentChange, monthlyAnnualizedChange, monthlyDifference, nearestPrior } from "./market-data.mjs";
+import { computeScores, actionFor } from "./public/risk-model.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
@@ -247,30 +248,6 @@ function pctChange(current, previous) {
     : null;
 }
 
-function annualizedChange(current, previous, months) {
-  return Number.isFinite(current) && Number.isFinite(previous) && previous > 0
-    ? ((current / previous) ** (12 / months) - 1) * 100
-    : null;
-}
-
-function monthsBefore(point, months) {
-  if (!point?.date) return null;
-  const date = new Date(`${point.date}T00:00:00Z`);
-  date.setUTCMonth(date.getUTCMonth() - months);
-  return date.toISOString().slice(0, 7);
-}
-
-function yearOverYear(series, offset = 0) {
-  const current = series?.at(-1 - offset);
-  const previousMonth = monthsBefore(current, 12);
-  const previous = series?.find((point) => point.date.startsWith(previousMonth));
-  return pctChange(current?.value, previous?.value);
-}
-
-function monthOverMonth(series) {
-  return pctChange(series?.at(-1)?.value, series?.at(-2)?.value);
-}
-
 function monthLabel(point) {
   if (!point?.date) return "数据期未知";
   const [year, month] = point.date.split("-");
@@ -284,17 +261,6 @@ function signedPercent(value, digits = 1) {
 
 function latest(series) {
   return series?.at(-1) || null;
-}
-
-function nearestPrior(series, daysAgo) {
-  if (!series?.length) return null;
-  const target = Date.parse(series.at(-1).date) - daysAgo * 86_400_000;
-  let best = series[0];
-  for (const point of series) {
-    if (Date.parse(point.date) <= target) best = point;
-    else break;
-  }
-  return best;
 }
 
 function statusFor(risk) {
@@ -450,19 +416,19 @@ async function buildDashboard() {
   const coreCpiNsa = getFred("CPILFENS");
   const headlinePce = getFred("PCEPI");
   const corePce = getFred("PCEPILFE");
-  const headlineCpiYoy = yearOverYear(headlineCpiNsa);
-  const priorHeadlineCpiYoy = yearOverYear(headlineCpiNsa, 1);
-  const headlineCpiMom = monthOverMonth(headlineCpi);
-  const coreCpiYoy = yearOverYear(coreCpiNsa);
-  const priorCoreCpiYoy = yearOverYear(coreCpiNsa, 1);
-  const coreCpiMom = monthOverMonth(coreCpi);
-  const headlinePceYoy = yearOverYear(headlinePce);
-  const headlinePceMom = monthOverMonth(headlinePce);
-  const corePceYoy = yearOverYear(corePce);
-  const corePceMom = monthOverMonth(corePce);
-  const headlineCpi3m = headlineCpi.length >= 4 ? annualizedChange(headlineCpi.at(-1).value, headlineCpi.at(-4).value, 3) : null;
-  const coreCpi3m = coreCpi.length >= 4 ? annualizedChange(coreCpi.at(-1).value, coreCpi.at(-4).value, 3) : null;
-  const pce3m = corePce.length >= 4 ? annualizedChange(corePce.at(-1).value, corePce.at(-4).value, 3) : null;
+  const headlineCpiYoy = monthlyPercentChange(headlineCpiNsa, 12);
+  const priorHeadlineCpiYoy = monthlyPercentChange(headlineCpiNsa, 12, 1);
+  const headlineCpiMom = monthlyPercentChange(headlineCpi);
+  const coreCpiYoy = monthlyPercentChange(coreCpiNsa, 12);
+  const priorCoreCpiYoy = monthlyPercentChange(coreCpiNsa, 12, 1);
+  const coreCpiMom = monthlyPercentChange(coreCpi);
+  const headlinePceYoy = monthlyPercentChange(headlinePce, 12);
+  const headlinePceMom = monthlyPercentChange(headlinePce);
+  const corePceYoy = monthlyPercentChange(corePce, 12);
+  const corePceMom = monthlyPercentChange(corePce);
+  const headlineCpi3m = monthlyAnnualizedChange(headlineCpi, 3);
+  const coreCpi3m = monthlyAnnualizedChange(coreCpi, 3);
+  const pce3m = monthlyAnnualizedChange(corePce, 3);
   const inflationRisk = [headlineCpi3m, headlineCpiYoy, pce3m, coreCpi3m].every(Number.isFinite)
     ? clamp(
       scale(headlineCpi3m, 2.5, 7.0) * 0.35
@@ -503,13 +469,14 @@ async function buildDashboard() {
 
   const unemployment = getFred("UNRATE");
   const unemploymentLast = latest(unemployment);
-  const unemployment3mChange = unemployment.length >= 4 ? unemploymentLast.value - unemployment.at(-4).value : null;
-  const unemployment12mChange = unemployment.length >= 13 ? unemploymentLast.value - unemployment.at(-13).value : null;
+  const unemployment3mChange = monthlyDifference(unemployment, 3);
   const payrolls = getFred("PAYEMS");
   const payrollLast = latest(payrolls);
-  const payroll3mAvg = payrolls.length >= 4 ? (payrollLast.value - payrolls.at(-4).value) / 3 : null;
-  const payroll6mAvg = payrolls.length >= 7 ? (payrollLast.value - payrolls.at(-7).value) / 6 : null;
-  const payrollLatestChange = payrolls.length >= 2 ? payrollLast.value - payrolls.at(-2).value : null;
+  const payroll3mChange = monthlyDifference(payrolls, 3);
+  const payroll6mChange = monthlyDifference(payrolls, 6);
+  const payroll3mAvg = Number.isFinite(payroll3mChange) ? payroll3mChange / 3 : null;
+  const payroll6mAvg = Number.isFinite(payroll6mChange) ? payroll6mChange / 6 : null;
+  const payrollLatestChange = monthlyDifference(payrolls);
   const unemploymentHeat = unemploymentLast ? scale(5.0 - unemploymentLast.value, 0, 1.0) : null;
   const payrollHeat = Number.isFinite(payroll3mAvg) ? scale(payroll3mAvg, 75, 225) : null;
   const laborHeat = Number.isFinite(unemploymentHeat) && Number.isFinite(payrollHeat) ? average([unemploymentHeat, payrollHeat]) : null;
@@ -588,7 +555,7 @@ async function buildDashboard() {
   const creditLast = latest(credit);
   const creditPrior = nearestPrior(credit, 90);
   const creditMove = creditLast && creditPrior ? creditLast.value - creditPrior.value : null;
-  const creditRisk = creditLast
+  const creditRisk = creditLast && Number.isFinite(creditMove)
     ? clamp(scale(creditLast.value, 3.0, 6.0) * 0.8 + scale(creditMove, 0.25, 2.0) * 0.2)
     : null;
 
@@ -747,22 +714,15 @@ async function buildDashboard() {
       source: { label: "Nasdaq · SPY / RSP / Sector ETFs", url: "https://www.nasdaq.com/market-activity/etf/rsp/historical" }, cadence: "交易日", confidence: "proxy", sparkline: spark(rsp, 60), methodology: "RSP 相对 SPY 落后幅度占 45%，行业跌破 200 日线比例占 55%。",
     }),
     indicator({
-      id: "sp500", title: "标普 500 距历史高点跌幅", category: "市场确认", weight: weights.sp500, risk: spRisk,
+      id: "sp500", title: "标普 500 距 52 周高点跌幅", category: "市场确认", weight: weights.sp500, risk: spRisk,
       value: Number.isFinite(drawdown) ? `-${round(drawdown, 1)}%` : "暂无数据", detail: `${spLast ? round(spLast.value, 2).toLocaleString("en-US") : "--"}；${below200 === null ? "200 日历史不足" : below200 ? "低于 200 日线" : "高于 200 日线"}`,
       date: spLast?.date, description: "0%-5% 为正常高位，10%-15% 为明显调整，20% 以上确认技术性熊市。", why: "这是结果确认指标，因此权重低于信用、通胀和盈利。",
       source: { label: "FRED · S&P 500", url: sourceUrl("SP500") }, cadence: "交易日", confidence: "high", sparkline: spark(sp500, 60), methodology: "高位 0%-5% 先计 12%-25% 脆弱风险，5%-20% 逐步升高；跌破 200 日线额外确认。",
     }),
   ];
 
-  const available = indicators.filter((item) => item.available);
-  const rawPoints = available.reduce((sum, item) => sum + item.points, 0);
-  const availableWeight = available.reduce((sum, item) => sum + item.weight, 0);
-  const baseScore = availableWeight ? (rawPoints / availableWeight) * 100 : null;
-  const confirmationIds = new Set(["vix", "sp500", "credit", "breadth", "earningsBreadth"]);
-  const confirmationItems = available.filter((item) => confirmationIds.has(item.id));
-  const confirmationWeight = confirmationItems.reduce((sum, item) => sum + item.weight, 0);
-  const confirmationPoints = confirmationItems.reduce((sum, item) => sum + item.points, 0);
-  const confirmationScore = confirmationWeight ? (confirmationPoints / confirmationWeight) * 100 : null;
+  const scoringContext = { drawdownPercent: drawdown, breadthRiskPercent: Number.isFinite(breadthRisk) ? breadthRisk * 100 : null };
+  const { available, ...model } = computeScores(indicators, scoringContext);
   const categories = ["通胀与政策", "信用", "盈利与AI", "就业与经济", "市场确认"].map((name) => {
     const items = available.filter((item) => item.category === name);
     const weight = items.reduce((sum, item) => sum + item.weight, 0);
@@ -770,52 +730,11 @@ async function buildDashboard() {
     return { name, score: weight ? round((points / weight) * 100, 1) : null, weight };
   });
 
-  const scoreByIds = (ids) => {
-    const selected = available.filter((item) => ids.includes(item.id));
-    const selectedWeight = selected.reduce((sum, item) => sum + item.weight, 0);
-    const selectedPoints = selected.reduce((sum, item) => sum + item.points, 0);
-    return selectedWeight ? round((selectedPoints / selectedWeight) * 100, 1) : null;
-  };
-  const stagflationScore = scoreByIds(["oil", "inflation", "fed", "rates"]);
-  const recessionScore = scoreByIds(["unemployment", "payrolls", "credit", "earningsBreadth"]);
-  const marketBreakScore = scoreByIds(["vix", "breadth", "sp500"]);
-  const dominantRegimeScore = Math.max(...[stagflationScore, recessionScore, marketBreakScore].filter(Number.isFinite));
-  const stagflationHighCount = ["oil", "inflation", "fed", "rates"]
-    .map((id) => available.find((item) => item.id === id)?.risk)
-    .filter((risk) => Number.isFinite(risk) && risk >= 60).length;
-  const macroSynergyUplift = stagflationHighCount >= 4 ? 10 : stagflationHighCount >= 3 ? 7 : 0;
-  const fragileHighUplift = Number.isFinite(drawdown) && drawdown < 5 && Number.isFinite(breadthRisk) && breadthRisk >= 0.20 ? 4 : 0;
-  const riskUplift = macroSynergyUplift + fragileHighUplift;
-  const score = Number.isFinite(baseScore) && Number.isFinite(dominantRegimeScore)
-    ? clamp((baseScore * 0.70 + dominantRegimeScore * 0.30 + riskUplift) / 100) * 100
-    : baseScore;
-  const action = !Number.isFinite(score)
-    ? { key: "unavailable", label: "数据不足：暂不提供仓位动作", detail: "等待至少一项有效数据后再判断风险，不把缺失数据误判为低风险。" }
-    : score <= 20
-    ? { key: "add", label: "风险较低：可考虑分批增加风险敞口", detail: "适合按既定资产配置逐步投入，不代表短期不会回调。" }
-    : score <= 40
-      ? { key: "hold", label: "正常波动：以持有和再平衡为主", detail: "不追涨，也不因单项噪声急于减仓，等待风险是否跨指标扩散。" }
-      : score <= 60
-        ? { key: "caution", label: "黄色警戒：保持仓位，暂停加仓", detail: "当前不支持全面卖出；保留现金，优先降低高估值、高波动或带杠杆仓位，等待信用、盈利或市场宽度改善。" }
-        : score <= 75
-          ? { key: "reduce", label: "橙色警报：考虑降低高波动仓位", detail: "风险链已明显共振，重点控制回撤、杠杆与流动性。" }
-          : { key: "defend", label: "红色警报：优先防守与控制回撤", detail: "系统性风险较高，应优先处理杠杆和流动性暴露。" };
-
   return {
     generatedAt: new Date().toISOString(),
-    score: round(score, 1),
-    baseScore: round(baseScore, 1),
-    confirmationScore: round(confirmationScore, 1),
-    heatScore: stagflationScore,
-    stagflationScore,
-    recessionScore,
-    marketBreakScore,
-    dominantRegimeScore: round(dominantRegimeScore, 1),
-    riskUplift,
-    action,
-    rawPoints: round(rawPoints, 2),
-    availableWeight,
-    coverage: availableWeight,
+    ...model,
+    scoringContext,
+    action: actionFor(model.score),
     categories,
     indicators,
     aiEarnings: currentAiEarnings,
@@ -824,7 +743,7 @@ async function buildDashboard() {
     calendarSchedule: calendarService.snapshot(),
     calendarSync: calendarService.syncStatus(),
     methodology: {
-      version: "4.6.2",
+      version: "4.6.3",
       note: "先计算 12 项基础加权分，再用 30% 的主导风险链和最多 14 分的同向共振修正，避免油价、通胀、政策与利率同时恶化时被低风险项过度稀释。基础分与修正项均单独展示。",
       bands: [
         { min: 0, max: 20, label: "健康、风险较低" },

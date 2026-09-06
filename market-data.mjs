@@ -36,7 +36,7 @@ export function parseNasdaqRows(rows) {
   return rows.map((row) => {
     const date = parseNasdaqDate(row?.date);
     const value = Number(String(row?.close).replace(/[$,]/g, ""));
-    return date && Number.isFinite(value) ? { date, value } : null;
+    return date && Number.isFinite(value) && value > 0 ? { date, value } : null;
   }).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date));
 }
 
@@ -49,4 +49,43 @@ export function requireFreshSeries(series, { name, maxAgeDays, now = new Date() 
   if (ageDays < -1) throw new Error(`${name} 返回了未来日期 ${latestDate}`);
   if (ageDays > maxAgeDays) throw new Error(`${name} 最新数据停留在 ${latestDate}（${ageDays} 天前）`);
   return series;
+}
+
+function monthlyPoint(series, monthsAgo) {
+  const latest = series?.at(-1);
+  if (!validIsoDate(latest?.date) || !Number.isInteger(monthsAgo) || monthsAgo < 0) return null;
+  const [year, month] = latest.date.split("-").map(Number);
+  // Anchor to the first day so month-end dates cannot overflow into another month.
+  const target = new Date(Date.UTC(year, month - 1 - monthsAgo, 1)).toISOString().slice(0, 7);
+  return series.find((point) => point.date.slice(0, 7) === target && Number.isFinite(point.value)) || null;
+}
+
+export function monthlyPercentChange(series, months = 1, offset = 0) {
+  const current = monthlyPoint(series, offset);
+  const previous = monthlyPoint(series, months + offset);
+  return current && previous && previous.value > 0
+    ? (current.value / previous.value - 1) * 100
+    : null;
+}
+
+export function monthlyAnnualizedChange(series, months) {
+  const change = monthlyPercentChange(series, months);
+  return Number.isFinite(change) && months > 0 ? ((1 + change / 100) ** (12 / months) - 1) * 100 : null;
+}
+
+export function monthlyDifference(series, months = 1) {
+  const current = monthlyPoint(series, 0);
+  const previous = monthlyPoint(series, months);
+  return current && previous ? current.value - previous.value : null;
+}
+
+export function nearestPrior(series, daysAgo) {
+  if (!series?.length) return null;
+  const target = Date.parse(series.at(-1).date) - daysAgo * DAY_MS;
+  let best = null;
+  for (const point of series) {
+    if (Date.parse(point.date) <= target) best = point;
+    else break;
+  }
+  return best;
 }
