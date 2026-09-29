@@ -764,11 +764,22 @@ function refreshDashboard(force = false) {
   return refreshPromise;
 }
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+async function handleRequest(req, res) {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    req.resume();
+    res.setHeader("allow", "GET, HEAD");
+    return sendJson(res, 405, { error: "Method not allowed" });
+  }
+  let url;
+  try {
+    // Routing never needs the client-provided Host header.
+    url = new URL(req.url, "http://localhost");
+  } catch {
+    return sendJson(res, 400, { error: "Invalid request URL" });
+  }
 
   if (url.pathname === "/api/dashboard") {
-    const force = url.searchParams.get("refresh") === "1";
+    const force = req.method === "GET" && url.searchParams.get("refresh") === "1";
     if (!dashboardCache) {
       refreshDashboard();
       return sendJson(res, 202, { warming: true, message: "正在同步最新数据" });
@@ -806,6 +817,14 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(404, { ...SECURITY_HEADERS, "content-type": "text/plain; charset=utf-8" });
     res.end("Not found");
   }
+}
+
+const server = http.createServer((req, res) => {
+  handleRequest(req, res).catch((error) => {
+    console.warn(`[http] request failed: ${error.message}`);
+    if (!res.headersSent && !res.destroyed) sendJson(res, 500, { error: "Request failed" });
+    else res.destroy();
+  });
 });
 
 try {

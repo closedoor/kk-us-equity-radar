@@ -4,6 +4,7 @@ import { cp, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import net from "node:net";
+import http from "node:http";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
 
@@ -47,7 +48,19 @@ async function withOfflineServer(cache, check, { stalled = false } = {}) {
       }
       assert.fail(`Refresh did not finish: ${output}`);
     };
-    await check({ read, finished, dir, requestCount: () => output.split("TEST_FETCH").length - 1 });
+    const request = (options = {}) => new Promise((resolve, reject) => {
+      const req = http.request({ hostname: "127.0.0.1", port, path: "/", ...options }, (response) => {
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => { body += chunk; });
+        response.on("end", () => resolve({ status: response.statusCode, headers: response.headers, body }));
+        response.on("error", reject);
+      });
+      req.on("error", reject);
+      req.setTimeout(3000, () => req.destroy(new Error("HTTP test timed out")));
+      req.end();
+    });
+    await check({ read, finished, request, dir, requestCount: () => output.split("TEST_FETCH").length - 1 });
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill("SIGTERM");
@@ -109,5 +122,41 @@ test("manual refresh returns promptly and shares the running fetch when upstream
     }
     await delay(50);
     assert.equal(requestCount(), count);
+  }, { stalled: true });
+});
+
+test("a malformed Host header cannot crash the service", async () => {
+  await withOfflineServer(fixture, async ({ request, read }) => {
+    assert.equal((await request({ headers: { host: "[" } })).status, 200);
+    assert.equal((await read()).status, 200);
+  }, { stalled: true });
+});
+
+test("a malformed request target returns 400 and leaves subsequent requests working", async () => {
+  await withOfflineServer(fixture, async ({ request, read }) => {
+    const invalid = await request({ path: "http://[" });
+    assert.equal(invalid.status, 400);
+    assert.ok(invalid.headers["x-content-type-options"]);
+    assert.doesNotMatch(invalid.body, /TypeError|server\.mjs/);
+    assert.equal((await read()).status, 200);
+  }, { stalled: true });
+});
+
+test("read-only routes reject writes and HEAD returns headers without a body", async () => {
+  await withOfflineServer(fixture, async ({ request }) => {
+    for (const method of ["POST", "PUT", "DELETE"]) {
+      const response = await request({ method, path: "/api/dashboard?refresh=1" });
+      assert.equal(response.status, 405);
+      assert.equal(response.headers.allow, "GET, HEAD");
+    }
+    for (const path of ["/", "/app.js", "/api/dashboard"]) {
+      const head = await request({ method: "HEAD", path });
+      assert.equal(head.status, 200);
+      assert.equal(head.body, "");
+      assert.ok(head.headers["content-security-policy"]);
+    }
+    for (const path of ["/server.mjs", "/dashboard-cache.json", "/.git/config", "/../server.mjs"]) {
+      assert.equal((await request({ path })).status, 404);
+    }
   }, { stalled: true });
 });
