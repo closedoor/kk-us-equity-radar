@@ -59,3 +59,42 @@ test("structurally broken disk caches are rejected before API rendering", () => 
     assert.equal(isDashboardSnapshot(data), false);
   }
 });
+
+test("overnight projections cannot show a passed macro date as the next event", () => {
+  const data = sample();
+  data.reminders = [{ label: "CPI", date: "2026-09-06", event: "CPI", scheduleStatus: "confirmed" }];
+  const before = projectDashboard(data, Date.parse("2026-09-07T03:59:00Z"));
+  const after = projectDashboard(data, Date.parse("2026-09-07T04:01:00Z"));
+  assert.equal(before.reminders[0].date, "2026-09-06");
+  assert.equal(after.reminders[0].date, null);
+  assert.equal(after.reminders[0].scheduleStatus, "pending");
+  assert.match(after.reminders[0].event, /待.*下一期/);
+  assert.equal(data.reminders[0].date, "2026-09-06");
+});
+
+test("company cards and reminders agree when an earnings date or estimate passes", () => {
+  const data = sample();
+  data.aiEarnings[0] = { ...data.aiEarnings[0], nextReportDate: "2026-09-06", nextReportStatus: "confirmed", nextReportLabel: "2026-09-06", snapshotValidThrough: "2026-09-06" };
+  data.aiEarnings[1] = { ...data.aiEarnings[1], nextReportDate: null, nextReportEstimatedDate: "2026-09-06", nextReportLabel: "预计 2026-09-06 前后", nextReportStatus: "estimated" };
+  data.reminders = [{ date: null, companies: data.aiEarnings.slice(0, 2).map((row) => ({ ticker: row.ticker, next: row.nextReportLabel, status: row.nextReportStatus })) }];
+  const after = projectDashboard(data, Date.parse("2026-09-07T04:01:00Z"));
+  for (let index = 0; index < 2; index += 1) {
+    assert.equal(after.aiEarnings[index].nextReportDate, null);
+    assert.equal(after.aiEarnings[index].nextReportStatus, "pending");
+    assert.equal(after.reminders[0].companies[index].next, after.aiEarnings[index].nextReportLabel);
+    assert.equal(after.reminders[0].companies[index].status, "pending");
+  }
+  assert.equal(after.aiEarnings[0].snapshotStale, true);
+});
+
+test("calendar expiry follows New York midnight across daylight saving and year-end", () => {
+  for (const [date, before, after] of [
+    ["2026-03-08", "2026-03-09T03:59:00Z", "2026-03-09T04:01:00Z"],
+    ["2026-11-01", "2026-11-02T04:59:00Z", "2026-11-02T05:01:00Z"],
+    ["2026-12-31", "2027-01-01T04:59:00Z", "2027-01-01T05:01:00Z"],
+  ]) {
+    const data = { ...sample(), generatedAt: before, reminders: [{ date, label: "CPI", event: "CPI" }] };
+    assert.equal(projectDashboard(data, Date.parse(before)).reminders[0].date, date);
+    assert.equal(projectDashboard(data, Date.parse(after)).reminders[0].date, null);
+  }
+});

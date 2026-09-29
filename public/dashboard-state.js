@@ -47,7 +47,28 @@ export function resolveAiSnapshots(rows = [], nowMs = Date.now()) {
     const age = validDate(row.released) ? Math.floor((Date.parse(today) - Date.parse(row.released)) / 86_400_000) : null;
     const snapshotStale = Boolean(row.snapshotStale) || !Number.isFinite(age) || age < 0 || age > 120
       || (validDate(row.snapshotValidThrough) && today > row.snapshotValidThrough);
-    return { ...row, snapshotStale, snapshotAgeDays: age, snapshotLabel: snapshotStale ? "财报解读待更新" : `资料截至 ${row.released}` };
+    const nextDate = row.nextReportDate || row.nextReportEstimatedDate;
+    const passed = validDate(nextDate) && nextDate < today;
+    return {
+      ...row,
+      ...(passed ? { nextReportDate: null, nextReportEstimatedDate: null, nextReportLabel: "待核对下一期日程", nextReportStatus: "pending" } : {}),
+      snapshotStale, snapshotAgeDays: age, snapshotLabel: snapshotStale ? "财报解读待更新" : `资料截至 ${row.released}`,
+    };
+  });
+}
+
+function resolveReminders(rows = [], aiEarnings, nowMs) {
+  const today = marketDate(nowMs);
+  const companies = new Map(aiEarnings.map((row) => [row.ticker, row]));
+  return rows.map((row) => {
+    if (row.companies) return { ...row, companies: row.companies.map((company) => {
+      const report = companies.get(company.ticker);
+      return report ? { ...company, next: report.nextReportLabel || report.nextReportDate, status: report.nextReportStatus } : { ...company };
+    }) };
+    if (validDate(row.date) && row.date < today) {
+      return { ...row, date: null, scheduleStatus: "pending", event: "上期日程已过，待同步下一期安排" };
+    }
+    return { ...row };
   });
 }
 
@@ -74,6 +95,7 @@ export function projectDashboard(data, nowMs = Date.now()) {
   const expired = cacheExpired(data, nowMs);
   const cacheAgeMs = Math.max(0, nowMs - Date.parse(data.generatedAt)) || 0;
   const aiEarnings = resolveAiSnapshots(data.aiEarnings, nowMs);
+  const reminders = resolveReminders(data.reminders, aiEarnings, nowMs);
   const indicators = data.indicators.map((item) => {
     if (item.id === "aiEarnings") return resolveAiIndicator(item, aiEarnings);
     if (!expired || !item.available) return { ...item };
@@ -85,5 +107,5 @@ export function projectDashboard(data, nowMs = Date.now()) {
     const weight = items.reduce((sum, item) => sum + item.weight, 0);
     return { ...category, weight, score: weight ? Math.round(items.reduce((sum, item) => sum + item.points, 0) / weight * 1000) / 10 : null };
   });
-  return { ...data, ...model, aiEarnings, indicators, categories, cacheAgeMs, stale: expired || cacheAgeMs >= 15 * 60_000, cacheExpired: expired, action: actionFor(model.score, model.coverage) };
+  return { ...data, ...model, aiEarnings, reminders, indicators, categories, cacheAgeMs, stale: expired || cacheAgeMs >= 15 * 60_000, cacheExpired: expired, action: actionFor(model.score, model.coverage) };
 }

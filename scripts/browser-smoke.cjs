@@ -12,6 +12,7 @@ async function main() {
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined });
   let passed = 0;
   async function scenario(name, check, width = 1440) {
+    if (process.env.RADAR_TEST && !name.includes(process.env.RADAR_TEST)) return;
     const context = await browser.newContext({ viewport: { width, height: 960 } });
     const page = await context.newPage();
     const errors = [];
@@ -197,6 +198,127 @@ async function main() {
       await expect(page.locator("#coverageValue")).toHaveText(`${baselineCoverage}%`);
       assert.equal(await page.evaluate(() => Boolean(window.injected)), false);
     });
+    await scenario("keyboard Enter saves manual input and Escape discards a draft", async (page) => {
+      await mock(page, () => ({ body: fresh() }));
+      await page.goto(baseURL);
+      await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(12);
+      await page.locator("#manualButton").click();
+      const input = page.locator('[data-id="earningsBreadth"] .manual-risk');
+      await input.fill("101");
+      await input.press("Enter");
+      await expect(page.locator("#manualDialog")).toBeVisible();
+      await input.fill("0");
+      await input.press("Enter");
+      await expect(page.locator("#manualDialog")).toBeHidden();
+      await expect(page.locator("#indicator-earningsBreadth .metric-value")).toHaveText("0/100");
+      await page.locator("#manualButton").click();
+      await input.fill("75");
+      await input.press("Escape");
+      await expect(page.locator("#indicator-earningsBreadth .metric-value")).toHaveText("0/100");
+      await page.reload();
+      await expect(page.locator("#indicator-earningsBreadth .metric-value")).toHaveText("0/100");
+    });
+    await scenario("manual edits synchronize across tabs without overwriting untouched draft fields", async (page, context) => {
+      const other = await context.newPage();
+      const otherErrors = [];
+      other.on("pageerror", (error) => otherErrors.push(error.message));
+      await mock(page, () => ({ body: fresh() }));
+      await mock(other, () => ({ body: fresh() }));
+      await page.goto(baseURL);
+      await other.goto(baseURL);
+      await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(12);
+      await page.locator("#manualButton").click();
+      await page.locator('[data-id="aiEarnings"] .manual-risk').fill("42");
+      await other.locator("#manualButton").click();
+      await other.locator('[data-id="earningsBreadth"] .manual-risk').fill("80");
+      await other.locator('#manualForm button[value="default"]').click();
+      await expect(page.locator("#indicator-earningsBreadth .metric-value")).toHaveText("80/100");
+      await expect(page.locator('[data-id="aiEarnings"] .manual-risk')).toHaveValue("42");
+      await page.locator('#manualForm button[value="default"]').click();
+      await expect(page.locator("#indicator-earningsBreadth .metric-value")).toHaveText("80/100");
+      await expect(other.locator("#indicator-aiEarnings .metric-value")).toHaveText("42/100");
+      await page.reload();
+      await expect(page.locator("#indicator-aiEarnings .metric-value")).toHaveText("42/100");
+      await other.locator("#manualButton").click();
+      await other.locator("#clearManual").click();
+      await expect(page.locator("#indicator-aiEarnings .risk-chip")).not.toHaveText("人工覆盖");
+      await expect(page.locator("#indicator-earningsBreadth .risk-chip")).not.toHaveText("人工覆盖");
+      assert.deepEqual(otherErrors, []);
+    });
+    await scenario("storage failures stay visible after save and clear, then disappear on successful retry", async (page) => {
+      await mock(page, () => ({ body: fresh() }));
+      await page.addInitScript(() => {
+        const original = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (...args) {
+          if (window.failStorage && args[0] === "bearRadarOverrides") throw new DOMException("Storage unavailable", "QuotaExceededError");
+          return original.apply(this, args);
+        };
+      });
+      await page.goto(baseURL);
+      await page.locator("#manualButton").click();
+      await page.locator('[data-id="earningsBreadth"] .manual-risk').fill("0");
+      await page.locator('#manualForm button[value="default"]').click();
+      await page.evaluate(() => { window.failStorage = true; });
+      await page.locator("#manualButton").click();
+      await page.locator('[data-id="aiEarnings"] .manual-risk').fill("42");
+      await page.locator('#manualForm button[value="default"]').click();
+      await expect(page.locator("#storageNotice")).toContainText("未能保存人工数据");
+      await expect(page.locator("#indicator-aiEarnings .metric-value")).toHaveText("42/100");
+      await page.locator("#refreshButton").click();
+      await expect(page.locator("#storageNotice")).toBeVisible();
+      await page.locator("#manualButton").click();
+      await page.locator("#clearManual").click();
+      await expect(page.locator("#dialogStorageNotice")).toContainText("未能保存清除操作");
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+      if (outputDir) await page.screenshot({ path: path.join(outputDir, "storage-error-mobile.png") });
+      await page.locator("#closeManual").click();
+      await expect(page.locator("#storageNotice")).toContainText("未能保存清除操作");
+      await page.evaluate(() => { window.failStorage = false; });
+      await page.locator("#manualButton").click();
+      await page.locator("#clearManual").click();
+      await expect(page.locator("#dialogStorageNotice")).toBeHidden();
+      await page.locator("#closeManual").click();
+      await expect(page.locator("#storageNotice")).toBeHidden();
+      await page.reload();
+      await expect(page.locator("#indicator-earningsBreadth .risk-chip")).not.toHaveText("人工覆盖");
+    }, 390);
+    for (const mode of ["visible", "hidden", "offline"]) {
+      await scenario(`New York midnight rechecks schedules with page ${mode}`, async (page, context) => {
+        const time = new Date("2026-10-01T03:59:30Z");
+        await page.clock.install({ time });
+        await page.clock.pauseAt(time);
+        await page.addInitScript(() => {
+          Object.defineProperty(document, "visibilityState", { configurable: true, get: () => window.testHidden ? "hidden" : "visible" });
+        });
+        const data = fresh();
+        data.generatedAt = time.toISOString();
+        data.reminders[0] = { ...data.reminders[0], date: "2026-09-30" };
+        data.reminders[1] = { ...data.reminders[1], date: null, scheduleStatus: "pending" };
+        data.aiEarnings[0] = { ...data.aiEarnings[0], nextReportDate: "2026-09-30", nextReportLabel: "2026-09-30", nextReportStatus: "confirmed", snapshotValidThrough: "2026-09-30" };
+        const calls = await mock(page, (count) => ({ body: count === 1 ? data : { ...data, generatedAt: "2026-10-01T04:00:30Z", reminders: [{ ...data.reminders[0], date: "2026-10-14" }, ...data.reminders.slice(1)] } }));
+        await page.goto(baseURL);
+        await expect(page.locator("#reminderGrid .reminder-card").nth(0).locator("time")).toContainText("今天");
+        await expect(page.locator("#reminderGrid .reminder-card").nth(1).locator("time")).toHaveText("待核对");
+        if (mode === "hidden") await page.evaluate(() => { window.testHidden = true; document.dispatchEvent(new Event("visibilitychange")); });
+        if (mode === "offline") {
+          await context.setOffline(true);
+          await expect(page.locator("#liveText")).toContainText("离线");
+          await expect(page.locator(".live-pill")).toHaveAttribute("data-state", "error");
+        }
+        await page.clock.runFor(60000);
+        if (mode !== "visible") {
+          assert.equal(calls.length, 1);
+          await expect(page.locator("#reminderGrid .reminder-card").nth(0).locator("time")).toHaveText("待核对");
+          await expect(page.locator("#aiCompanyGrid .ai-company-card").first().locator(".ai-next-report strong")).toHaveText("待核对下一期日程");
+          await expect(page.locator("#reminderGrid .company-reminder-item").first()).toContainText("待核对下一期日程");
+          if (mode === "hidden") await page.evaluate(() => { window.testHidden = false; document.dispatchEvent(new Event("visibilitychange")); });
+          else await context.setOffline(false);
+        }
+        await expect.poll(() => calls.length).toBe(2);
+        await expect(page.locator("#reminderGrid .reminder-card").nth(0).locator("time")).toContainText("2026-10-14");
+        await expect(page.locator("#liveText")).toHaveText("已连接 · 数据已更新");
+      });
+    }
     console.log(`${passed} browser scenarios passed`);
   } finally {
     await browser.close();

@@ -85,6 +85,7 @@ function parseEnglishDate(value) {
 
 function previousMonthLabel(date) {
   const parsed = new Date(`${date}T12:00:00Z`);
+  parsed.setUTCDate(1);
   parsed.setUTCMonth(parsed.getUTCMonth() - 1);
   return `${parsed.getUTCMonth() + 1} 月`;
 }
@@ -475,6 +476,7 @@ export function createCalendarService({
         ...company,
         ...snapshot,
         nextReportDate: null,
+        nextReportEstimatedDate: estimate,
         nextReportLabel: `预计 ${estimate} 前后 · 待官宣`,
         nextReportStatus: "estimated",
         nextReportSource: null,

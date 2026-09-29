@@ -51,12 +51,15 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
 .live-pill { display: flex; align-items: center; gap: 8px; padding: 9px 13px; font: 11px var(--mono); border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
 .live-dot { width: 7px; height: 7px; background: var(--green); border-radius: 50%; box-shadow: 0 0 0 4px rgba(75,155,103,.13); }
+.live-pill[data-state="error"] .live-dot { background: var(--red); box-shadow: 0 0 0 4px rgba(204,58,45,.13); }
+.live-pill[data-state="updating"] .live-dot { background: var(--amber); box-shadow: 0 0 0 4px rgba(216,162,50,.13); }
 .ghost-button, .refresh-button, .primary-button, .text-button, .icon-button { border: 0; background: none; }
 .ghost-button { padding: 10px 14px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; font-weight: 700; }
 .refresh-button { display: flex; align-items: center; gap: 8px; padding: 10px 15px; color: white; background: var(--dark); border-radius: 999px; font-size: 12px; font-weight: 700; }
 .refresh-button svg { width: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .refresh-button.loading svg { animation: spin 1s linear infinite; }
 .refresh-button:disabled { cursor: wait; opacity: .72; }
+.storage-notice { padding: 12px 14px; border-left: 3px solid var(--amber); background: rgba(216,162,50,.1); color: var(--ink); font-size: 12px; line-height: 1.7; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .hero { display: grid; grid-template-columns: 1.12fr .88fr; gap: 64px; align-items: center; min-height: 650px; padding-block: 72px; }

@@ -16,6 +16,7 @@ const state = {
   syncPending: false,
   displayValidity: null,
 };
+let manualDraft = {};
 
 const els = {
   score: document.querySelector("#scoreValue"),
@@ -46,6 +47,8 @@ const els = {
   manualForm: document.querySelector("#manualForm"),
   manualFields: document.querySelector("#manualFields"),
   clearManual: document.querySelector("#clearManual"),
+  closeManual: document.querySelector("#closeManual"),
+  storageNotices: [document.querySelector("#storageNotice"), document.querySelector("#dialogStorageNotice")],
   actionLabel: document.querySelector("#actionLabel"),
   actionDetail: document.querySelector("#actionDetail"),
   actionCallout: document.querySelector("#actionCallout"),
@@ -54,6 +57,20 @@ const els = {
   reminderGrid: document.querySelector("#reminderGrid"),
   calendarSyncStatus: document.querySelector("#calendarSyncStatus"),
 };
+
+function setLiveStatus(text, status = "updating") {
+  els.liveText.textContent = text;
+  els.liveText.parentElement.dataset.state = status;
+}
+
+function showStorageResult(saved, clearing = false) {
+  for (const notice of els.storageNotices) {
+    notice.hidden = saved;
+    notice.textContent = saved ? "" : clearing
+      ? "浏览器未能保存清除操作，当前页面已清除，但重新打开可能恢复旧的人工数据。"
+      : "浏览器未能保存人工数据，本次重算仍然有效，刷新页面后可能恢复原值。";
+  }
+}
 
 function loadOverrides() {
   try {
@@ -185,11 +202,13 @@ function renderSummary(data) {
   els.recession.textContent = Number.isFinite(data.recessionScore) ? data.recessionScore.toFixed(1) : "--";
   els.uplift.textContent = Number.isFinite(data.riskUplift) ? `+${data.riskUplift.toFixed(0)}` : "--";
   const cacheAge = formatCacheAge(data.cacheAgeMs);
-  els.liveText.textContent = state.loadError ? "连接失败" : data.cacheExpired ? "缓存已过期 · 等待新数据" : data.refreshing || state.syncPending
+  const offline = navigator.onLine === false;
+  const status = offline || state.loadError ? "error" : data.cacheExpired || data.refreshing || state.syncPending || data.stale ? "updating" : "connected";
+  setLiveStatus(offline ? "离线 · 暂用已有数据" : state.loadError ? "连接失败" : data.cacheExpired ? "缓存已过期 · 等待新数据" : data.refreshing || state.syncPending
     ? `后台更新中 · 暂用${cacheAge}缓存`
     : data.stale
       ? `更新暂缓 · 暂用${cacheAge}缓存`
-      : "已连接 · 数据已更新";
+      : "已连接 · 数据已更新", status);
   els.actionLabel.textContent = data.action?.label || "等待数据";
   els.actionDetail.textContent = data.action?.detail || "";
   els.actionCallout.dataset.action = data.action?.key || "hold";
@@ -270,7 +289,7 @@ function renderAiEarnings(rows = [], layers = []) {
       <div><span>下一期判断</span><p class="assessment ${safeTone(row.guidanceTone)}">${escapeHtml(row.guidanceAssessment)}</p></div>
     </div>
     <div class="ai-guidance-copy"><span>公司指引</span><p>${escapeHtml(row.guidance)}</p><small>${escapeHtml(row.note)}</small></div>
-    <div class="ai-card-foot"><a href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">查看官方财报</a><div class="ai-next-report"><span>下次财报 <strong>${escapeHtml(nextReportLabel)}</strong></span><i class="schedule-status ${scheduleConfirmed ? "confirmed" : "estimated"}">${scheduleConfirmed ? "公司确认" : "市场预估"}</i>${scheduleSource}</div></div>
+    <div class="ai-card-foot"><a href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">查看官方财报</a><div class="ai-next-report"><span>下次财报 <strong>${escapeHtml(nextReportLabel)}</strong></span><i class="schedule-status ${scheduleConfirmed ? "confirmed" : "estimated"}">${scheduleConfirmed ? "公司确认" : row.nextReportStatus === "pending" ? "待核对" : "市场预估"}</i>${scheduleSource}</div></div>
   </article>`;
   }).join("");
 }
@@ -283,12 +302,13 @@ function renderReminders(rows = []) {
     const days = dateParts?.length === 3
       ? Math.round((Date.UTC(dateParts[0], dateParts[1] - 1, dateParts[2]) - todayUtc) / 86_400_000)
       : null;
-    const companyList = row.companies?.length ? `<div class="company-reminder-list">${row.companies.map((company) => `<div class="company-reminder-item"><b>${escapeHtml(company.ticker)}</b><em>上期 ${escapeHtml(company.released)}</em><em>下期 ${escapeHtml(company.next)}</em><i class="${company.status === "confirmed" ? "confirmed" : "estimated"}">${company.status === "confirmed" ? "已确认" : "预计窗口"}</i>${company.source ? `<a href="${safeExternalUrl(company.source)}" target="_blank" rel="noreferrer">核对日期</a>` : ""}</div>`).join("")}</div>` : "";
+    const companyList = row.companies?.length ? `<div class="company-reminder-list">${row.companies.map((company) => `<div class="company-reminder-item"><b>${escapeHtml(company.ticker)}</b><em>上期 ${escapeHtml(company.released)}</em><em>下期 ${escapeHtml(company.next)}</em><i class="${company.status === "confirmed" ? "confirmed" : "estimated"}">${company.status === "confirmed" ? "已确认" : company.status === "pending" ? "待核对" : "预计窗口"}</i>${company.source ? `<a href="${safeExternalUrl(company.source)}" target="_blank" rel="noreferrer">核对日期</a>` : ""}</div>`).join("")}</div>` : "";
     const sourceLink = !row.companies?.length && row.linkLabel ? `<a class="reminder-source" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">${escapeHtml(row.linkLabel)} <span aria-hidden="true">↗</span></a>` : "";
-    const relativeLabel = days === null ? "" : days < 0 ? "已公布" : days === 0 ? "今天" : `${days} 天后`;
+    const relativeLabel = days === null ? "" : days < 0 ? "日期已过" : days === 0 ? "今天" : `${days} 天后`;
+    const dateLabel = row.date ? escapeHtml(row.date) : row.companies ? "逐家公司" : "待核对";
     return `<article class="reminder-card${row.companies?.length ? " company-card" : ""}">
       <span class="reminder-index">${String(index + 1).padStart(2, "0")}</span><div class="reminder-copy"><small>${escapeHtml(row.label)}</small><strong>${escapeHtml(row.event)}</strong>${sourceLink}</div>
-      <time>${row.date ? escapeHtml(row.date) : "逐家公司"}${relativeLabel ? `<b>${relativeLabel}</b>` : ""}</time>${companyList}
+      <time>${dateLabel}${relativeLabel ? `<b>${relativeLabel}</b>` : ""}</time>${companyList}
     </article>`;
   }).join("");
 }
@@ -413,7 +433,7 @@ function loadData(force = false) {
     els.refresh.classList.add("loading");
     els.refresh.disabled = true;
     els.refresh.setAttribute("aria-busy", "true");
-    els.liveText.textContent = force ? "正在抓取最新数据" : "正在更新数据";
+    setLiveStatus(force ? "正在抓取最新数据" : "正在更新数据");
     try {
       const { payload, warming } = await requestDashboard(`/api/dashboard${force ? "?refresh=1" : ""}`);
       state.loadError = null;
@@ -422,7 +442,7 @@ function loadData(force = false) {
       if (warming) {
         if (state.data) render();
         else {
-          els.liveText.textContent = "正在同步首批数据";
+          setLiveStatus("正在同步首批数据");
           renderErrors();
         }
       } else {
@@ -437,7 +457,7 @@ function loadData(force = false) {
     } catch (error) {
       state.loadError = error.message;
       render();
-      els.liveText.textContent = "连接失败";
+      setLiveStatus(navigator.onLine === false ? "网络已断开" : "连接失败", "error");
       els.loading.hidden = true;
       els.loading.replaceChildren();
       renderErrors();
@@ -473,6 +493,7 @@ function buildManualFields(focusId = null) {
 }
 
 function openManual(focusId = null) {
+  manualDraft = { ...state.overrides };
   buildManualFields(focusId);
   els.manualDialog.showModal();
   if (focusId) setTimeout(() => els.manualFields.querySelector(`[data-id="${focusId}"] .manual-risk`)?.focus(), 50);
@@ -480,6 +501,7 @@ function openManual(focusId = null) {
 
 els.refresh.addEventListener("click", () => loadData(true));
 els.manualButton.addEventListener("click", () => openManual());
+els.closeManual.addEventListener("click", () => els.manualDialog.close());
 els.filters.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-filter]");
   if (!button) return;
@@ -508,12 +530,15 @@ els.drivers.addEventListener("click", (event) => {
   requestAnimationFrame(() => document.querySelector(`#indicator-${button.dataset.driverId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
 });
 els.manualForm.addEventListener("submit", (event) => {
-  if (event.submitter?.value === "cancel") return;
   event.preventDefault();
+  if (!els.manualForm.reportValidity()) return;
   const next = { ...state.overrides };
   els.manualFields.querySelectorAll(".manual-field").forEach((field) => {
     const riskText = field.querySelector(".manual-risk").value.trim();
     const note = field.querySelector(".manual-note").value.trim();
+    const original = manualDraft[field.dataset.id];
+    // An untouched field must not overwrite a newer edit from another tab.
+    if (riskText === String(original?.risk ?? "") && note === (original?.note || "").trim()) return;
     if (riskText === "") delete next[field.dataset.id];
     else if (Number.isFinite(Number(riskText))) {
       const risk = clamp(Number(riskText));
@@ -527,29 +552,50 @@ els.manualForm.addEventListener("submit", (event) => {
   const saved = saveOverrides();
   els.manualDialog.close();
   render();
-  if (!saved) {
-    els.error.hidden = false;
-    els.error.textContent = "浏览器未能保存人工数据，本次重算仍然有效，刷新页面后可能恢复原值。";
-  }
+  showStorageResult(saved);
 });
 els.clearManual.addEventListener("click", () => {
   state.overrides = {};
-  saveOverrides();
+  manualDraft = {};
+  showStorageResult(saveOverrides(), true);
   buildManualFields();
   render();
 });
 
 function refreshAfterInactivity() {
-  if (document.visibilityState !== "visible" || activeLoad) return;
+  if (document.visibilityState !== "visible") return;
+  revalidateDisplay();
+  if (activeLoad || navigator.onLine === false) return;
   const inactiveFor = Date.now() - state.lastLoadedAt;
-  if (!state.lastLoadedAt || state.loadError || state.syncPending || state.data?.stale || inactiveFor >= 15 * 60 * 1000) loadData();
+  if (!state.lastLoadedAt || state.loadError || state.syncPending || state.data?.stale || crossedMarketDay() || inactiveFor >= 15 * 60 * 1000) loadData();
+}
+
+function crossedMarketDay() {
+  return state.lastLoadedAt && dateInTimeZone(new Date(state.lastLoadedAt)) !== dateInTimeZone();
+}
+
+function revalidateDisplay() {
+  if (state.data && state.displayValidity !== `${dateInTimeZone()}:${cacheExpired(state.data)}`) render();
 }
 
 document.addEventListener("visibilitychange", refreshAfterInactivity);
 window.addEventListener("online", refreshAfterInactivity);
+window.addEventListener("offline", () => {
+  state.loadError = "网络已断开";
+  render();
+  if (!state.data) setLiveStatus("网络已断开", "error");
+  renderErrors();
+});
+window.addEventListener("storage", (event) => {
+  if ((event.key !== null && event.key !== "bearRadarOverrides") || event.storageArea !== localStorage) return;
+  state.overrides = loadOverrides();
+  showStorageResult(true);
+  render();
+});
 
 setInterval(() => {
-  if (state.data && state.displayValidity !== `${dateInTimeZone()}:${cacheExpired(state.data)}`) render();
+  revalidateDisplay();
+  if (crossedMarketDay()) refreshAfterInactivity();
 }, 60_000);
 
 loadData();

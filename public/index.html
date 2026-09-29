@@ -28,6 +28,7 @@
       </div>
     </header>
 
+    <p class="storage-notice shell" id="storageNotice" role="alert" hidden></p>
     <main id="top">
       <section class="hero shell" id="overview">
         <div class="hero-copy">
@@ -133,7 +134,7 @@
     </main>
 
     <footer class="footer shell">
-      <span>US EQUITY RISK RADAR · v4.6.5</span>
+      <span>US EQUITY RISK RADAR · v4.6.6</span>
       <span>数据：公司 IR / SEC / BLS / BEA / Federal Reserve / FRED / Cboe / Nasdaq</span>
     </footer>
 
@@ -141,10 +142,11 @@
       <form method="dialog" id="manualForm">
         <div class="dialog-head">
           <div><p class="eyebrow">MANUAL OVERRIDES</p><h2 id="manualDialogTitle">补充专业数据</h2></div>
-          <button class="icon-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button>
+          <button class="icon-button" value="cancel" aria-label="关闭" type="button" id="closeManual">×</button>
         </div>
         <p class="dialog-intro">分析师一致预期通常来自付费数据库。你可以把券商、FactSet 或 Bloomberg 的结论转换成 0–100 风险值；留空则继续使用公开代理或不计分。</p>
         <div class="manual-fields" id="manualFields"></div>
+        <p class="storage-notice" id="dialogStorageNotice" role="alert" hidden></p>
         <div class="dialog-actions">
           <button class="text-button" id="clearManual" type="button">清除人工数据</button>
           <button class="primary-button" value="default" type="submit">保存并重算</button>

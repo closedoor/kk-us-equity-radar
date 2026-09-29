@@ -60,6 +60,14 @@ test("parses current and future FOMC panels", () => {
   ]);
 });
 
+test("fallback reporting months do not overflow at month-end or year-end", () => {
+  const rows = parseFredReleaseCalendar(`
+    <span style="font-weight: bold;">January 31, 2026</span>
+    <span style="font-weight: bold;">March 31, 2026</span>
+    <span style="font-weight: bold;">May 31, 2026</span>`);
+  assert.deepEqual(rows.map(({ period }) => period), ["12 月", "2 月", "4 月"]);
+});
+
 test("parses Nasdaq earnings date and timing", () => {
   const event = parseNasdaqEarningsDate({
     data: {
@@ -214,6 +222,7 @@ test("clamps a month-end quarterly estimate to the last valid day", () => {
 
   const [company] = service.resolvedAiEarnings();
   assert.match(company.nextReportLabel, /2026-04-30/);
+  assert.equal(company.nextReportEstimatedDate, "2026-04-30");
 });
 
 test("uses the Nasdaq-listed symbol in SK hynix earnings links", () => {
