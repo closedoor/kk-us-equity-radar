@@ -10,7 +10,7 @@ import { spawn } from "node:child_process";
 const fixture = JSON.parse(await readFile(new URL("./dashboard-cache.json", import.meta.url), "utf8"));
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function withOfflineServer(cache, check) {
+async function withOfflineServer(cache, check, { stalled = false } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "radar-server-test-"));
   const reservation = net.createServer();
   reservation.listen(0, "127.0.0.1");
@@ -23,7 +23,9 @@ async function withOfflineServer(cache, check) {
       await cp(new URL(name, import.meta.url), path.join(dir, name), { recursive: true });
     }
     await writeFile(path.join(dir, "dashboard-cache.json"), JSON.stringify(cache));
-    await writeFile(path.join(dir, "offline.mjs"), 'globalThis.fetch = async () => { throw new Error("test upstream outage"); };');
+    await writeFile(path.join(dir, "offline.mjs"), stalled
+      ? 'globalThis.fetch = (_url, { signal }) => new Promise((_resolve, reject) => { process.stdout.write("TEST_FETCH\\n"); signal.addEventListener("abort", () => reject(new Error("test timeout")), { once: true }); });'
+      : 'globalThis.fetch = async () => { throw new Error("test upstream outage"); };');
     child = spawn(process.execPath, ["--import", path.join(dir, "offline.mjs"), path.join(dir, "server.mjs")], {
       cwd: dir, env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) }, stdio: ["ignore", "pipe", "pipe"],
     });
@@ -33,8 +35,8 @@ async function withOfflineServer(cache, check) {
     const deadline = Date.now() + 15_000;
     while (!output.includes("已启动") && Date.now() < deadline && child.exitCode === null) await delay(50);
     assert.match(output, /已启动/, output);
-    const read = async () => {
-      const response = await fetch(`http://127.0.0.1:${port}/api/dashboard`, { signal: AbortSignal.timeout(3000) });
+    const read = async (query = "") => {
+      const response = await fetch(`http://127.0.0.1:${port}/api/dashboard${query}`, { signal: AbortSignal.timeout(3000) });
       return { status: response.status, body: await response.json() };
     };
     const finished = async () => {
@@ -45,7 +47,7 @@ async function withOfflineServer(cache, check) {
       }
       assert.fail(`Refresh did not finish: ${output}`);
     };
-    await check({ read, finished, dir });
+    await check({ read, finished, dir, requestCount: () => output.split("TEST_FETCH").length - 1 });
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill("SIGTERM");
@@ -93,4 +95,19 @@ test("a recent cache survives source failures while latest calendar status is pe
     assert.equal(stored.generatedAt, cache.generatedAt);
     assert.ok(stored.calendarSync.sources.bls.error);
   });
+});
+
+test("manual refresh returns promptly and shares the running fetch when upstream requests stall", async () => {
+  const cache = { ...fixture, generatedAt: new Date().toISOString() };
+  await withOfflineServer(cache, async ({ read, requestCount }) => {
+    const count = requestCount();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const result = await read("?refresh=1");
+      assert.equal(result.status, 200);
+      assert.equal(result.body.refreshing, true);
+      assert.equal(result.body.generatedAt, cache.generatedAt);
+    }
+    await delay(50);
+    assert.equal(requestCount(), count);
+  }, { stalled: true });
 });

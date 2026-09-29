@@ -8,6 +8,7 @@ import {
   monthlyAnnualizedChange,
   monthlyDifference,
   nearestPrior,
+  fredMaxAgeDays,
 } from "./market-data.mjs";
 
 test("parses only valid FRED observations", () => {
@@ -98,4 +99,13 @@ test("lookbacks require an observation at or before the actual target date", () 
   assert.equal(nearestPrior(rows, 90), rows[0]);
   assert.equal(nearestPrior(rows.slice(1), 90), null);
   assert.equal(nearestPrior([], 90), null);
+});
+
+test("PCE remains usable through its normal month-end publication lag, but cannot stay fresh indefinitely", () => {
+  const series = [{ date: "2026-07-01", value: 125 }];
+  for (const name of ["PCEPI", "PCEPILFE"]) {
+    assert.equal(requireFreshSeries(series, { name, maxAgeDays: fredMaxAgeDays[name], now: new Date("2026-09-29T12:00:00Z") }), series);
+    assert.throws(() => requireFreshSeries(series, { name, maxAgeDays: fredMaxAgeDays[name], now: new Date("2026-10-15T12:00:00Z") }), /最新数据停留/);
+  }
+  assert.throws(() => requireFreshSeries(series, { name: "CPIAUCSL", maxAgeDays: fredMaxAgeDays.CPIAUCSL, now: new Date("2026-09-29T12:00:00Z") }), /最新数据停留/);
 });

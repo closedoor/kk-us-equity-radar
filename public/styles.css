@@ -228,7 +228,10 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   .ai-company-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
-  .shell { width: min(100% - 28px, 1240px); }.topbar { height: 62px; padding-inline: 14px; }.brand { gap: 9px; }.brand span:last-child { font-size: 14px; }.brand-mark { transform: scale(.88); transform-origin: left center; }.live-pill { display: none; }.topbar-actions { gap: 6px; }.ghost-button { padding: 9px 11px; font-size: 10px; }.ghost-button::after { content: ""; }.refresh-button { width: 40px; height: 40px; justify-content: center; padding: 0; }.refresh-button span { display: none; }
+  .shell { width: min(100% - 28px, 1240px); }.topbar { height: 90px; padding: 10px 14px 30px; }.brand { gap: 9px; }.brand span:last-child { font-size: 14px; }.brand-mark { transform: scale(.88); transform-origin: left center; }.topbar-actions { gap: 6px; }.ghost-button { padding: 9px 11px; font-size: 10px; }.ghost-button::after { content: ""; }.refresh-button { width: 40px; height: 40px; justify-content: center; padding: 0; }.refresh-button span { display: none; }
+  [id] { scroll-margin-top: 110px; }
+  .live-pill { position: absolute; left: 14px; right: 14px; bottom: 7px; padding: 0; border: 0; font-size: 10px; line-height: 16px; }
+  .live-dot { flex-shrink: 0; }
   .hero { min-height: 0; padding-block: 48px 58px; }.hero h1 { font-size: 48px; }.hero-intro { margin-block: 22px 28px; font-size: 14px; }.hero-meta { display: grid; grid-template-columns: repeat(2,1fr); gap: 18px; }.hero-meta div { min-width: 0; padding: 0; margin: 0; border: 0; }.hero-meta div:last-child { display: none; }
   .score-panel { padding: 23px 20px; }.gauge-wrap { width: 235px; height: 235px; }.gauge-value strong { font-size: 66px; }
   .category-strip { grid-template-columns: repeat(2, 1fr); }.category-item { padding: 18px 14px; }.category-item:nth-child(2n) { border-right: 0; }.category-item:nth-child(3) { border-right: 1px solid var(--line); }.category-item:nth-child(n+3) { border-top: 1px solid var(--line); }

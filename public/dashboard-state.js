@@ -3,11 +3,22 @@ import { computeScores, actionFor } from "./risk-model.js";
 export const MAX_MARKET_CACHE_AGE_MS = 24 * 60 * 60 * 1000;
 
 export function isDashboardSnapshot(data) {
-  return Boolean(data && Number.isFinite(Date.parse(data.generatedAt)) && Number.isFinite(data.coverage)
-    && Array.isArray(data.aiEarnings) && Array.isArray(data.categories) && data.categories.every((row) => typeof row?.name === "string")
-    && Array.isArray(data.indicators) && data.indicators.length
-    && data.indicators.every((row) => typeof row?.id === "string" && Number.isFinite(row.weight)
-      && (row.risk === null || Number.isFinite(row.risk)) && (row.points === null || Number.isFinite(row.points))));
+  const object = (row) => row !== null && typeof row === "object" && !Array.isArray(row);
+  const rows = (value, check) => Array.isArray(value) && value.every(check);
+  const optionalRows = (value, check) => value === undefined || rows(value, check);
+  return Boolean(object(data) && typeof data.generatedAt === "string" && Number.isFinite(Date.parse(data.generatedAt))
+    && Number.isFinite(data.coverage) && data.coverage >= 0 && data.coverage <= 100
+    && (data.scoringContext === undefined || object(data.scoringContext))
+    && rows(data.aiEarnings, (row) => object(row) && typeof row.ticker === "string")
+    && rows(data.categories, (row) => object(row) && typeof row.name === "string")
+    && rows(data.indicators, (row) => object(row) && typeof row.id === "string" && Number.isFinite(row.weight) && row.weight > 0
+      && (row.risk === null || (Number.isFinite(row.risk) && row.risk >= 0 && row.risk <= 100))
+      && (row.points === null || Number.isFinite(row.points))
+      && optionalRows(row.sparkline, object) && (row.breakdown == null || rows(row.breakdown, object)))
+    && data.indicators.length && new Set(data.indicators.map((row) => row.id)).size === data.indicators.length
+    && optionalRows(data.aiChainLayers, (row) => object(row) && rows(row.tickers, (ticker) => typeof ticker === "string"))
+    && optionalRows(data.reminders, (row) => object(row) && (row.date == null || validDate(row.date)) && optionalRows(row.companies, object))
+    && optionalRows(data.errors, (error) => typeof error === "string"));
 }
 
 function marketDate(nowMs) {

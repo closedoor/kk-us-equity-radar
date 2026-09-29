@@ -1,5 +1,6 @@
 import { computeScores, actionFor, MIN_SCORE_COVERAGE } from "./risk-model.js";
 import { projectDashboard, cacheExpired } from "./dashboard-state.js";
+import { requestDashboard } from "./dashboard-client.js";
 
 const manualConfig = [
   { id: "aiEarnings", label: "AI 产业链财报风险", help: "当云资本开支、芯片指引或库存出现新变化时，可调整风险值。" },
@@ -12,6 +13,7 @@ const state = {
   overrides: loadOverrides(),
   lastLoadedAt: 0,
   loadError: null,
+  syncPending: false,
   displayValidity: null,
 };
 
@@ -183,7 +185,7 @@ function renderSummary(data) {
   els.recession.textContent = Number.isFinite(data.recessionScore) ? data.recessionScore.toFixed(1) : "--";
   els.uplift.textContent = Number.isFinite(data.riskUplift) ? `+${data.riskUplift.toFixed(0)}` : "--";
   const cacheAge = formatCacheAge(data.cacheAgeMs);
-  els.liveText.textContent = state.loadError ? "连接失败" : data.cacheExpired ? "缓存已过期 · 等待新数据" : data.refreshing
+  els.liveText.textContent = state.loadError ? "连接失败" : data.cacheExpired ? "缓存已过期 · 等待新数据" : data.refreshing || state.syncPending
     ? `后台更新中 · 暂用${cacheAge}缓存`
     : data.stale
       ? `更新暂缓 · 暂用${cacheAge}缓存`
@@ -340,7 +342,7 @@ function renderIndicators(data) {
     return `<article class="indicator-card" id="indicator-${escapeHtml(item.id)}" data-category="${escapeHtml(item.category)}">
       <div class="card-head">
         <div><span class="card-index">${index} · ${escapeHtml(item.category)} · 权重 ${escapeHtml(item.weight)}</span><h3 class="card-title">${escapeHtml(item.title)}</h3></div>
-        <span class="risk-chip ${status}">${chipText}</span>
+        <span class="risk-chip ${status}">${escapeHtml(chipText)}</span>
       </div>
       <div class="card-main">
         <div><div class="metric-value">${escapeHtml(item.value)}</div><div class="metric-detail">${escapeHtml(item.detail || "")}${item.date ? ` · ${escapeHtml(item.date)}` : ""}</div></div>
@@ -389,57 +391,49 @@ function render() {
   renderErrors(data.errors);
 }
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let activeLoad = null;
+let retryTimer = null;
+let pollAttempts = 0;
+let failureAttempts = 0;
 
-async function fetchDashboard(url) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 75_000);
-  try {
-    return await fetch(url, { signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
+function scheduleRetry(delay) {
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    if (document.visibilityState === "visible" && navigator.onLine !== false) loadData();
+  }, delay);
 }
 
 function loadData(force = false) {
   if (activeLoad) return activeLoad;
+  clearTimeout(retryTimer);
+  retryTimer = null;
   activeLoad = (async () => {
+    let retryDelay = null;
     els.refresh.classList.add("loading");
     els.refresh.disabled = true;
     els.refresh.setAttribute("aria-busy", "true");
     els.liveText.textContent = force ? "正在抓取最新数据" : "正在更新数据";
     try {
-      let response;
-      let payload;
-      for (let attempt = 0; attempt < 12; attempt += 1) {
-        response = await fetchDashboard(`/api/dashboard${force && attempt === 0 ? "?refresh=1" : ""}`);
-        payload = await response.json();
-        if (response.status === 202 && payload.warming) {
-          els.liveText.textContent = `正在同步首批数据 · ${attempt + 1}/12`;
-          await wait(2500);
-          continue;
-        }
-        if (response.ok && payload.refreshing && !force && attempt < 11) {
-          state.data = payload;
-          state.loadError = null;
-          els.loading.hidden = true;
-          els.loading.replaceChildren();
-          render();
-          await wait(2500);
-          continue;
-        }
-        break;
-      }
-      if (response?.status === 202) throw new Error("数据同步时间较长，请稍后再试");
-      if (!response?.ok) throw new Error(payload?.detail || payload?.error || "数据请求失败");
-      state.data = payload;
+      const { payload, warming } = await requestDashboard(`/api/dashboard${force ? "?refresh=1" : ""}`);
       state.loadError = null;
-      state.lastLoadedAt = Date.now();
-      els.loading.hidden = true;
-      els.loading.replaceChildren();
-      els.error.hidden = true;
-      render();
+      state.syncPending = warming || Boolean(payload.refreshing);
+      failureAttempts = 0;
+      if (warming) {
+        if (state.data) render();
+        else {
+          els.liveText.textContent = "正在同步首批数据";
+          renderErrors();
+        }
+      } else {
+        state.data = payload;
+        state.lastLoadedAt = Date.now();
+        els.loading.hidden = true;
+        els.loading.replaceChildren();
+        render();
+      }
+      if (state.syncPending) retryDelay = [2500, 5000, 10000, 15000][Math.min(pollAttempts++, 3)];
+      else pollAttempts = 0;
     } catch (error) {
       state.loadError = error.message;
       render();
@@ -447,11 +441,13 @@ function loadData(force = false) {
       els.loading.hidden = true;
       els.loading.replaceChildren();
       renderErrors();
+      retryDelay = [15000, 30000, 60000][Math.min(failureAttempts++, 2)];
     } finally {
       els.refresh.classList.remove("loading");
       els.refresh.disabled = false;
       els.refresh.removeAttribute("aria-busy");
       activeLoad = null;
+      if (retryDelay !== null) scheduleRetry(retryDelay);
     }
   })();
   return activeLoad;
@@ -546,7 +542,7 @@ els.clearManual.addEventListener("click", () => {
 function refreshAfterInactivity() {
   if (document.visibilityState !== "visible" || activeLoad) return;
   const inactiveFor = Date.now() - state.lastLoadedAt;
-  if (!state.lastLoadedAt || state.loadError || state.data?.stale || inactiveFor >= 15 * 60 * 1000) loadData();
+  if (!state.lastLoadedAt || state.loadError || state.syncPending || state.data?.stale || inactiveFor >= 15 * 60 * 1000) loadData();
 }
 
 document.addEventListener("visibilitychange", refreshAfterInactivity);
@@ -557,4 +553,6 @@ setInterval(() => {
 }, 60_000);
 
 loadData();
-setInterval(() => loadData(), 15 * 60 * 1000);
+setInterval(() => {
+  if (document.visibilityState === "visible" && navigator.onLine !== false) loadData();
+}, 15 * 60 * 1000);

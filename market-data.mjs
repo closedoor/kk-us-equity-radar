@@ -1,5 +1,31 @@
 const DAY_MS = 86_400_000;
 
+export const fredMaxAgeDays = {
+  DCOILBRENTEU: 14,
+  CPIAUCSL: 75,
+  CPIAUCNS: 75,
+  CPILFESL: 75,
+  CPILFENS: 75,
+  // FRED dates PCE at the period's first day; BEA releases it near the next month's end.
+  PCEPI: 100,
+  PCEPILFE: 100,
+  DFEDTARL: 14,
+  DFEDTARU: 14,
+  DGS2: 14,
+  DGS10: 14,
+  DFII10: 14,
+  T10Y3M: 14,
+  VIXCLS: 14,
+  SP500: 14,
+  BAMLH0A0HYM2: 14,
+  DRTSCILM: 180,
+  SAHMREALTIME: 75,
+  ICSA: 21,
+  NFCI: 21,
+  UNRATE: 75,
+  PAYEMS: 75,
+};
+
 function isoDate(year, month, day) {
   if (![year, month, day].every(Number.isInteger)) return null;
   const candidate = new Date(Date.UTC(year, month - 1, day));

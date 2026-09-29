@@ -14,7 +14,9 @@
 - `market-data.test.mjs`
 - `risk-model.test.mjs`
 - `dashboard-state.test.mjs`
+- `dashboard-client.test.mjs`
 - `server.test.mjs`
+- `scripts/browser-smoke.cjs`
 - `package.json`
 - `dashboard-cache.json`
 - `README.md`

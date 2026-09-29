@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCalendarService } from "./calendar.mjs";
-import { parseFredCsv, parseNasdaqRows, requireFreshSeries, monthlyPercentChange, monthlyAnnualizedChange, monthlyDifference, nearestPrior } from "./market-data.mjs";
+import { parseFredCsv, parseNasdaqRows, requireFreshSeries, monthlyPercentChange, monthlyAnnualizedChange, monthlyDifference, nearestPrior, fredMaxAgeDays } from "./market-data.mjs";
 import { computeScores, actionFor } from "./public/risk-model.js";
 import { projectDashboard, resolveAiIndicator, shouldReplaceDashboard, isDashboardSnapshot } from "./public/dashboard-state.js";
 
@@ -195,31 +195,6 @@ const fredMeta = {
   UNRATE: ["美国失业率", "月度"],
   PAYEMS: ["美国非农就业人数", "月度"],
   CFNAIMA3: ["芝加哥联储经济活动三个月均值", "月度"],
-};
-
-const fredMaxAgeDays = {
-  DCOILBRENTEU: 14,
-  CPIAUCSL: 75,
-  CPIAUCNS: 75,
-  CPILFESL: 75,
-  CPILFENS: 75,
-  PCEPI: 75,
-  PCEPILFE: 75,
-  DFEDTARL: 14,
-  DFEDTARU: 14,
-  DGS2: 14,
-  DGS10: 14,
-  DFII10: 14,
-  T10Y3M: 14,
-  VIXCLS: 14,
-  SP500: 14,
-  BAMLH0A0HYM2: 14,
-  DRTSCILM: 180,
-  SAHMREALTIME: 75,
-  ICSA: 21,
-  NFCI: 21,
-  UNRATE: 75,
-  PAYEMS: 75,
 };
 
 function clamp(value, min = 0, max = 1) {
@@ -733,7 +708,7 @@ async function buildDashboard() {
     calendarSchedule: calendarService.snapshot(),
     calendarSync: calendarService.syncStatus(),
     methodology: {
-      version: "4.6.4",
+      version: "4.6.5",
       note: "先计算 12 项基础加权分，再用 30% 的主导风险链和最多 14 分的同向共振修正，避免油价、通胀、政策与利率同时恶化时被低风险项过度稀释。基础分与修正项均单独展示。",
       bands: [
         { min: 0, max: 20, label: "健康、风险较低" },
@@ -799,7 +774,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 202, { warming: true, message: "正在同步最新数据" });
     }
     const fresh = Date.now() - dashboardCachedAt < CACHE_TTL_MS;
-    if (force) await refreshDashboard(true);
+    if (force) refreshDashboard(true);
     else if (!fresh) refreshDashboard();
     const cacheAgeMs = Math.max(0, Date.now() - dashboardCachedAt);
     return sendJson(res, 200, projectDashboard({
