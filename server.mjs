@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCalendarService } from "./calendar.mjs";
-import { parseFredCsv, parseNasdaqRows, requireFreshSeries, monthlyPercentChange, monthlyAnnualizedChange, monthlyDifference, nearestPrior, fredMaxAgeDays } from "./market-data.mjs";
+import { parseFredCsv, parseNasdaqRows, requireFreshSeries, monthlyPercentChange, monthlyAnnualizedChange, monthlyDifference, nearestPrior, fredMaxAgeDays, relativePerformance } from "./market-data.mjs";
 import { computeScores, actionFor } from "./public/risk-model.js";
 import { projectDashboard, resolveAiIndicator, shouldReplaceDashboard, isDashboardSnapshot } from "./public/dashboard-state.js";
 
@@ -335,7 +335,7 @@ function seriesData(result) {
   return result?.ok ? result.data : [];
 }
 
-function indicator({ id, title, category, weight, risk, value, detail, date, description, why, source, cadence, confidence = "high", sparkline = [], available = true, methodology = "", breakdown = null, judgment = null }) {
+function indicator({ id, title, category, weight, risk, value, detail, date, description, why, source, cadence, confidence = "high", sparkline = [], available = true, unavailableReason = "数据不足", methodology = "", breakdown = null, judgment = null }) {
   const normalizedRisk = available && Number.isFinite(risk) ? clamp(risk) : null;
   return {
     id,
@@ -355,6 +355,7 @@ function indicator({ id, title, category, weight, risk, value, detail, date, des
     confidence,
     sparkline,
     available: normalizedRisk !== null,
+    unavailableReason: normalizedRisk === null ? unavailableReason : null,
     methodology,
     breakdown,
     judgment,
@@ -558,13 +559,12 @@ async function buildDashboard() {
 
   const spy = getMarket("SPY");
   const rsp = getMarket("RSP");
-  const spy60 = pctChange(latest(spy)?.value, spy.at(-61)?.value);
-  const rsp60 = pctChange(latest(rsp)?.value, rsp.at(-61)?.value);
-  const relative60 = Number.isFinite(rsp60) && Number.isFinite(spy60) ? rsp60 - spy60 : null;
+  const breadthWindow = relativePerformance(spy, rsp);
+  const relative60 = breadthWindow?.value ?? null;
   const sectorSymbols = ["XLK", "XLF", "XLY", "XLC", "XLI", "XLV", "XLP", "XLE", "XLU", "XLRE", "XLB"];
   const sectorTrends = sectorSymbols.map((symbol) => {
-    const series = getMarket(symbol);
-    if (series.length < 200) return null;
+    const series = breadthWindow ? getMarket(symbol).filter((point) => point.date <= breadthWindow.date) : [];
+    if (series.length < 200 || latest(series)?.date !== breadthWindow?.date) return null;
     const current = latest(series)?.value;
     const ma200 = average(series.slice(-200).map((point) => point.value));
     return Number.isFinite(current) && Number.isFinite(ma200) ? { symbol, below200: current < ma200 } : null;
@@ -574,9 +574,11 @@ async function buildDashboard() {
   const breadthRisk = Number.isFinite(relative60) && availableSectorCount >= 8
     ? clamp(scale(-relative60, 0, 8) * 0.45 + (belowSectorCount / availableSectorCount) * 0.55)
     : null;
-  const breadthDetail = availableSectorCount >= 8
-    ? `RSP 相对 SPY 60 日表现；${availableSectorCount} 个可用行业中 ${belowSectorCount} 个低于 200 日线`
-    : `RSP 相对 SPY 60 日表现；仅 ${availableSectorCount}/11 个行业有足够历史，暂不计分`;
+  const breadthDetail = !breadthWindow
+    ? "SPY/RSP 缺少同日起止价格，暂不计分"
+    : `RSP 相对 SPY 收益差（百分点）；${breadthWindow.startDate} 至 ${breadthWindow.date}；${availableSectorCount >= 8
+      ? `${availableSectorCount} 个同日行业中 ${belowSectorCount} 个低于 200 日线`
+      : `仅 ${availableSectorCount}/11 个行业有同日价格与足够历史，暂不计分`}`;
 
   const nfci = getFred("NFCI");
   const nfciLast = latest(nfci);
@@ -670,13 +672,13 @@ async function buildDashboard() {
       id: "earningsBreadth", title: "标普 500 整体盈利预期", category: "盈利与AI", weight: weights.earningsBreadth, risk: null,
       value: "待接入", detail: "免费公开源无法稳定提供每周 EPS 上调/下调广度，暂不以旧快照计分",
       date: null, description: "观察未来 12 个月 EPS 是否连续 8 至 12 周下修，并检查下修是否扩散。", why: "盈利下调从科技扩散至金融、工业和消费时，熊市风险会显著上升。",
-      source: { label: "S&P Global · S&P 500", url: "https://www.spglobal.com/spdji/en/indices/equity/sp-500/" }, cadence: "需要专业数据", confidence: "manual", sparkline: [], available: false, methodology: "该项需要 FactSet、Bloomberg 或同等级 EPS 修正广度；接入前保持未计分，也可人工覆盖。",
+      source: { label: "S&P Global · S&P 500", url: "https://www.spglobal.com/spdji/en/indices/equity/sp-500/" }, cadence: "需要专业数据", confidence: "manual", sparkline: [], available: false, unavailableReason: "待接入", methodology: "该项需要 FactSet、Bloomberg 或同等级 EPS 修正广度；接入前保持未计分，也可人工覆盖。",
     }),
     indicator({
       id: "breadth", title: "市场宽度", category: "市场确认", weight: weights.breadth, risk: breadthRisk,
-      value: Number.isFinite(relative60) ? `${relative60 >= 0 ? "+" : ""}${round(relative60, 1)}%` : "暂无数据", detail: breadthDetail,
-      date: latest(spy)?.date, description: "用等权指数、行业趋势和 200 日均线判断上涨是否只靠少数巨头。", why: "指数创新高而多数股票走弱，说明内部结构已经脆化。",
-      source: { label: "Nasdaq · SPY / RSP / Sector ETFs", url: "https://www.nasdaq.com/market-activity/etf/rsp/historical" }, cadence: "交易日", confidence: "proxy", sparkline: spark(rsp, 60), methodology: "RSP 相对 SPY 落后幅度占 45%，行业跌破 200 日线比例占 55%。",
+      value: Number.isFinite(relative60) ? `${relative60 >= 0 ? "+" : ""}${round(relative60, 1)}` : "暂无数据", detail: breadthDetail,
+      date: breadthWindow?.date, description: "用等权指数、行业趋势和 200 日均线判断上涨是否只靠少数巨头。收益差从共同截至日回溯 SPY 的 60 个交易日，使用同一起止日期，行业也对齐同一截至日。", why: "指数创新高而多数股票走弱，说明内部结构已经脆化。",
+      source: { label: "Nasdaq · SPY / RSP / Sector ETFs", url: "https://www.nasdaq.com/market-activity/etf/rsp/historical" }, cadence: "交易日", confidence: "proxy", sparkline: spark(rsp.filter((point) => !breadthWindow || point.date <= breadthWindow.date), 60), methodology: "RSP 相对 SPY 落后幅度占 45%，行业跌破 200 日线比例占 55%；缺少共同基期或少于 8 个同日行业时暂停计分。",
     }),
     indicator({
       id: "sp500", title: "标普 500 距 52 周高点跌幅", category: "市场确认", weight: weights.sp500, risk: spRisk,

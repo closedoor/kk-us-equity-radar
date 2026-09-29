@@ -9,6 +9,7 @@ import {
   monthlyDifference,
   nearestPrior,
   fredMaxAgeDays,
+  relativePerformance,
 } from "./market-data.mjs";
 
 test("parses only valid FRED observations", () => {
@@ -108,4 +109,25 @@ test("PCE remains usable through its normal month-end publication lag, but canno
     assert.throws(() => requireFreshSeries(series, { name, maxAgeDays: fredMaxAgeDays[name], now: new Date("2026-10-15T12:00:00Z") }), /最新数据停留/);
   }
   assert.throws(() => requireFreshSeries(series, { name: "CPIAUCSL", maxAgeDays: fredMaxAgeDays.CPIAUCSL, now: new Date("2026-09-29T12:00:00Z") }), /最新数据停留/);
+});
+
+test("identical daily records count once, not as extra history", () => {
+  assert.deepEqual(parseFredCsv("date,value\n2026-09-28,10\n2026-09-28,10"), [{ date: "2026-09-28", value: 10 }]);
+  assert.deepEqual(parseNasdaqRows(Array.from({ length: 200 }, () => ({ date: "09/28/2026", close: "$10" }))), [{ date: "2026-09-28", value: 10 }]);
+});
+
+test("conflicting prices on the same date cannot silently enter a score", () => {
+  assert.throws(() => parseFredCsv("date,value\n2026-09-28,10\n2026-09-28,11"), /冲突/);
+  assert.throws(() => parseNasdaqRows([{ date: "09/28/2026", close: "$10" }, { date: "09/28/2026", close: "$11" }]), /冲突/);
+});
+
+test("relative performance uses matching endpoints and tolerates missing interior observations", () => {
+  const reference = [100, 110, 120, 130, 140].map((value, index) => ({ date: `2026-09-0${index + 1}`, value }));
+  const comparison = [reference[0], reference[1], reference[3]].map((point) => ({ ...point, value: point.value * 2 }));
+  assert.deepEqual(relativePerformance(reference, comparison, 2), { startDate: "2026-09-02", date: "2026-09-04", value: 0 });
+  assert.equal(relativePerformance(reference, comparison.filter((point) => point.date !== "2026-09-02"), 2), null);
+  assert.equal(relativePerformance(reference, [], 2), null);
+  assert.equal(relativePerformance(reference, comparison, 60), null);
+  assert.equal(relativePerformance(reference, comparison, 0), null);
+  assert.equal(relativePerformance(reference.filter((point) => point.date !== "2026-09-04"), comparison, 1), null);
 });

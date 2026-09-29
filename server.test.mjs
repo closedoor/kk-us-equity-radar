@@ -11,7 +11,7 @@ import { spawn } from "node:child_process";
 const fixture = JSON.parse(await readFile(new URL("./dashboard-cache.json", import.meta.url), "utf8"));
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function withOfflineServer(cache, check, { stalled = false } = {}) {
+async function withOfflineServer(cache, check, { stalled = false, preload = null } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "radar-server-test-"));
   const reservation = net.createServer();
   reservation.listen(0, "127.0.0.1");
@@ -24,9 +24,9 @@ async function withOfflineServer(cache, check, { stalled = false } = {}) {
       await cp(new URL(name, import.meta.url), path.join(dir, name), { recursive: true });
     }
     await writeFile(path.join(dir, "dashboard-cache.json"), JSON.stringify(cache));
-    await writeFile(path.join(dir, "offline.mjs"), stalled
+    await writeFile(path.join(dir, "offline.mjs"), preload ?? (stalled
       ? 'globalThis.fetch = (_url, { signal }) => new Promise((_resolve, reject) => { process.stdout.write("TEST_FETCH\\n"); signal.addEventListener("abort", () => reject(new Error("test timeout")), { once: true }); });'
-      : 'globalThis.fetch = async () => { throw new Error("test upstream outage"); };');
+      : 'globalThis.fetch = async () => { throw new Error("test upstream outage"); };'));
     child = spawn(process.execPath, ["--import", path.join(dir, "offline.mjs"), path.join(dir, "server.mjs")], {
       cwd: dir, env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) }, stdio: ["ignore", "pipe", "pipe"],
     });
@@ -159,4 +159,58 @@ test("read-only routes reject writes and HEAD returns headers without a body", a
       assert.equal((await request({ path })).status, 404);
     }
   }, { stalled: true });
+});
+
+function marketStub({ missingStart = false, staleSectors = false } = {}) {
+  const dates = [];
+  const day = new Date();
+  for (; dates.length < 260; day.setUTCDate(day.getUTCDate() - 1)) {
+    if (day.getUTCDay() !== 0 && day.getUTCDay() !== 6) dates.unshift(day.toISOString().slice(0, 10));
+  }
+  const expectedDate = dates.at(-2);
+  const preload = `
+    const dates = ${JSON.stringify(dates)};
+    globalThis.fetch = async (url) => {
+      const symbol = String(url).match(/\\/quote\\/([^/]+)\\/historical/)?.[1];
+      if (!symbol) throw new Error("test source unavailable");
+      const rows = dates.flatMap((date, index) => {
+        if (symbol === "RSP" && (index === 259 || (${missingStart} && index === 198))) return [];
+        if (${staleSectors} && ["XLK", "XLF", "XLY", "XLC"].includes(symbol) && index >= 258) return [];
+        const [year, month, day] = date.split("-");
+        return [{ date: month + "/" + day + "/" + year, close: String(index === 259 ? 1000 : 100 + index) }];
+      }).reverse();
+      return new Response(JSON.stringify({ data: { tradesTable: { rows } } }));
+    };
+  `;
+  return { preload, expectedDate };
+}
+
+test("breadth compares the same start and end dates when a fund updates late", async () => {
+  const { preload, expectedDate } = marketStub();
+  await withOfflineServer({}, async ({ finished }) => {
+    const data = await finished();
+    const breadth = data.indicators.find((row) => row.id === "breadth");
+    assert.equal(breadth.available, true);
+    assert.equal(breadth.date, expectedDate);
+    assert.equal(breadth.risk, 0);
+  }, { preload });
+});
+
+test("breadth is unavailable if the common starting price is missing", async () => {
+  const { preload } = marketStub({ missingStart: true });
+  await withOfflineServer({}, async ({ finished }) => {
+    const breadth = (await finished()).indicators.find((row) => row.id === "breadth");
+    assert.equal(breadth.available, false);
+    assert.equal(breadth.risk, null);
+    assert.equal(breadth.unavailableReason, "数据不足");
+  }, { preload });
+});
+
+test("breadth requires at least eight sectors on the comparison date, not stale sector prices", async () => {
+  const { preload } = marketStub({ staleSectors: true });
+  await withOfflineServer({}, async ({ finished }) => {
+    const breadth = (await finished()).indicators.find((row) => row.id === "breadth");
+    assert.equal(breadth.available, false);
+    assert.match(breadth.detail, /7\/11/);
+  }, { preload });
 });

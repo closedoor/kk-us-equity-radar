@@ -38,10 +38,19 @@ function validIsoDate(value) {
   return Boolean(match && isoDate(Number(match[1]), Number(match[2]), Number(match[3])) === match[0]);
 }
 
+function uniqueObservations(rows) {
+  const dates = new Map();
+  for (const row of rows) {
+    if (dates.has(row.date) && dates.get(row.date).value !== row.value) throw new Error(`${row.date} 存在冲突的数据记录`);
+    dates.set(row.date, row);
+  }
+  return [...dates.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
 export function parseFredCsv(csv) {
   const lines = String(csv || "").trim().split(/\r?\n/);
   if (lines.length < 2) return [];
-  return lines.slice(1).map((line) => {
+  return uniqueObservations(lines.slice(1).map((line) => {
     const comma = line.indexOf(",");
     if (comma <= 0) return null;
     const date = line.slice(0, comma);
@@ -49,7 +58,7 @@ export function parseFredCsv(csv) {
     if (!validIsoDate(date) || !raw || raw === "." || raw.toLowerCase() === "na") return null;
     const value = Number(raw);
     return Number.isFinite(value) ? { date, value } : null;
-  }).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date));
+  }).filter(Boolean));
 }
 
 function parseNasdaqDate(value) {
@@ -59,11 +68,30 @@ function parseNasdaqDate(value) {
 
 export function parseNasdaqRows(rows) {
   if (!Array.isArray(rows)) return [];
-  return rows.map((row) => {
+  return uniqueObservations(rows.map((row) => {
     const date = parseNasdaqDate(row?.date);
     const value = Number(String(row?.close).replace(/[$,]/g, ""));
     return date && Number.isFinite(value) && value > 0 ? { date, value } : null;
-  }).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date));
+  }).filter(Boolean));
+}
+
+export function relativePerformance(reference, comparison, periods = 60) {
+  if (!Array.isArray(reference) || !Array.isArray(comparison) || !Number.isInteger(periods) || periods < 1) return null;
+  if (!reference.length || !comparison.length) return null;
+  const comparisonByDate = new Map(comparison.map((point) => [point.date, point.value]));
+  const endDate = reference.at(-1).date < comparison.at(-1).date ? reference.at(-1).date : comparison.at(-1).date;
+  const end = reference.findIndex((point) => point.date === endDate);
+  const first = reference[end - periods];
+  const last = reference[end];
+  if (!first || !last || !comparisonByDate.has(endDate)) return null;
+  const comparisonStart = comparisonByDate.get(first.date);
+  const comparisonEnd = comparisonByDate.get(last.date);
+  if (![first.value, last.value, comparisonStart, comparisonEnd].every((value) => Number.isFinite(value) && value > 0)) return null;
+  return {
+    startDate: first.date,
+    date: last.date,
+    value: (comparisonEnd / comparisonStart - last.value / first.value) * 100,
+  };
 }
 
 export function requireFreshSeries(series, { name, maxAgeDays, now = new Date() }) {
