@@ -237,7 +237,7 @@ function renderDrivers(data) {
     : "暂无可用信号，请稍后刷新数据。";
   els.drivers.innerHTML = drivers.map((item, index) => {
     const risk = Number.isFinite(item.risk) ? Math.round(item.risk) : 0;
-    return `<button class="driver-item" type="button" data-driver-id="${escapeHtml(item.id)}" data-driver-category="${escapeHtml(item.category)}">
+    return `<button class="driver-item" type="button" data-focus-key="driver-${escapeHtml(item.id)}" data-driver-id="${escapeHtml(item.id)}" data-driver-category="${escapeHtml(item.category)}">
       <span class="driver-rank">0${index + 1}</span>
       <span class="driver-copy"><small>${escapeHtml(item.category)}</small><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.detail || item.description)}</span></span>
       <span class="driver-score"><strong>${item.points.toFixed(1)}</strong><small>/ ${item.weight} 分</small><i><b style="width:${risk}%;background:${scoreColor(risk)}"></b></i></span>
@@ -271,7 +271,7 @@ function renderAiEarnings(rows = [], layers = []) {
   els.aiCompanyGrid.innerHTML = rows.map((row) => {
     const nextReportLabel = row.nextReportLabel || row.nextReportDate || "待官方公布";
     const scheduleConfirmed = row.nextReportStatus === "confirmed";
-    const scheduleSource = row.nextReportSource ? `<a class="date-source" href="${safeExternalUrl(row.nextReportSource)}" target="_blank" rel="noreferrer">核对日期</a>` : "";
+    const scheduleSource = row.nextReportSource ? `<a class="date-source" data-focus-key="report-date-${escapeHtml(row.ticker)}" href="${safeExternalUrl(row.nextReportSource)}" target="_blank" rel="noreferrer">核对日期</a>` : "";
     return `<article class="ai-company-card${row.snapshotStale ? " snapshot-stale" : ""}">
     <div class="ai-card-head">
       <span class="ai-layer-pill">${escapeHtml(row.layer)}</span>
@@ -289,7 +289,7 @@ function renderAiEarnings(rows = [], layers = []) {
       <div><span>下一期判断</span><p class="assessment ${safeTone(row.guidanceTone)}">${escapeHtml(row.guidanceAssessment)}</p></div>
     </div>
     <div class="ai-guidance-copy"><span>公司指引</span><p>${escapeHtml(row.guidance)}</p><small>${escapeHtml(row.note)}</small></div>
-    <div class="ai-card-foot"><a href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">查看官方财报</a><div class="ai-next-report"><span>下次财报 <strong>${escapeHtml(nextReportLabel)}</strong></span><i class="schedule-status ${scheduleConfirmed ? "confirmed" : "estimated"}">${scheduleConfirmed ? "公司确认" : row.nextReportStatus === "pending" ? "待核对" : "市场预估"}</i>${scheduleSource}</div></div>
+    <div class="ai-card-foot"><a data-focus-key="financial-${escapeHtml(row.ticker)}" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">查看官方财报</a><div class="ai-next-report"><span>下次财报 <strong>${escapeHtml(nextReportLabel)}</strong></span><i class="schedule-status ${scheduleConfirmed ? "confirmed" : "estimated"}">${scheduleConfirmed ? "公司确认" : row.nextReportStatus === "pending" ? "待核对" : "市场预估"}</i>${scheduleSource}</div></div>
   </article>`;
   }).join("");
 }
@@ -302,8 +302,8 @@ function renderReminders(rows = []) {
     const days = dateParts?.length === 3
       ? Math.round((Date.UTC(dateParts[0], dateParts[1] - 1, dateParts[2]) - todayUtc) / 86_400_000)
       : null;
-    const companyList = row.companies?.length ? `<div class="company-reminder-list">${row.companies.map((company) => `<div class="company-reminder-item"><b>${escapeHtml(company.ticker)}</b><em>上期 ${escapeHtml(company.released)}</em><em>下期 ${escapeHtml(company.next)}</em><i class="${company.status === "confirmed" ? "confirmed" : "estimated"}">${company.status === "confirmed" ? "已确认" : company.status === "pending" ? "待核对" : "预计窗口"}</i>${company.source ? `<a href="${safeExternalUrl(company.source)}" target="_blank" rel="noreferrer">核对日期</a>` : ""}</div>`).join("")}</div>` : "";
-    const sourceLink = !row.companies?.length && row.linkLabel ? `<a class="reminder-source" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">${escapeHtml(row.linkLabel)} <span aria-hidden="true">↗</span></a>` : "";
+    const companyList = row.companies?.length ? `<div class="company-reminder-list">${row.companies.map((company) => `<div class="company-reminder-item"><b>${escapeHtml(company.ticker)}</b><em>上期 ${escapeHtml(company.released)}</em><em>下期 ${escapeHtml(company.next)}</em><i class="${company.status === "confirmed" ? "confirmed" : "estimated"}">${company.status === "confirmed" ? "已确认" : company.status === "pending" ? "待核对" : "预计窗口"}</i>${company.source ? `<a data-focus-key="company-date-${escapeHtml(company.ticker)}" href="${safeExternalUrl(company.source)}" target="_blank" rel="noreferrer">核对日期</a>` : ""}</div>`).join("")}</div>` : "";
+    const sourceLink = !row.companies?.length && row.linkLabel ? `<a class="reminder-source" data-focus-key="calendar-${escapeHtml(row.indicatorId)}" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">${escapeHtml(row.linkLabel)} <span aria-hidden="true">↗</span></a>` : "";
     const relativeLabel = days === null ? "" : days < 0 ? "日期已过" : days === 0 ? "今天" : `${days} 天后`;
     const dateLabel = row.date ? escapeHtml(row.date) : row.companies ? "逐家公司" : "待核对";
     return `<article class="reminder-card${row.companies?.length ? " company-card" : ""}">
@@ -359,7 +359,7 @@ function renderIndicators(data) {
     const index = String(data.indicators.findIndex((source) => source.id === item.id) + 1).padStart(2, "0");
     const manualCapable = manualConfig.some((config) => config.id === item.id);
     const status = ["critical", "high", "watch", "low", "unavailable"].includes(item.status) ? item.status : "unavailable";
-    return `<article class="indicator-card" id="indicator-${escapeHtml(item.id)}" data-category="${escapeHtml(item.category)}">
+    return `<article class="indicator-card" id="indicator-${escapeHtml(item.id)}" data-focus-key="signal-${escapeHtml(item.id)}" tabindex="-1" data-category="${escapeHtml(item.category)}">
       <div class="card-head">
         <div><span class="card-index">${index} · ${escapeHtml(item.category)} · 权重 ${escapeHtml(item.weight)}</span><h3 class="card-title">${escapeHtml(item.title)}</h3></div>
         <span class="risk-chip ${status}">${escapeHtml(chipText)}</span>
@@ -372,8 +372,8 @@ function renderIndicators(data) {
       ${item.judgment ? `<div class="indicator-judgment ${safeTone(item.judgment.tone)}"><strong>${escapeHtml(item.judgment.label)}</strong><span>${escapeHtml(item.judgment.text)}</span></div>` : ""}
       <div class="score-row"><span>风险强度 ${risk === null ? "--" : Math.round(risk)}</span><div class="risk-bar"><i style="width:${risk ?? 0}%;background:${color}"></i></div><strong class="score-points">${item.points === null ? "--" : item.points.toFixed(1)} / ${item.weight}</strong></div>
       <p class="card-copy">${escapeHtml(item.description)}<br /><strong>为什么重要：</strong>${escapeHtml(item.why)}</p>
-      ${manualCapable ? `<button class="manual-edit" data-manual-id="${escapeHtml(item.id)}" type="button">${item.overridden ? "修改人工数据" : "录入更准确的数据"}</button>` : ""}
-      <div class="card-foot"><a class="source-link" href="${safeExternalUrl(item.source?.url)}" target="_blank" rel="noreferrer">查看官方数据 · ${escapeHtml(item.source?.label)}</a><span class="cadence">${escapeHtml(item.cadence)}<span class="confidence">${escapeHtml(confidenceLabel(item.confidence))}</span></span></div>
+      ${manualCapable ? `<button class="manual-edit" data-focus-key="manual-${escapeHtml(item.id)}" data-manual-id="${escapeHtml(item.id)}" type="button">${item.overridden ? "修改人工数据" : "录入更准确的数据"}</button>` : ""}
+      <div class="card-foot"><a class="source-link" data-focus-key="source-${escapeHtml(item.id)}" href="${safeExternalUrl(item.source?.url)}" target="_blank" rel="noreferrer">查看官方数据 · ${escapeHtml(item.source?.label)}</a><span class="cadence">${escapeHtml(item.cadence)}<span class="confidence">${escapeHtml(confidenceLabel(item.confidence))}</span></span></div>
     </article>`;
   }).join("");
 }
@@ -399,6 +399,7 @@ function renderErrors(errors = []) {
 
 function render() {
   if (!state.data) return;
+  const focusKey = document.activeElement?.dataset.focusKey;
   const data = applyOverrides(projectDashboard(state.data));
   state.displayValidity = `${dateInTimeZone()}:${data.cacheExpired}`;
   renderSummary(data);
@@ -409,6 +410,7 @@ function render() {
   renderReminders(data.reminders);
   renderCalendarSync(data.calendarSync);
   renderErrors(data.errors);
+  if (focusKey) document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`)?.focus({ preventScroll: true });
 }
 
 let activeLoad = null;
@@ -492,7 +494,10 @@ function buildManualFields(focusId = null) {
   }
 }
 
+let manualReturnFocus = null;
+
 function openManual(focusId = null) {
+  manualReturnFocus = document.activeElement;
   manualDraft = { ...state.overrides };
   buildManualFields(focusId);
   els.manualDialog.showModal();
@@ -502,6 +507,12 @@ function openManual(focusId = null) {
 els.refresh.addEventListener("click", () => loadData(true));
 els.manualButton.addEventListener("click", () => openManual());
 els.closeManual.addEventListener("click", () => els.manualDialog.close());
+els.manualDialog.addEventListener("close", () => {
+  const key = manualReturnFocus?.dataset.focusKey;
+  const target = key ? document.querySelector(`[data-focus-key="${CSS.escape(key)}"]`) : manualReturnFocus;
+  if (target?.isConnected) target.focus({ preventScroll: true });
+  manualReturnFocus = null;
+});
 els.filters.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-filter]");
   if (!button) return;
@@ -527,7 +538,11 @@ els.drivers.addEventListener("click", (event) => {
     item.setAttribute("aria-pressed", String(active));
   });
   render();
-  requestAnimationFrame(() => document.querySelector(`#indicator-${button.dataset.driverId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  requestAnimationFrame(() => {
+    const signal = document.getElementById(`indicator-${button.dataset.driverId}`);
+    if (event.detail === 0) signal?.focus({ preventScroll: true });
+    signal?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+  });
 });
 els.manualForm.addEventListener("submit", (event) => {
   event.preventDefault();

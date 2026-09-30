@@ -319,10 +319,71 @@ async function main() {
         await expect(page.locator("#liveText")).toHaveText("已连接 · 数据已更新");
       });
     }
+    await scenario("keyboard focus survives a background refresh and inline manual save", async (page) => {
+      await freeze(page);
+      const calls = await mock(page, (count) => ({ body: { ...fresh(), refreshing: count === 1 } }));
+      await page.goto(baseURL);
+      const source = page.locator("#indicator-credit .source-link");
+      await source.focus();
+      await page.clock.runFor(2500);
+      await expect.poll(() => calls.length).toBe(2);
+      await expect(source).toBeFocused();
+      const edit = page.locator("#indicator-aiEarnings .manual-edit");
+      await edit.focus();
+      await edit.press("Enter");
+      await page.locator('[data-id="aiEarnings"] .manual-risk').fill("42");
+      await page.locator('[data-id="aiEarnings"] .manual-risk').press("Enter");
+      await expect(edit).toBeFocused();
+      for (const key of ["Escape", "Enter"]) {
+        await edit.press("Enter");
+        const input = page.locator('[data-id="aiEarnings"] .manual-risk');
+        await input.fill("43");
+        const before = calls.length;
+        await page.clock.runFor(15 * 60 * 1000);
+        await expect.poll(() => calls.length).toBeGreaterThan(before);
+        await expect(input).toHaveValue("43");
+        await input.press(key);
+        await expect(edit).toBeFocused();
+      }
+    });
+    await scenario("keyboard focus follows a risk driver to its matching signal", async (page) => {
+      await mock(page, () => ({ body: fresh() }));
+      await page.goto(baseURL);
+      const driver = page.locator(".driver-item").first();
+      await driver.waitFor();
+      const id = await driver.getAttribute("data-driver-id");
+      await driver.focus();
+      await driver.press("Enter");
+      await expect(page.locator(`#indicator-${id}`)).toBeFocused();
+    });
+    for (const width of [320, 390, 768, 1024]) {
+      await scenario(`responsive navigation reaches the calendar and overview at ${width}px`, async (page) => {
+        await mock(page, () => ({ body: fresh() }));
+        await page.goto(baseURL);
+        await expect(page.locator('.section-nav a[href="#calendar"]')).toBeVisible();
+        assert.ok(await page.evaluate(() => {
+          const boxes = [".brand", ".section-nav", ".topbar-actions"].map((selector) => document.querySelector(selector).getBoundingClientRect());
+          const bottom = document.querySelector(".topbar").getBoundingClientRect().bottom;
+          return boxes.every((box, i) => box.left >= 0 && box.right <= innerWidth && box.bottom <= bottom && boxes.slice(i + 1).every((other) => box.right <= other.left || other.right <= box.left || box.bottom <= other.top || other.bottom <= box.top));
+        }), "Header controls must fit without overlapping");
+        await page.locator('.section-nav a[href="#calendar"]').click();
+        await expect.poll(() => page.evaluate(() => {
+          const top = document.querySelector("#calendarTitle").getBoundingClientRect().top;
+          return top >= document.querySelector(".topbar").getBoundingClientRect().bottom && top < innerHeight - 30;
+        })).toBe(true);
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+        if (outputDir) await page.screenshot({ path: path.join(outputDir, `calendar-navigation-${width}.png`) });
+        await page.locator('.section-nav a[href="#overview"]').click();
+        await expect.poll(() => page.evaluate(() => {
+          const top = document.querySelector("h1").getBoundingClientRect().top;
+          return top >= document.querySelector(".topbar").getBoundingClientRect().bottom && top < innerHeight;
+        })).toBe(true);
+      }, width);
+    }
     console.log(`${passed} browser scenarios passed`);
   } finally {
     await browser.close();
   }
 }
 
-main().catch((error) => { console.error(error); process.exitCode = 1; });
+main().catch((error) => { console.error(error.stack || error); process.exitCode = 1; });
