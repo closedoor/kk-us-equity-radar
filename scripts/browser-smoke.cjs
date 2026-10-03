@@ -243,6 +243,50 @@ async function main() {
       await expect(cards.nth(3).locator(".ai-readout")).toContainText("历史表现");
       await expect(cards.nth(3).locator(".ai-readout")).toContainText("历史指引");
     });
+    for (const width of [1440, 320]) {
+      await scenario(`scoring method exposes current weights and supported regimes at ${width}px`, async (page) => {
+        const data = fresh();
+        data.indicators.forEach((row) => { row.points = 999; });
+        await mock(page, () => ({ body: data }));
+        await page.goto(baseURL);
+        await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(12);
+        await page.locator("#scoreMethodology summary").click();
+        await expect(page.locator('[data-weight-id="aiEarnings"] td').first()).toHaveText("5%");
+        await expect(page.locator('[data-weight-id="credit"] td').first()).toHaveText("15%");
+        await expect(page.locator('[data-weight-id="breadth"] td').first()).toHaveText("10%");
+        await expect(page.locator("#methodologyContent")).toContainText("并非下跌概率");
+        await expect(page.locator("#methodologyContent")).toContainText("模型 4.7.0");
+        await expect(page.locator(".regime-coverage li")).toHaveCount(3);
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+        await page.locator("#manualButton").click();
+        await page.locator('[data-id="aiEarnings"] .manual-risk').fill("100");
+        await page.locator('[data-id="aiEarnings"] .manual-risk').press("Enter");
+        await expect(page.locator('[data-weight-id="aiEarnings"] td').last()).toHaveText("人工覆盖");
+        await expect(page.locator("#indicator-aiEarnings .score-points")).toContainText("5.0 / 5");
+        await expect(page.locator("#scoreMethodology")).toHaveAttribute("open", "");
+        if (outputDir) {
+          await fs.mkdir(outputDir, { recursive: true });
+          await page.locator("#scoreMethodology").screenshot({ path: path.join(outputDir, `methodology-${width}.png`) });
+        }
+      }, width);
+    }
+    await scenario("an unsupported market regime is disclosed without inflating total risk", async (page) => {
+      const data = fresh();
+      data.indicators.forEach((row) => {
+        row.available = !["breadth", "sp500", "earningsBreadth"].includes(row.id);
+        row.risk = row.available ? row.id === "vix" ? 100 : 0 : null;
+        row.points = row.available ? row.risk * row.weight / 100 : null;
+      });
+      data.aiEarnings.forEach((row) => { row.snapshotStale = true; });
+      await mock(page, () => ({ body: data }));
+      await page.goto(baseURL);
+      await expect(page.locator("#regimeUpliftValue")).toHaveText("+0.0");
+      assert.equal(await page.locator("#scoreValue").textContent(), await page.locator("#baseScoreValue").textContent());
+      await expect(page.locator("#marketBreakValue")).toHaveText("--");
+      await page.locator("#scoreMethodology summary").click();
+      await expect(page.locator('[data-regime-id="marketBreak"]')).toContainText("1 项有效");
+      await expect(page.locator('[data-regime-id="marketBreak"]')).toContainText("不参与主导修正");
+    });
     await scenario("keyboard Enter saves manual input and Escape discards a draft", async (page) => {
       await mock(page, () => ({ body: fresh() }));
       await page.goto(baseURL);

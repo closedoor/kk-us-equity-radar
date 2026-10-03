@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCalendarService } from "./calendar.mjs";
 import { parseFredCsv, parseNasdaqRows, requireFreshSeries, monthlyPercentChange, monthlyAnnualizedChange, monthlyDifference, nearestPrior, fredMaxAgeDays, relativePerformance } from "./market-data.mjs";
-import { computeScores, actionFor } from "./public/risk-model.js";
+import { computeScores, actionFor, INDICATOR_WEIGHTS, normalizeIndicator, SCORING_VERSION, SCORING_NOTE } from "./public/risk-model.js";
 import { projectDashboard, resolveAiIndicator, shouldReplaceDashboard, isDashboardSnapshot } from "./public/dashboard-state.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -27,20 +27,7 @@ let lastDashboardAttemptAt = 0;
 let refreshPromise = null;
 let lastRefreshErrors = [];
 
-const weights = {
-  oil: 5,
-  inflation: 10,
-  fed: 10,
-  rates: 10,
-  vix: 5,
-  unemployment: 8,
-  payrolls: 5,
-  aiEarnings: 10,
-  credit: 12,
-  earningsBreadth: 10,
-  breadth: 8,
-  sp500: 7,
-};
+const weights = INDICATOR_WEIGHTS;
 
 const aiEarnings = [
   {
@@ -686,7 +673,7 @@ async function buildDashboard() {
       date: spLast?.date, description: "0%-5% 为正常高位，10%-15% 为明显调整，20% 以上确认技术性熊市。", why: "这是结果确认指标，因此权重低于信用、通胀和盈利。",
       source: { label: "FRED · S&P 500", url: sourceUrl("SP500") }, cadence: "交易日", confidence: "high", sparkline: spark(sp500, 60), methodology: "高位 0%-5% 先计 12%-25% 脆弱风险，5%-20% 逐步升高；跌破 200 日线额外确认。",
     }),
-  ];
+  ].map(normalizeIndicator);
 
   const scoringContext = { drawdownPercent: drawdown, breadthRiskPercent: Number.isFinite(breadthRisk) ? breadthRisk * 100 : null };
   const { available, ...model } = computeScores(indicators, scoringContext);
@@ -710,8 +697,8 @@ async function buildDashboard() {
     calendarSchedule: calendarService.snapshot(),
     calendarSync: calendarService.syncStatus(),
     methodology: {
-      version: "4.6.8",
-      note: "先计算 12 项基础加权分，再用 30% 的主导风险链和最多 14 分的同向共振修正，避免油价、通胀、政策与利率同时恶化时被低风险项过度稀释。基础分与修正项均单独展示。",
+      version: SCORING_VERSION,
+      note: SCORING_NOTE,
       bands: [
         { min: 0, max: 20, label: "健康、风险较低" },
         { min: 21, max: 40, label: "正常波动" },

@@ -1,8 +1,92 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeScores, actionFor } from "./public/risk-model.js";
+import { computeScores, actionFor, INDICATOR_WEIGHTS, normalizeIndicator } from "./public/risk-model.js";
 
 const item = (id, risk, weight = 10, extra = {}) => ({ id, risk, weight, points: risk * weight / 100, available: true, ...extra });
+const full = (risks = {}, missing = []) => Object.entries(INDICATOR_WEIGHTS)
+  .map(([id, weight]) => item(id, risks[id] ?? 0, weight, { available: !missing.includes(id) }));
+
+test("production weights stay at 100 and reduce reliance on qualitative AI snapshots", () => {
+  assert.equal(Object.values(INDICATOR_WEIGHTS).reduce((sum, weight) => sum + weight, 0), 100);
+  assert.equal(INDICATOR_WEIGHTS.aiEarnings, 5);
+  assert.equal(INDICATOR_WEIGHTS.credit, 15);
+  assert.equal(INDICATOR_WEIGHTS.breadth, 10);
+});
+
+test("a lone VIX observation cannot stand in for an entire market regime", () => {
+  const model = computeScores(full({ vix: 100 }, ["breadth", "sp500", "earningsBreadth"]));
+  const market = model.regimes.find((row) => row.id === "marketBreak");
+  assert.equal(market.observedScore, 100);
+  assert.equal(market.score, null);
+  assert.equal(market.availableCount, 1);
+  assert.equal(model.regimeUplift, 0);
+  assert.equal(model.score, model.baseScore);
+});
+
+test("regime confirmation requires both multiple signals and sufficient planned weight", () => {
+  const two = computeScores(full({ vix: 100, sp500: 100 }, ["breadth"]));
+  assert.equal(two.regimes.find((row) => row.id === "marketBreak").eligible, false);
+  const supported = computeScores(full({ breadth: 100, sp500: 100 }, ["vix"]));
+  const market = supported.regimes.find((row) => row.id === "marketBreak");
+  assert.equal(market.eligible, true);
+  assert.equal(market.coverage, 77.3);
+  assert.ok(supported.regimeUplift > 0);
+  assert.ok(supported.regimeUplift < (100 - supported.baseScore) * 0.3);
+});
+
+test("regime adjustments can increase risk but never dilute the base score", () => {
+  const model = computeScores(full({ aiEarnings: 100 }));
+  assert.equal(model.baseScore, 5);
+  assert.equal(model.regimeUplift, 0);
+  assert.equal(model.score, 5);
+});
+
+test("risk and weight are authoritative even when stored points are contradictory", () => {
+  const rows = full().map((row) => ({ ...row, points: row.weight }));
+  const model = computeScores(rows);
+  assert.equal(model.rawPoints, 0);
+  assert.equal(model.score, 0);
+  assert.ok(model.available.every((row) => row.points === 0));
+  assert.equal(rows[0].points, rows[0].weight);
+  assert.equal(normalizeIndicator(item("credit", 50, 15, { points: 99 })).points, 7.5);
+});
+
+test("invalid risks are excluded rather than generating negative or inflated scores", () => {
+  for (const risk of [-1, 101, NaN, Infinity, null]) {
+    const model = computeScores([item("oil", risk, 60)]);
+    assert.equal(model.availableWeight, 0);
+    assert.equal(model.score, null);
+  }
+});
+
+test("each risk input is monotone over the full range with fixed availability", () => {
+  for (const id of Object.keys(INDICATOR_WEIGHTS)) {
+    let previous = -1;
+    for (let risk = 0; risk <= 100; risk += 1) {
+      const model = computeScores(full({ oil: 60, inflation: 60, fed: 60, [id]: risk }));
+      assert.ok(model.score >= previous, `${id} fell at ${risk}`);
+      previous = model.score;
+    }
+  }
+});
+
+test("all 4096 missing-data combinations preserve coverage and evidence guards", () => {
+  const ids = Object.keys(INDICATOR_WEIGHTS);
+  for (let mask = 0; mask < 2 ** ids.length; mask += 1) {
+    const missing = ids.filter((id, index) => mask & (1 << index));
+    const model = computeScores(full(Object.fromEntries(ids.map((id, index) => [id, index % 2 ? 100 : 60])), missing));
+    const coverage = ids.filter((id) => !missing.includes(id)).reduce((sum, id) => sum + INDICATOR_WEIGHTS[id], 0);
+    assert.equal(model.coverage, coverage);
+    assert.equal(Number.isFinite(model.score), coverage >= 60);
+    if (model.score !== null) assert.ok(model.score >= model.baseScore && model.score <= 100);
+    for (const regime of model.regimes) {
+      if (regime.availableCount < 2 || regime.coverage < 60) {
+        assert.equal(regime.score, null);
+        assert.equal(regime.uplift, 0);
+      }
+    }
+  }
+});
 
 test("high-price fragility depends on actual drawdown even below the 200-day average", () => {
   const indicators = [item("sp500", 40), item("breadth", 30)];

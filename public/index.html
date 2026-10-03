@@ -44,7 +44,7 @@
         </div>
 
         <div class="score-panel" id="scorePanel">
-          <div class="score-topline"><span>未来 6–12 个月综合市场风险</span><span id="scoreDelta">等待数据</span></div>
+          <div class="score-topline"><span>综合市场风险强度</span><span id="scoreDelta">等待数据</span></div>
           <div class="gauge-wrap">
             <svg class="gauge" id="scoreGauge" viewBox="0 0 260 260" role="img" aria-label="综合市场风险分">
               <circle class="gauge-track" cx="130" cy="130" r="103"></circle>
@@ -61,9 +61,11 @@
             <p id="verdictDescription">正在抓取最新的宏观和市场数据。</p>
           </div>
           <div class="score-breakdown">
-            <div><span>12项基础分</span><strong id="baseScoreValue">--</strong><small>原始权重加总，不含共振</small></div>
+            <div><span>12项基础分</span><strong id="baseScoreValue">--</strong><small>按有效权重归一化</small></div>
             <div><span>滞胀 / 政策压力</span><strong id="heatValue">--</strong><small>原油、通胀、美联储与利率</small></div>
             <div><span>衰退 / 信用压力</span><strong id="recessionValue">--</strong><small>就业、信用与盈利</small></div>
+            <div><span>市场确认</span><strong id="marketBreakValue">--</strong><small>波动率、宽度与指数</small></div>
+            <div><span>主导风险链修正</span><strong id="regimeUpliftValue">--</strong><small>仅上调，并按本组覆盖率折减</small></div>
             <div><span>同向共振修正</span><strong id="upliftValue">--</strong><small>风险链同时恶化与高位脆弱</small></div>
           </div>
           <div class="action-callout" id="actionCallout">
@@ -81,6 +83,11 @@
       </section>
 
       <section class="category-strip shell" id="categoryStrip" aria-label="风险链条分数"></section>
+
+      <details class="methodology shell" id="scoreMethodology">
+        <summary>评分口径与权重<span>规则评分 · 非下跌概率</span></summary>
+        <div id="methodologyContent"><p class="methodology-note">等待有效数据。</p></div>
+      </details>
 
       <section class="drivers shell" aria-labelledby="driversTitle">
         <div class="drivers-heading">
@@ -134,7 +141,7 @@
     </main>
 
     <footer class="footer shell">
-      <span>US EQUITY RISK RADAR · v4.6.8</span>
+      <span>US EQUITY RISK RADAR · v4.7.0</span>
       <span>数据：公司 IR / SEC / BLS / BEA / Federal Reserve / FRED / Cboe / Nasdaq</span>
     </footer>
 

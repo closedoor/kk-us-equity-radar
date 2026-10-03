@@ -1,4 +1,4 @@
-import { computeScores, actionFor, MIN_SCORE_COVERAGE } from "./risk-model.js";
+import { computeScores, actionFor, MIN_SCORE_COVERAGE, normalizeIndicator } from "./risk-model.js";
 import { projectDashboard, cacheExpired } from "./dashboard-state.js";
 import { requestDashboard } from "./dashboard-client.js";
 
@@ -32,7 +32,10 @@ const els = {
   baseScore: document.querySelector("#baseScoreValue"),
   heat: document.querySelector("#heatValue"),
   recession: document.querySelector("#recessionValue"),
+  marketBreak: document.querySelector("#marketBreakValue"),
+  regimeUplift: document.querySelector("#regimeUpliftValue"),
   uplift: document.querySelector("#upliftValue"),
+  methodology: document.querySelector("#methodologyContent"),
   liveText: document.querySelector("#liveText"),
   grid: document.querySelector("#indicatorGrid"),
   loading: document.querySelector("#loadingGrid"),
@@ -139,7 +142,7 @@ function applyOverrides(data) {
       available: true,
       overridden: true,
     };
-  });
+  }).map(normalizeIndicator);
   const model = computeScores(indicators, data.scoringContext);
   const categories = data.categories.map((category) => {
     const items = model.available.filter((item) => item.category === category.name);
@@ -200,6 +203,8 @@ function renderSummary(data) {
   els.baseScore.textContent = Number.isFinite(data.baseScore) ? data.baseScore.toFixed(1) : "--";
   els.heat.textContent = Number.isFinite(data.heatScore) ? data.heatScore.toFixed(1) : "--";
   els.recession.textContent = Number.isFinite(data.recessionScore) ? data.recessionScore.toFixed(1) : "--";
+  els.marketBreak.textContent = Number.isFinite(data.marketBreakScore) ? data.marketBreakScore.toFixed(1) : "--";
+  els.regimeUplift.textContent = Number.isFinite(data.regimeUplift) ? `+${data.regimeUplift.toFixed(1)}` : "--";
   els.uplift.textContent = Number.isFinite(data.riskUplift) ? `+${data.riskUplift.toFixed(0)}` : "--";
   const cacheAge = formatCacheAge(data.cacheAgeMs);
   const offline = navigator.onLine === false;
@@ -216,6 +221,18 @@ function renderSummary(data) {
   els.actionLabel.textContent = data.action?.label || "等待数据";
   els.actionDetail.textContent = data.action?.detail || "";
   els.actionCallout.dataset.action = data.action?.key || "hold";
+}
+
+function renderMethodology(data) {
+  els.methodology.innerHTML = `<p class="methodology-note">模型 ${escapeHtml(data.scoringVersion)} · ${escapeHtml(data.methodology.note)}</p>
+    <ul class="regime-coverage">${data.regimes.map((row) => `<li data-regime-id="${escapeHtml(row.id)}">
+      <span>${escapeHtml(row.label)}</span><strong>${row.score === null ? "--" : row.score.toFixed(1)}</strong>
+      <small>${row.availableCount} 项有效 · 本组覆盖 ${row.coverage}%${row.eligible ? "" : " · 不参与主导修正"}</small>
+    </li>`).join("")}</ul>
+    <table class="weight-table"><caption>指标权重 · 合计 100%</caption><thead><tr><th scope="col">指标</th><th scope="col">权重</th><th scope="col">当前状态</th></tr></thead>
+      <tbody>${data.indicators.map((row) => `<tr data-weight-id="${escapeHtml(row.id)}"><th scope="row">${escapeHtml(row.title)}</th><td>${row.weight}%</td><td>${row.overridden ? "人工覆盖" : row.available ? "有效" : "不计分"}</td></tr>`).join("")}</tbody>
+    </table>
+    <p class="methodology-sources">设计参考：<a href="https://www.federalreserve.gov/financial-stability/types-of-financial-system-vulnerabilities-and-risks.htm" target="_blank" rel="noopener noreferrer">美联储风险框架</a>、<a href="https://www.chicagofed.org/research/data/nfci/about" target="_blank" rel="noopener noreferrer">芝加哥联储金融条件</a>、<a href="https://www.spglobal.com/spdji/en/indices/equity/sp-500-equal-weight-index/" target="_blank" rel="noopener noreferrer">标普等权指数口径</a>。上述来源不代表对本模型权重的认可。</p>`;
 }
 
 function renderCategories(categories) {
@@ -414,6 +431,7 @@ function render() {
   const data = applyOverrides(projectDashboard(state.data));
   state.displayValidity = `${dateInTimeZone()}:${data.cacheExpired}`;
   renderSummary(data);
+  renderMethodology(data);
   renderCategories(data.categories);
   renderDrivers(data);
   renderIndicators(data);

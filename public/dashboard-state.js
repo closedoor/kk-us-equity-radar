@@ -1,4 +1,4 @@
-import { computeScores, actionFor } from "./risk-model.js";
+import { computeScores, actionFor, INDICATOR_WEIGHTS, normalizeIndicator, SCORING_VERSION, SCORING_NOTE } from "./risk-model.js";
 
 export const MAX_MARKET_CACHE_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -96,16 +96,18 @@ export function projectDashboard(data, nowMs = Date.now()) {
   const cacheAgeMs = Math.max(0, nowMs - Date.parse(data.generatedAt)) || 0;
   const aiEarnings = resolveAiSnapshots(data.aiEarnings, nowMs);
   const reminders = resolveReminders(data.reminders, aiEarnings, nowMs);
-  const indicators = data.indicators.map((item) => {
+  const indicators = data.indicators.map((previous) => {
+    const item = { ...previous, weight: INDICATOR_WEIGHTS[previous.id] ?? previous.weight };
     if (item.id === "aiEarnings") return resolveAiIndicator(item, aiEarnings);
     if (!expired || !item.available) return { ...item };
     return { ...item, risk: null, points: null, available: false, status: "unavailable", unavailableReason: "缓存已过期" };
-  });
+  }).map(normalizeIndicator);
   const { available, ...model } = computeScores(indicators, data.scoringContext);
   const categories = data.categories.map((category) => {
     const items = available.filter((item) => item.category === category.name);
     const weight = items.reduce((sum, item) => sum + item.weight, 0);
     return { ...category, weight, score: weight ? Math.round(items.reduce((sum, item) => sum + item.points, 0) / weight * 1000) / 10 : null };
   });
-  return { ...data, ...model, aiEarnings, reminders, indicators, categories, cacheAgeMs, stale: expired || cacheAgeMs >= 15 * 60_000, cacheExpired: expired, action: actionFor(model.score, model.coverage) };
+  return { ...data, ...model, aiEarnings, reminders, indicators, categories, cacheAgeMs, stale: expired || cacheAgeMs >= 15 * 60_000, cacheExpired: expired,
+    methodology: { ...data.methodology, version: SCORING_VERSION, note: SCORING_NOTE }, action: actionFor(model.score, model.coverage) };
 }

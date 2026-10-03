@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { projectDashboard, shouldReplaceDashboard, MAX_MARKET_CACHE_AGE_MS, isDashboardSnapshot } from "./public/dashboard-state.js";
+import { INDICATOR_WEIGHTS, SCORING_VERSION } from "./public/risk-model.js";
 
 const fixture = JSON.parse(readFileSync(new URL("./dashboard-cache.json", import.meta.url)));
 const now = Date.parse("2026-09-06T12:00:00Z");
@@ -18,7 +19,7 @@ test("market caches stop scoring at 24 hours while independent financial reports
   const after = projectDashboard(data, now + MAX_MARKET_CACHE_AGE_MS);
   assert.equal(before.cacheExpired, false);
   assert.equal(after.cacheExpired, true);
-  assert.equal(after.coverage, 10);
+  assert.equal(after.coverage, 5);
   assert.equal(after.score, null);
   assert.equal(after.action.key, "unavailable");
   assert.ok(after.indicators.filter((item) => item.id !== "aiEarnings").every((item) => !item.available));
@@ -37,7 +38,7 @@ test("passing a report date immediately updates the AI indicator, coverage and s
   const before = projectDashboard(data, Date.parse("2026-09-07T03:59:00Z"));
   const after = projectDashboard(data, Date.parse("2026-09-07T04:01:00Z"));
   assert.equal(before.coverage, 90);
-  assert.equal(after.coverage, 80);
+  assert.equal(after.coverage, 85);
   assert.equal(after.aiEarnings.filter((row) => row.snapshotStale).length, 6);
   assert.equal(after.indicators.find((row) => row.id === "aiEarnings").available, false);
   assert.equal(after.indicators.find((row) => row.id === "aiEarnings").value, "2 / 8 家");
@@ -51,6 +52,22 @@ test("a poor refresh cannot displace a recent good cache but can replace an expi
   assert.equal(shouldReplaceDashboard(good, poor, now + MAX_MARKET_CACHE_AGE_MS), true);
   assert.equal(shouldReplaceDashboard(null, poor, now), true);
   assert.equal(shouldReplaceDashboard(good, { ...poor, errors: [] }, now), true);
+});
+
+test("old cached weights and inconsistent points migrate without changing source freshness", () => {
+  const data = sample();
+  data.indicators.forEach((row) => { row.points = 999; });
+  const projected = projectDashboard(data, now);
+  assert.equal(projected.generatedAt, data.generatedAt);
+  assert.equal(projected.scoringVersion, SCORING_VERSION);
+  assert.equal(projected.methodology.version, SCORING_VERSION);
+  assert.equal(projected.coverage, 90);
+  for (const row of projected.indicators) {
+    assert.equal(row.weight, INDICATOR_WEIGHTS[row.id]);
+    assert.equal(row.points, row.available ? row.risk * row.weight / 100 : null);
+  }
+  assert.equal(projectDashboard(projected, now).score, projected.score);
+  assert.equal(data.indicators[0].points, 999);
 });
 
 test("structurally broken disk caches are rejected before API rendering", () => {
