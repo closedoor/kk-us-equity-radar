@@ -13,7 +13,7 @@ export function isDashboardSnapshot(data) {
     && data.aiEarnings.length > 0 && new Set(data.aiEarnings.map((row) => row.ticker)).size === data.aiEarnings.length
     && rows(data.categories, (row) => object(row) && typeof row.name === "string" && row.name.length > 0)
     && new Set(data.categories.map((row) => row.name)).size === data.categories.length
-    && rows(data.indicators, (row) => object(row) && Object.hasOwn(INDICATOR_WEIGHTS, row.id) && Number.isFinite(row.weight) && row.weight > 0
+    && rows(data.indicators, (row) => object(row) && typeof row.id === "string" && Object.hasOwn(INDICATOR_WEIGHTS, row.id) && Number.isFinite(row.weight) && row.weight > 0
       && typeof row.available === "boolean" && typeof row.title === "string" && row.title.length > 0
       && (row.available ? Number.isFinite(row.risk) : row.risk === null)
       && data.categories.some((category) => category.name === row.category)

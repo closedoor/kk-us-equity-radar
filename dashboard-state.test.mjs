@@ -82,6 +82,8 @@ test("snapshots require the complete signal board and unambiguous availability",
   const mutate = (edit) => { const data = sample(); edit(data); broken.push(data); };
   mutate((data) => { data.indicators.pop(); });
   mutate((data) => { data.indicators[0].id = "unknown-signal"; });
+  mutate((data) => { data.indicators[0].id = ["oil"]; });
+  mutate((data) => { data.indicators[0].id = { toString: "oil" }; });
   mutate((data) => { data.indicators[0].available = "false"; });
   mutate((data) => { data.indicators[0].available = false; });
   mutate((data) => { data.indicators[0].category = "missing-category"; });
