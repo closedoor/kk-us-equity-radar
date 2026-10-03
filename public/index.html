@@ -60,6 +60,7 @@
             <strong id="verdictLabel">读取中</strong>
             <p id="verdictDescription">正在抓取最新的宏观和市场数据。</p>
           </div>
+          <div class="manual-score-note" id="manualScoreNote" role="status" hidden><span id="manualScoreText"></span><button type="button" id="reviewManualButton">复核人工判断</button></div>
           <div class="score-breakdown">
             <div><span>12项基础分</span><strong id="baseScoreValue">--</strong><small>按有效权重归一化</small></div>
             <div><span>滞胀 / 政策压力</span><strong id="heatValue">--</strong><small>原油、通胀、美联储与利率</small></div>
@@ -141,7 +142,7 @@
     </main>
 
     <footer class="footer shell">
-      <span>US EQUITY RISK RADAR · v4.7.0</span>
+      <span>US EQUITY RISK RADAR · v4.7.1</span>
       <span>数据：公司 IR / SEC / BLS / BEA / Federal Reserve / FRED / Cboe / Nasdaq</span>
     </footer>
 
@@ -162,11 +163,12 @@
     </dialog>
 
     <template id="manualFieldTemplate">
-      <label class="manual-field">
+      <div class="manual-field">
         <span class="manual-label"></span>
         <span class="manual-help"></span>
-        <div><input class="manual-risk" type="number" min="0" max="100" step="1" placeholder="风险值 0–100" /><input class="manual-note" type="text" maxlength="80" placeholder="备注，例如：近三月 EPS 下调 4%" /></div>
-      </label>
+        <div class="manual-inputs"><input class="manual-risk" type="number" min="0" max="100" step="1" placeholder="风险值 0–100" /><input class="manual-note" type="text" maxlength="80" placeholder="备注，例如：近三月 EPS 下调 4%" /></div>
+        <div class="manual-review"><span class="manual-reviewed-at"></span><label class="manual-reconfirm" hidden><input class="manual-reconfirm-input" type="checkbox" />确认仍有效</label></div>
+      </div>
     </template>
 
     <noscript><p class="noscript-message">需要启用 JavaScript 才能读取和计算最新数据。</p></noscript>

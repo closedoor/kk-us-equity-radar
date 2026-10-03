@@ -59,6 +59,14 @@ test("invalid risks are excluded rather than generating negative or inflated sco
   }
 });
 
+test("availability must be a boolean rather than a truthy string or number", () => {
+  for (const available of ["false", "true", 0, 1, null, undefined]) {
+    const model = computeScores([item("oil", 80, 60, { available })]);
+    assert.equal(model.availableWeight, 0);
+    assert.equal(model.score, null);
+  }
+});
+
 test("each risk input is monotone over the full range with fixed availability", () => {
   for (const id of Object.keys(INDICATOR_WEIGHTS)) {
     let previous = -1;

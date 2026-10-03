@@ -87,6 +87,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, .indicator-card:focu
 .verdict-dot { position: absolute; left: 1px; top: 29px; width: 10px; height: 10px; border-radius: 50%; background: var(--acid); }
 .score-verdict strong { font-size: 19px; }
 .score-verdict p { min-height: 44px; margin: 7px 0 0; color: #cbd1df; font-size: 12px; line-height: 1.7; }
+.manual-score-note { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 16px; padding: 10px 0; border-top: 1px solid rgba(255,255,255,.12); color: #cbd1c8; font-size: 12px; line-height: 1.7; }
+.manual-score-note[data-review="true"] { color: #f0c56c; }
+.manual-score-note button { padding: 4px 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .score-breakdown { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; margin: 0 0 16px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.1); }
 .score-breakdown > div { padding: 12px 14px; background: rgba(247,241,226,.055); backdrop-filter: blur(8px); }
 .score-breakdown span, .score-breakdown small { display: block; color: #cbd1c8; font: 10px/1.5 var(--mono); }
@@ -234,7 +237,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, .indicator-card:focu
 .dialog-head { display: flex; justify-content: space-between; align-items: start; }.dialog-head h2 { margin: 0; font-size: 32px; letter-spacing: 0; }.icon-button { font: 300 32px/1 var(--sans); }
 .dialog-intro { color: var(--muted); font-size: 12px; line-height: 1.7; }
 .manual-fields { margin-top: 25px; border-top: 1px solid var(--line); }
-.manual-field { display: block; padding: 20px 0; border-bottom: 1px solid var(--line); }.manual-label { display: block; font-size: 14px; font-weight: 700; }.manual-help { display: block; margin: 5px 0 12px; color: var(--muted); font-size: 10px; }.manual-field div { display: grid; grid-template-columns: 160px 1fr; gap: 10px; }.manual-field input { width: 100%; padding: 11px 12px; color: var(--ink); background: rgba(255,255,255,.5); border: 1px solid var(--line); outline: none; font-size: 12px; }.manual-field input:focus { border-color: var(--ink); }
+.manual-field { display: block; padding: 20px 0; border-bottom: 1px solid var(--line); }.manual-label { display: block; font-size: 14px; font-weight: 700; }.manual-help { display: block; margin: 5px 0 12px; color: var(--muted); font-size: 10px; }.manual-inputs { display: grid; grid-template-columns: 160px 1fr; gap: 10px; }.manual-field input { width: 100%; padding: 11px 12px; color: var(--ink); background: rgba(255,255,255,.5); border: 1px solid var(--line); outline: none; font-size: 12px; }.manual-field input:focus { border-color: var(--ink); }
+.manual-review { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.manual-reconfirm { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; color: var(--ink); }
+.manual-reconfirm input { width: 16px; height: 16px; padding: 0; margin: 0; accent-color: var(--ink); }
 .dialog-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 26px; }.text-button { padding: 10px 0; color: var(--muted); font-size: 11px; }.primary-button { padding: 12px 20px; color: white; background: var(--dark); border-radius: 2px; font-size: 12px; font-weight: 700; }
 
 @media (max-width: 900px) {
@@ -256,8 +262,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, .indicator-card:focu
   [id] { scroll-margin-top: 152px; }
   .live-pill { position: absolute; left: 14px; right: 14px; bottom: 7px; padding: 0; border: 0; font-size: 10px; line-height: 16px; }
   .live-dot { flex-shrink: 0; }
-  .hero { min-height: 0; padding-block: 48px 58px; }.hero h1 { font-size: 48px; }.hero-intro { margin-block: 22px 28px; font-size: 14px; }.hero-meta { display: grid; grid-template-columns: repeat(2,1fr); gap: 18px; }.hero-meta div { min-width: 0; padding: 0; margin: 0; border: 0; }.hero-meta div:last-child { display: none; }
-  .score-panel { padding: 23px 20px; }.gauge-wrap { width: 235px; height: 235px; }.gauge-value strong { font-size: 66px; }
+  .hero { min-height: 0; gap: 22px; padding-block: 20px 40px; }.hero h1 { font-size: 36px; }.hero-copy .eyebrow { margin-bottom: 12px; font-size: 10px; }.hero-intro { margin-block: 14px 18px; font-size: 13px; line-height: 1.6; }.hero-meta { display: grid; grid-template-columns: repeat(2,1fr); gap: 14px; padding-top: 14px; }.hero-meta span { margin-bottom: 6px; }.hero-meta div { min-width: 0; padding: 0; margin: 0; border: 0; }.hero-meta div:last-child { display: none; }
+  .score-panel { padding: 20px 16px; }.gauge-wrap { width: 180px; height: 180px; margin-top: 12px; }.gauge-value strong { font-size: 56px; }
   .methodology summary span { display: block; margin: 4px 0 0; }
   .regime-coverage { grid-template-columns: 1fr; gap: 14px; }
   .weight-table th:first-child { width: auto; }
@@ -267,7 +273,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, .indicator-card:focu
   .dashboard { padding-block: 72px; }.section-heading { align-items: start; gap: 28px; flex-direction: column; }.filters { justify-content: flex-start; }.indicator-card { padding: 25px 18px; }.card-main { grid-template-columns: 1fr; }.sparkline { height: 60px; }.metric-value { font-size: 40px; }.metric-breakdown { grid-template-columns: repeat(2, 1fr); }.metric-breakdown > div:nth-child(2) { border-right: 0; }.metric-breakdown > div:nth-child(n+3) { border-top: 1px solid var(--line); }.indicator-judgment { grid-template-columns: 1fr; gap: 5px; }
   .ai-section, .calendar-section { padding-block: 70px; }.ai-heading > p, .calendar-heading > p { max-width: none; }.calendar-sync { text-align: left; }.ai-selection-note { grid-template-columns: 1fr; gap: 7px; }.ai-company-card { padding: 20px 17px; }.ai-card-head { align-items: flex-start; }.ai-snapshot-meta { flex-wrap: wrap; max-width: 160px; }.ai-company-title { align-items: start; }.ai-company-title > strong { max-width: 130px; }.ai-readout { grid-template-columns: 1fr; }.ai-card-foot { align-items: flex-start; flex-direction: column; }.ai-next-report { justify-content: flex-start; text-align: left; }.reminder-grid { grid-template-columns: 1fr; }.reminder-card, .reminder-card:nth-child(2n), .reminder-card.company-card { grid-template-columns: 28px 1fr; border-right: 0; padding-inline: 8px; }.reminder-card time { grid-column: 2; text-align: left; }.reminder-card time b { display: inline; margin-left: 8px; }.reminder-source { margin-top: 10px; }.company-reminder-list { grid-column: 2; grid-template-columns: repeat(2, 1fr); }
   .footer { flex-direction: column; gap: 8px; }
-  .manual-dialog form { padding: 22px 18px; }.manual-field div { grid-template-columns: 1fr; }
+  .manual-dialog form { padding: 22px 18px; }.manual-inputs { grid-template-columns: 1fr; }
   .manual-field input { font-size: 16px; }
   .ai-card-head time, .ai-stale-badge, .ai-financials span, .ai-readout > div > span, .ai-guidance-copy > span { font-size: 11px; }
   .ai-impact, .assessment, .ai-guidance-copy p { font-size: 12px; }
@@ -276,6 +282,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, .indicator-card:focu
 }
 
 @media (max-width: 360px) {
+  .hero h1 br { display: initial; }
   .ai-financials { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ai-financials > div:nth-child(2) { border-right: 0; }
   .ai-financials > div:last-child { grid-column: 1 / -1; padding-left: 0; border-top: 1px solid var(--line); }

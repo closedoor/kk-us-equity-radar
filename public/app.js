@@ -29,6 +29,9 @@ const els = {
   coverage: document.querySelector("#coverageValue"),
   updated: document.querySelector("#updatedValue"),
   scoreDelta: document.querySelector("#scoreDelta"),
+  manualScoreNote: document.querySelector("#manualScoreNote"),
+  manualScoreText: document.querySelector("#manualScoreText"),
+  reviewManual: document.querySelector("#reviewManualButton"),
   baseScore: document.querySelector("#baseScoreValue"),
   heat: document.querySelector("#heatValue"),
   recession: document.querySelector("#recessionValue"),
@@ -104,6 +107,11 @@ function saveOverrides() {
 
 function clamp(value, min = 0, max = 100) {
   return Math.min(max, Math.max(min, value));
+}
+
+function manualReviewInfo(override) {
+  const ageDays = override?.updatedAt ? Math.floor((Date.now() - Date.parse(override.updatedAt)) / 86_400_000) : null;
+  return { ageDays, unknownDate: !Number.isFinite(ageDays), needsReview: !Number.isFinite(ageDays) || ageDays >= 30 };
 }
 
 function dateInTimeZone(date = new Date(), timeZone = "America/New_York") {
@@ -199,7 +207,15 @@ function renderSummary(data) {
   els.coverage.textContent = Number.isFinite(data.coverage) ? `${data.coverage}%` : "--";
   els.updated.textContent = formatDate(data.generatedAt);
   const availableCount = data.indicators.filter((item) => item.available).length;
-  els.scoreDelta.textContent = `${availableCount} 项有效 · 权重 ${data.coverage}%`;
+  const manual = data.indicators.filter((item) => item.overridden);
+  const reviews = manual.map((item) => manualReviewInfo(state.overrides[item.id]));
+  const unknownDates = reviews.filter((row) => row.unknownDate).length;
+  const oldDates = reviews.filter((row) => row.needsReview && !row.unknownDate).length;
+  const reviewReasons = [unknownDates ? `${unknownDates} 项确认日期未知` : "", oldDates ? `${oldDates} 项超过 30 天未复核` : ""].filter(Boolean);
+  els.scoreDelta.textContent = `${availableCount} 项有效 · 权重 ${data.coverage}%${manual.length ? ` · ${manual.length} 项人工` : ""}`;
+  els.manualScoreNote.hidden = manual.length === 0;
+  els.manualScoreNote.dataset.review = String(reviewReasons.length > 0);
+  els.manualScoreText.textContent = `评分含 ${manual.length} 项人工判断${reviewReasons.length ? `，${reviewReasons.join("、")}，建议复核。` : "。"}`;
   els.baseScore.textContent = Number.isFinite(data.baseScore) ? data.baseScore.toFixed(1) : "--";
   els.heat.textContent = Number.isFinite(data.heatScore) ? data.heatScore.toFixed(1) : "--";
   els.recession.textContent = Number.isFinite(data.recessionScore) ? data.recessionScore.toFixed(1) : "--";
@@ -534,6 +550,11 @@ function buildManualFields(focusId = null) {
     note.setAttribute("aria-label", `${config.label}备注`);
     risk.value = state.overrides[config.id]?.risk ?? "";
     note.value = state.overrides[config.id]?.note ?? "";
+    const override = state.overrides[config.id];
+    const review = manualReviewInfo(override);
+    fragment.querySelector(".manual-reviewed-at").textContent = !override ? "尚未录入" : review.unknownDate ? "确认日期未知" : `上次确认 ${dateInTimeZone(new Date(override.updatedAt), Intl.DateTimeFormat().resolvedOptions().timeZone)} · ${review.ageDays} 天前`;
+    fragment.querySelector(".manual-reconfirm").hidden = !override;
+    fragment.querySelector(".manual-reconfirm-input").setAttribute("aria-label", `重新确认${config.label}仍有效`);
     if (focusId === config.id) field.dataset.focus = "true";
     els.manualFields.append(fragment);
   }
@@ -551,11 +572,13 @@ function openManual(focusId = null) {
 
 els.refresh.addEventListener("click", () => loadData(true));
 els.manualButton.addEventListener("click", () => openManual());
+els.reviewManual.addEventListener("click", () => openManual(manualConfig.find(({ id }) => state.overrides[id] && manualReviewInfo(state.overrides[id]).needsReview)?.id));
 els.closeManual.addEventListener("click", () => els.manualDialog.close());
 els.manualDialog.addEventListener("close", () => {
   const key = manualReturnFocus?.dataset.focusKey;
   const target = key ? document.querySelector(`[data-focus-key="${CSS.escape(key)}"]`) : manualReturnFocus;
-  if (target?.isConnected) target.focus({ preventScroll: true });
+  if (target?.isConnected && target.getClientRects().length) target.focus({ preventScroll: true });
+  else els.manualButton.focus({ preventScroll: true });
   manualReturnFocus = null;
 });
 els.filters.addEventListener("click", (event) => {
@@ -596,14 +619,15 @@ els.manualForm.addEventListener("submit", (event) => {
   els.manualFields.querySelectorAll(".manual-field").forEach((field) => {
     const riskText = field.querySelector(".manual-risk").value.trim();
     const note = field.querySelector(".manual-note").value.trim();
+    const reconfirmed = field.querySelector(".manual-reconfirm-input").checked;
     const original = manualDraft[field.dataset.id];
     // An untouched field must not overwrite a newer edit from another tab.
-    if (riskText === String(original?.risk ?? "") && note === (original?.note || "").trim()) return;
+    if (!reconfirmed && riskText === String(original?.risk ?? "") && note === (original?.note || "").trim()) return;
     if (riskText === "") delete next[field.dataset.id];
     else if (Number.isFinite(Number(riskText))) {
       const risk = clamp(Number(riskText));
       const previous = state.overrides[field.dataset.id];
-      next[field.dataset.id] = previous?.risk === risk && previous?.note === note
+      next[field.dataset.id] = !reconfirmed && previous?.risk === risk && previous?.note === note
         ? previous
         : { risk, note, updatedAt: new Date().toISOString() };
     }

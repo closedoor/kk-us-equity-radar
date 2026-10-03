@@ -11,17 +11,26 @@ async function main() {
   const fresh = () => ({ ...structuredClone(fixture), generatedAt: new Date().toISOString(), errors: [], refreshing: false });
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined });
   let passed = 0;
-  async function scenario(name, check, width = 1440) {
+  async function scenario(name, check, width = 1440, height = 960) {
     if (process.env.RADAR_TEST && !name.includes(process.env.RADAR_TEST)) return;
-    const context = await browser.newContext({ viewport: { width, height: 960 } });
+    const context = await browser.newContext({ viewport: { width, height } });
     const page = await context.newPage();
     const errors = [];
+    const failedRequests = [];
     page.on("pageerror", (error) => errors.push(error.message));
+    page.on("requestfailed", (request) => failedRequests.push({ url: request.url(), error: request.failure()?.errorText }));
     try {
       await check(page, context);
       assert.deepEqual(errors, [], name);
       console.log(`PASS ${name}`);
       passed += 1;
+    } catch (error) {
+      console.error(JSON.stringify({ scenario: name, url: page.url(), pageErrors: errors, failedRequests: failedRequests.slice(-10) }));
+      if (outputDir) {
+        await fs.mkdir(outputDir, { recursive: true });
+        await page.screenshot({ path: path.join(outputDir, `failure-${name.replace(/[^a-z0-9]+/gi, "-")}.png`) }).catch(() => {});
+      }
+      throw error;
     } finally {
       await context.close();
     }
@@ -41,6 +50,86 @@ async function main() {
     return calls;
   }
   try {
+    for (const width of [320, 390]) {
+      await scenario(`product audit: core verdict fits the first mobile viewport at ${width}px`, async (page) => {
+        await mock(page, () => ({ body: fresh() }));
+        await page.goto(baseURL);
+        await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(12);
+        await page.evaluate(() => document.fonts.ready);
+        assert.ok(await page.evaluate(() => ["#scoreValue", "#verdictLabel"].every((selector) => {
+          const box = document.querySelector(selector).getBoundingClientRect();
+          return box.top >= document.querySelector(".topbar").getBoundingClientRect().bottom && box.bottom <= innerHeight;
+        })), "The score and verdict must be readable without scrolling");
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+        if (outputDir) {
+          await fs.mkdir(outputDir, { recursive: true });
+          await page.screenshot({ path: path.join(outputDir, `first-viewport-${width}.png`) });
+        }
+      }, width, 740);
+    }
+    await scenario("product audit: stale manual judgments are disclosed and explicitly reconfirmed", async (page) => {
+      await freeze(page);
+      const updatedAt = new Date(Date.now() - 60 * 86_400_000).toISOString();
+      await page.addInitScript((value) => {
+        if (!localStorage.getItem("bearRadarOverrides")) localStorage.setItem("bearRadarOverrides", JSON.stringify({ earningsBreadth: { risk: 0, note: "old manual judgment", updatedAt: value } }));
+      }, updatedAt);
+      await mock(page, () => ({ body: fresh() }));
+      await page.goto(baseURL);
+      await expect(page.locator("#scoreDelta")).toContainText("1 项人工");
+      await expect(page.locator("#manualScoreNote")).toContainText("建议复核");
+      const before = await page.locator("#scoreValue").textContent();
+      await page.locator("#reviewManualButton").click();
+      const field = page.locator('[data-id="earningsBreadth"]');
+      await expect(field.locator(".manual-risk")).toHaveValue("0");
+      await page.locator("#manualForm .primary-button").click();
+      assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("bearRadarOverrides")).earningsBreadth.updatedAt), updatedAt);
+      await expect(page.locator("#manualScoreNote")).toContainText("建议复核");
+      await page.locator("#reviewManualButton").click();
+      await field.locator(".manual-reconfirm-input").check();
+      await page.locator("#manualForm .primary-button").click();
+      await expect(page.locator("#manualScoreNote")).not.toContainText("建议复核");
+      await expect(page.locator("#scoreValue")).toHaveText(before);
+      const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("bearRadarOverrides")).earningsBreadth);
+      assert.equal(stored.risk, 0);
+      assert.ok(Date.parse(stored.updatedAt) > Date.parse(updatedAt));
+      await page.reload();
+      await expect(page.locator("#manualScoreNote")).not.toContainText("建议复核");
+    });
+    await scenario("product audit: manual values with unknown dates stay visible for review", async (page) => {
+      await page.addInitScript(() => localStorage.setItem("bearRadarOverrides", JSON.stringify({ aiEarnings: { risk: 0, note: "legacy value" } })));
+      await mock(page, () => ({ body: fresh() }));
+      await page.goto(baseURL);
+      await expect(page.locator("#manualScoreNote")).toContainText("确认日期未知");
+      await expect(page.locator("#indicator-aiEarnings .metric-value")).toHaveText("0/100");
+      await page.locator("#reviewManualButton").click();
+      await expect(page.locator('[data-id="aiEarnings"] .manual-reviewed-at')).toContainText("日期未知");
+      await page.locator("#clearManual").click();
+      await page.locator("#closeManual").click();
+      await expect(page.locator("#manualScoreNote")).toBeHidden();
+      await expect(page.locator("#manualButton")).toBeFocused();
+    });
+    for (const [width, height] of [[320, 740], [640, 360]]) {
+      await scenario(`product audit: manual review remains usable in a ${width}x${height} viewport`, async (page) => {
+        const updatedAt = new Date(Date.now() - 60 * 86_400_000).toISOString();
+        await page.addInitScript((value) => localStorage.setItem("bearRadarOverrides", JSON.stringify({ earningsBreadth: { risk: 0, note: "review needed", updatedAt: value } })), updatedAt);
+        await mock(page, () => ({ body: fresh() }));
+        await page.goto(baseURL);
+        await expect(page.locator("#manualScoreNote")).toContainText("建议复核");
+        await page.locator("#reviewManualButton").click();
+        const dialog = page.getByRole("dialog", { name: "补充专业数据" });
+        const box = await dialog.boundingBox();
+        assert.ok(box && box.x >= 0 && box.y >= 0 && box.x + box.width <= width && box.y + box.height <= height);
+        await page.locator('[data-id="earningsBreadth"] .manual-reconfirm-input').check();
+        if (outputDir) {
+          await fs.mkdir(outputDir, { recursive: true });
+          await dialog.screenshot({ path: path.join(outputDir, `manual-review-${width}x${height}.png`) });
+        }
+        await page.locator("#manualForm .primary-button").click();
+        await expect(dialog).toBeHidden();
+        await expect(page.locator("#manualScoreNote")).not.toContainText("建议复核");
+        await expect(page.locator("#reviewManualButton")).toBeFocused();
+      }, width, height);
+    }
     for (const width of [1440, 390, 320]) {
       await scenario(`live layout ${width}px`, async (page) => {
         await page.goto(baseURL);

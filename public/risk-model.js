@@ -16,7 +16,7 @@ const REGIMES = [
 ];
 
 export function normalizeIndicator(item) {
-  const available = Boolean(item.available) && Number.isFinite(item.risk) && item.risk >= 0 && item.risk <= 100
+  const available = item.available === true && Number.isFinite(item.risk) && item.risk >= 0 && item.risk <= 100
     && Number.isFinite(item.weight) && item.weight > 0;
   return { ...item, available, risk: available ? item.risk : null, points: available ? item.risk * item.weight / 100 : null };
 }

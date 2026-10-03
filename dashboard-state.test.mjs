@@ -77,6 +77,24 @@ test("structurally broken disk caches are rejected before API rendering", () => 
   }
 });
 
+test("snapshots require the complete signal board and unambiguous availability", () => {
+  const broken = [];
+  const mutate = (edit) => { const data = sample(); edit(data); broken.push(data); };
+  mutate((data) => { data.indicators.pop(); });
+  mutate((data) => { data.indicators[0].id = "unknown-signal"; });
+  mutate((data) => { data.indicators[0].available = "false"; });
+  mutate((data) => { data.indicators[0].available = false; });
+  mutate((data) => { data.indicators[0].category = "missing-category"; });
+  mutate((data) => { data.categories = []; });
+  mutate((data) => { data.aiEarnings[1].ticker = data.aiEarnings[0].ticker; });
+  for (const data of broken) assert.equal(isDashboardSnapshot(data), false);
+  assert.equal(isDashboardSnapshot(sample()), true);
+  const oldPoints = sample();
+  oldPoints.indicators.forEach((row) => { row.points = 999; });
+  assert.equal(isDashboardSnapshot(oldPoints), true);
+  assert.equal(projectDashboard(oldPoints, now).score, projectDashboard(sample(), now).score);
+});
+
 test("overnight projections cannot show a passed macro date as the next event", () => {
   const data = sample();
   data.reminders = [{ label: "CPI", date: "2026-09-06", event: "CPI", scheduleStatus: "confirmed" }];

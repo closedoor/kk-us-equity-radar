@@ -81,6 +81,18 @@ test("a malformed disk cache returns warming status instead of crashing the HTTP
   });
 });
 
+test("an incomplete disk signal board cannot bootstrap a reassuring score", async () => {
+  const cache = { ...fixture, generatedAt: new Date().toISOString(), indicators: fixture.indicators.slice(1) };
+  await withOfflineServer(cache, async ({ read, finished }) => {
+    const first = await read();
+    assert.equal(first.status, 202);
+    assert.equal(first.body.warming, true);
+    const after = await finished();
+    assert.equal(after.score, null);
+    assert.equal(after.indicators.length, 12);
+  });
+});
+
 test("an expired cache cannot supply a total score, even before or after an upstream failure", async () => {
   const cache = { ...fixture, generatedAt: new Date(Date.now() - 2 * 86_400_000).toISOString() };
   await withOfflineServer(cache, async ({ read, finished }) => {

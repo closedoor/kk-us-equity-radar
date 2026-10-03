@@ -15,6 +15,8 @@ test("client rejects malformed success payloads before they can replace a workin
   const malformed = [null, {}, { ...fixture, indicators: null }, { ...fixture, aiEarnings: [null] },
     { ...fixture, aiChainLayers: [{ tickers: null }] }, { ...fixture, reminders: [null] },
     { ...fixture, errors: {} }, { ...fixture, scoringContext: null },
+    { ...fixture, indicators: fixture.indicators.slice(1) },
+    { ...fixture, indicators: fixture.indicators.map((row, index) => index ? row : { ...row, available: "false" }) },
     { ...fixture, indicators: [{ ...fixture.indicators[0], sparkline: {} }] }];
   for (const payload of malformed) {
     await assert.rejects(requestDashboard("/api/dashboard", { fetchImpl: response(payload) }), /数据格式异常/);

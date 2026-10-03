@@ -9,13 +9,19 @@ export function isDashboardSnapshot(data) {
   return Boolean(object(data) && typeof data.generatedAt === "string" && Number.isFinite(Date.parse(data.generatedAt))
     && Number.isFinite(data.coverage) && data.coverage >= 0 && data.coverage <= 100
     && (data.scoringContext === undefined || object(data.scoringContext))
-    && rows(data.aiEarnings, (row) => object(row) && typeof row.ticker === "string")
-    && rows(data.categories, (row) => object(row) && typeof row.name === "string")
-    && rows(data.indicators, (row) => object(row) && typeof row.id === "string" && Number.isFinite(row.weight) && row.weight > 0
+    && rows(data.aiEarnings, (row) => object(row) && typeof row.ticker === "string" && row.ticker.length > 0)
+    && data.aiEarnings.length > 0 && new Set(data.aiEarnings.map((row) => row.ticker)).size === data.aiEarnings.length
+    && rows(data.categories, (row) => object(row) && typeof row.name === "string" && row.name.length > 0)
+    && new Set(data.categories.map((row) => row.name)).size === data.categories.length
+    && rows(data.indicators, (row) => object(row) && Object.hasOwn(INDICATOR_WEIGHTS, row.id) && Number.isFinite(row.weight) && row.weight > 0
+      && typeof row.available === "boolean" && typeof row.title === "string" && row.title.length > 0
+      && (row.available ? Number.isFinite(row.risk) : row.risk === null)
+      && data.categories.some((category) => category.name === row.category)
       && (row.risk === null || (Number.isFinite(row.risk) && row.risk >= 0 && row.risk <= 100))
       && (row.points === null || Number.isFinite(row.points))
       && optionalRows(row.sparkline, object) && (row.breakdown == null || rows(row.breakdown, object)))
-    && data.indicators.length && new Set(data.indicators.map((row) => row.id)).size === data.indicators.length
+    && data.indicators.length === Object.keys(INDICATOR_WEIGHTS).length
+    && new Set(data.indicators.map((row) => row.id)).size === data.indicators.length
     && optionalRows(data.aiChainLayers, (row) => object(row) && rows(row.tickers, (ticker) => typeof ticker === "string"))
     && optionalRows(data.reminders, (row) => object(row) && (row.date == null || validDate(row.date)) && optionalRows(row.companies, object))
     && optionalRows(data.errors, (error) => typeof error === "string"));
