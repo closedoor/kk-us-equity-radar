@@ -154,7 +154,7 @@ function formatDate(date) {
   if (!date) return "--";
   const parsed = new Date(date);
   if (Number.isNaN(parsed.getTime())) return "--";
-  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(parsed);
+  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, timeZoneName: "short" }).format(parsed);
 }
 
 function formatCacheAge(value) {
@@ -203,9 +203,13 @@ function renderSummary(data) {
   els.uplift.textContent = Number.isFinite(data.riskUplift) ? `+${data.riskUplift.toFixed(0)}` : "--";
   const cacheAge = formatCacheAge(data.cacheAgeMs);
   const offline = navigator.onLine === false;
-  const status = offline || state.loadError ? "error" : data.cacheExpired || data.refreshing || state.syncPending || data.stale ? "updating" : "connected";
+  const marketFailed = Boolean(data.errors?.length);
+  const calendarFailed = Object.values(data.calendarSync?.sources || {}).some((source) => source?.error);
+  const status = offline || state.loadError ? "error" : data.cacheExpired || data.refreshing || state.syncPending || data.stale || marketFailed || calendarFailed ? "updating" : "connected";
   setLiveStatus(offline ? "离线 · 暂用已有数据" : state.loadError ? "连接失败" : data.cacheExpired ? "缓存已过期 · 等待新数据" : data.refreshing || state.syncPending
     ? `后台更新中 · 暂用${cacheAge}缓存`
+    : marketFailed ? "部分来源失败 · 暂用已有数据"
+    : calendarFailed ? "日程部分同步失败"
     : data.stale
       ? `更新暂缓 · 暂用${cacheAge}缓存`
       : "已连接 · 数据已更新", status);
@@ -262,6 +266,13 @@ function safeTone(value) {
   return ["positive", "negative", "mixed", "good", "bad"].includes(value) ? value : "mixed";
 }
 
+function scheduleLabel(status, basis) {
+  if (status === "confirmed") return "公司确认";
+  if (status === "pending") return "待核对";
+  if (basis === "quarterly-fallback") return "季度推算";
+  return basis === "nasdaq" ? "Nasdaq 预估" : "日期预估";
+}
+
 function renderAiEarnings(rows = [], layers = []) {
   els.aiChainMap.innerHTML = layers.map((layer, index) => `<article class="ai-layer-card">
     <span class="ai-layer-index">0${index + 1}</span><h3>${escapeHtml(layer.name)}</h3><p>${escapeHtml(layer.description)}</p>
@@ -285,11 +296,11 @@ function renderAiEarnings(rows = [], layers = []) {
       <div><span>${escapeHtml(row.marginLabel || "毛利率")}</span><strong>${escapeHtml(row.grossMargin)}</strong></div>
     </div>
     <div class="ai-readout">
-      <div><span>本季表现</span><p class="assessment ${safeTone(row.resultTone)}">${escapeHtml(row.resultAssessment)}</p></div>
-      <div><span>下一期判断</span><p class="assessment ${safeTone(row.guidanceTone)}">${escapeHtml(row.guidanceAssessment)}</p></div>
+      <div><span>${row.snapshotStale ? "历史表现" : "本季表现"}</span><p class="assessment ${safeTone(row.resultTone)}">${escapeHtml(row.resultAssessment)}</p></div>
+      <div><span>${row.snapshotStale ? "历史指引" : "下一期判断"}</span><p class="assessment ${safeTone(row.guidanceTone)}">${escapeHtml(row.guidanceAssessment)}</p></div>
     </div>
-    <div class="ai-guidance-copy"><span>公司指引</span><p>${escapeHtml(row.guidance)}</p><small>${escapeHtml(row.note)}</small></div>
-    <div class="ai-card-foot"><a data-focus-key="financial-${escapeHtml(row.ticker)}" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">查看官方财报</a><div class="ai-next-report"><span>下次财报 <strong>${escapeHtml(nextReportLabel)}</strong></span><i class="schedule-status ${scheduleConfirmed ? "confirmed" : "estimated"}">${scheduleConfirmed ? "公司确认" : row.nextReportStatus === "pending" ? "待核对" : "市场预估"}</i>${scheduleSource}</div></div>
+    <div class="ai-guidance-copy"><span>${row.snapshotStale ? "历史公司指引" : "公司指引"}</span><p>${escapeHtml(row.guidance)}</p><small>${escapeHtml(row.note)}</small></div>
+    <div class="ai-card-foot"><a data-focus-key="financial-${escapeHtml(row.ticker)}" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">查看官方财报</a><div class="ai-next-report"><span>下次财报 <strong>${escapeHtml(nextReportLabel)}</strong></span><i class="schedule-status ${scheduleConfirmed ? "confirmed" : "estimated"}">${scheduleLabel(row.nextReportStatus, row.nextReportBasis)}</i>${scheduleSource}</div></div>
   </article>`;
   }).join("");
 }
@@ -302,7 +313,7 @@ function renderReminders(rows = []) {
     const days = dateParts?.length === 3
       ? Math.round((Date.UTC(dateParts[0], dateParts[1] - 1, dateParts[2]) - todayUtc) / 86_400_000)
       : null;
-    const companyList = row.companies?.length ? `<div class="company-reminder-list">${row.companies.map((company) => `<div class="company-reminder-item"><b>${escapeHtml(company.ticker)}</b><em>上期 ${escapeHtml(company.released)}</em><em>下期 ${escapeHtml(company.next)}</em><i class="${company.status === "confirmed" ? "confirmed" : "estimated"}">${company.status === "confirmed" ? "已确认" : company.status === "pending" ? "待核对" : "预计窗口"}</i>${company.source ? `<a data-focus-key="company-date-${escapeHtml(company.ticker)}" href="${safeExternalUrl(company.source)}" target="_blank" rel="noreferrer">核对日期</a>` : ""}</div>`).join("")}</div>` : "";
+    const companyList = row.companies?.length ? `<div class="company-reminder-list">${row.companies.map((company) => `<div class="company-reminder-item"><b>${escapeHtml(company.ticker)}</b><em>上期 ${escapeHtml(company.released)}</em><em>下期 ${escapeHtml(company.next)}</em><i class="${company.status === "confirmed" ? "confirmed" : "estimated"}">${scheduleLabel(company.status, company.basis)}</i>${company.source ? `<a data-focus-key="company-date-${escapeHtml(company.ticker)}" href="${safeExternalUrl(company.source)}" target="_blank" rel="noreferrer">核对日期</a>` : ""}</div>`).join("")}</div>` : "";
     const sourceLink = !row.companies?.length && row.linkLabel ? `<a class="reminder-source" data-focus-key="calendar-${escapeHtml(row.indicatorId)}" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">${escapeHtml(row.linkLabel)} <span aria-hidden="true">↗</span></a>` : "";
     const relativeLabel = days === null ? "" : days < 0 ? "日期已过" : days === 0 ? "今天" : `${days} 天后`;
     const dateLabel = row.date ? escapeHtml(row.date) : row.companies ? "逐家公司" : "待核对";
@@ -324,8 +335,8 @@ function renderCalendarSync(sync) {
   const cadence = Number.isFinite(sync.refreshEveryHours) ? ` · 每 ${sync.refreshEveryHours} 小时自动核对` : "";
   const failureRetry = Number.isFinite(sync.retryAfterFailureMinutes) ? ` · 失败后每 ${sync.retryAfterFailureMinutes} 分钟重试` : cadence;
   els.calendarSyncStatus.textContent = failed
-    ? `日程最近核对 ${formatDate(sync.updatedAt)} · ${failed} 个来源暂不可用，已保留最近成功日程${failureRetry}`
-    : `日程自动同步 · 最近核对 ${formatDate(sync.updatedAt)}${cadence}`;
+    ? `日程日期按纽约时间 · 最近核对 ${formatDate(sync.updatedAt)} · ${failed} 个来源暂不可用，已保留最近成功日程${failureRetry}`
+    : `日程日期按纽约时间 · 最近核对 ${formatDate(sync.updatedAt)}${cadence}`;
 }
 
 function sparklineSvg(points) {
@@ -409,8 +420,22 @@ function render() {
   renderAiEarnings(data.aiEarnings, data.aiChainLayers);
   renderReminders(data.reminders);
   renderCalendarSync(data.calendarSync);
-  renderErrors(data.errors);
+  const calendarErrors = Object.entries(data.calendarSync?.sources || {}).filter(([, source]) => source?.error)
+    .map(([key]) => `${({ bls: "CPI / 就业", fomc: "美联储", earnings: "财报" })[key] || key}日程来源暂不可用`);
+  renderErrors([...(data.errors || []), ...calendarErrors]);
   if (focusKey) document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`)?.focus({ preventScroll: true });
+}
+
+function renderInitialState() {
+  const failed = Boolean(state.loadError);
+  els.verdict.textContent = failed ? "连接失败" : "正在同步数据";
+  els.verdictDescription.textContent = failed ? "暂时无法读取数据，请稍后重试。" : "正在同步首批数据，完成后自动显示。";
+  els.scoreGauge.setAttribute("aria-label", "综合市场风险分暂不可用");
+  els.gauge.style.visibility = "hidden";
+  els.marker.hidden = true;
+  els.actionLabel.textContent = "等待有效数据";
+  els.actionDetail.textContent = els.verdictDescription.textContent;
+  els.calendarSyncStatus.textContent = failed ? "日程尚未同步" : "正在核对日程";
 }
 
 let activeLoad = null;
@@ -444,6 +469,7 @@ function loadData(force = false) {
       if (warming) {
         if (state.data) render();
         else {
+          renderInitialState();
           setLiveStatus("正在同步首批数据");
           renderErrors();
         }
@@ -458,7 +484,8 @@ function loadData(force = false) {
       else pollAttempts = 0;
     } catch (error) {
       state.loadError = error.message;
-      render();
+      if (state.data) render();
+      else renderInitialState();
       setLiveStatus(navigator.onLine === false ? "网络已断开" : "连接失败", "error");
       els.loading.hidden = true;
       els.loading.replaceChildren();
@@ -598,7 +625,10 @@ window.addEventListener("online", refreshAfterInactivity);
 window.addEventListener("offline", () => {
   state.loadError = "网络已断开";
   render();
-  if (!state.data) setLiveStatus("网络已断开", "error");
+  if (!state.data) {
+    renderInitialState();
+    setLiveStatus("网络已断开", "error");
+  }
   renderErrors();
 });
 window.addEventListener("storage", (event) => {

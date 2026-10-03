@@ -710,7 +710,7 @@ async function buildDashboard() {
     calendarSchedule: calendarService.snapshot(),
     calendarSync: calendarService.syncStatus(),
     methodology: {
-      version: "4.6.7",
+      version: "4.6.8",
       note: "先计算 12 项基础加权分，再用 30% 的主导风险链和最多 14 分的同向共振修正，避免油价、通胀、政策与利率同时恶化时被低风险项过度稀释。基础分与修正项均单独展示。",
       bands: [
         { min: 0, max: 20, label: "健康、风险较低" },

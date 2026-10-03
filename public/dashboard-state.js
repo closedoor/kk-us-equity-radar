@@ -51,8 +51,8 @@ export function resolveAiSnapshots(rows = [], nowMs = Date.now()) {
     const passed = validDate(nextDate) && nextDate < today;
     return {
       ...row,
-      ...(passed ? { nextReportDate: null, nextReportEstimatedDate: null, nextReportLabel: "待核对下一期日程", nextReportStatus: "pending" } : {}),
-      snapshotStale, snapshotAgeDays: age, snapshotLabel: snapshotStale ? "财报解读待更新" : `资料截至 ${row.released}`,
+      ...(passed ? { nextReportDate: null, nextReportEstimatedDate: null, nextReportLabel: "待核对下一期日程", nextReportStatus: "pending", nextReportBasis: null } : {}),
+      snapshotStale, snapshotAgeDays: age, snapshotLabel: Number.isFinite(age) && age >= 0 ? `资料截至 ${row.released}` : "资料日期待核对",
     };
   });
 }
@@ -63,7 +63,7 @@ function resolveReminders(rows = [], aiEarnings, nowMs) {
   return rows.map((row) => {
     if (row.companies) return { ...row, companies: row.companies.map((company) => {
       const report = companies.get(company.ticker);
-      return report ? { ...company, next: report.nextReportLabel || report.nextReportDate, status: report.nextReportStatus } : { ...company };
+      return report ? { ...company, next: report.nextReportLabel || report.nextReportDate, status: report.nextReportStatus, basis: report.nextReportBasis, source: report.nextReportSource || null } : { ...company };
     }) };
     if (validDate(row.date) && row.date < today) {
       return { ...row, date: null, scheduleStatus: "pending", event: "上期日程已过，待同步下一期安排" };

@@ -112,6 +112,35 @@ test("calendar service uses automatic dates and keeps confirmed company dates", 
   assert.equal(reminders[4].companies[0].status, "confirmed");
 });
 
+test("earnings schedules distinguish company dates, provider estimates, and quarterly projections", () => {
+  const service = createCalendarService({
+    fetchText: async () => "",
+    now: () => new Date("2026-10-03T12:00:00Z"),
+    aiEarnings: [
+      { ticker: "CONFIRMED", released: "2026-07-01", nextReportDate: "2026-10-20", nextReportStatus: "confirmed", nextReportSource: "https://example.com/ir" },
+      { ticker: "PROVIDER", released: "2026-07-01" },
+      { ticker: "FALLBACK", released: "2026-07-15" },
+    ],
+  });
+  service.hydrate({ earnings: { PROVIDER: { date: "2026-10-21", status: "estimated" } } });
+  const rows = service.resolvedAiEarnings();
+  assert.deepEqual(rows.map((row) => row.nextReportBasis), ["company", "nasdaq", "quarterly-fallback"]);
+  assert.equal(rows[2].nextReportDate, null);
+  assert.equal(rows[2].nextReportEstimatedDate, "2026-10-15");
+  assert.equal(rows[2].nextReportSource, null);
+  assert.deepEqual(service.buildReminders()[4].companies.map((row) => row.basis), ["company", "nasdaq", "quarterly-fallback"]);
+});
+
+test("an unknown or future financial report cannot invent a quarterly earnings schedule", () => {
+  for (const released of [undefined, "invalid", "2026-02-30", "2026-12-01", "2025-01-01"]) {
+    const service = createCalendarService({ fetchText: async () => "", aiEarnings: [{ ticker: "TEST", released }], now: () => new Date("2026-10-03T12:00:00Z") });
+    const [row] = service.resolvedAiEarnings();
+    assert.equal(row.nextReportDate, null);
+    assert.equal(row.nextReportEstimatedDate, null);
+    assert.equal(row.nextReportStatus, "pending");
+  }
+});
+
 test("marks a company snapshot stale after its confirmed next report has passed", () => {
   const service = createCalendarService({
     fetchText: async () => "",
@@ -128,7 +157,7 @@ test("marks a company snapshot stale after its confirmed next report has passed"
 
   const [company] = service.resolvedAiEarnings();
   assert.equal(company.snapshotStale, true);
-  assert.equal(company.snapshotLabel, "财报解读待更新");
+  assert.equal(company.snapshotLabel, "资料截至 2026-05-20");
   assert.match(company.nextReportLabel, /待官宣/);
 });
 
@@ -153,7 +182,7 @@ test("marks a company snapshot stale after an automatically estimated report dat
 
   const [company] = service.resolvedAiEarnings();
   assert.equal(company.snapshotStale, true);
-  assert.equal(company.snapshotLabel, "财报解读待更新");
+  assert.equal(company.snapshotLabel, "资料截至 2026-06-03");
   assert.match(company.nextReportLabel, /2026-12-03/);
 });
 

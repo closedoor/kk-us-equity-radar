@@ -185,7 +185,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, .indicator-card:focu
 .ai-snapshot-meta { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
 .ai-stale-badge { padding: 3px 6px; color: #9f441f; background: rgba(228,110,49,.12); border: 1px solid rgba(228,110,49,.24); font: 8px var(--mono); }
 .ai-company-card.snapshot-stale { background: rgba(255,255,255,.35); }
-.ai-company-card.snapshot-stale .ai-financials, .ai-company-card.snapshot-stale .ai-readout, .ai-company-card.snapshot-stale .ai-guidance-copy { opacity: .72; }
 .ai-company-title { align-items: end; margin-top: 22px; }.ai-company-title h3 { margin: 0; font-size: 26px; letter-spacing: 0; }.ai-company-title span { display: block; margin-top: 5px; color: var(--muted); font: 9px var(--mono); }.ai-company-title > strong { max-width: 190px; font-size: 11px; text-align: right; }
 .ai-impact { min-height: 49px; margin: 16px 0 20px; color: #555852; font-size: 11px; line-height: 1.7; }
 .ai-financials { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--ink); border-bottom: 1px solid var(--line); }
@@ -248,6 +247,17 @@ button:focus-visible, a:focus-visible, input:focus-visible, .indicator-card:focu
   .ai-section, .calendar-section { padding-block: 70px; }.ai-heading > p, .calendar-heading > p { max-width: none; }.calendar-sync { text-align: left; }.ai-selection-note { grid-template-columns: 1fr; gap: 7px; }.ai-company-card { padding: 20px 17px; }.ai-card-head { align-items: flex-start; }.ai-snapshot-meta { flex-wrap: wrap; max-width: 160px; }.ai-company-title { align-items: start; }.ai-company-title > strong { max-width: 130px; }.ai-readout { grid-template-columns: 1fr; }.ai-card-foot { align-items: flex-start; flex-direction: column; }.ai-next-report { justify-content: flex-start; text-align: left; }.reminder-grid { grid-template-columns: 1fr; }.reminder-card, .reminder-card:nth-child(2n), .reminder-card.company-card { grid-template-columns: 28px 1fr; border-right: 0; padding-inline: 8px; }.reminder-card time { grid-column: 2; text-align: left; }.reminder-card time b { display: inline; margin-left: 8px; }.reminder-source { margin-top: 10px; }.company-reminder-list { grid-column: 2; grid-template-columns: repeat(2, 1fr); }
   .footer { flex-direction: column; gap: 8px; }
   .manual-dialog form { padding: 22px 18px; }.manual-field div { grid-template-columns: 1fr; }
+  .manual-field input { font-size: 16px; }
+  .ai-card-head time, .ai-stale-badge, .ai-financials span, .ai-readout > div > span, .ai-guidance-copy > span { font-size: 11px; }
+  .ai-impact, .assessment, .ai-guidance-copy p { font-size: 12px; }
+  .ai-guidance-copy small, .ai-company-title span, .ai-next-report, .schedule-status, .ai-card-foot > a, .date-source, .company-reminder-item em, .company-reminder-item a { font-size: 10px; }
+  .company-reminder-item i { font-size: 9px; }
+}
+
+@media (max-width: 360px) {
+  .ai-financials { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ai-financials > div:nth-child(2) { border-right: 0; }
+  .ai-financials > div:last-child { grid-column: 1 / -1; padding-left: 0; border-top: 1px solid var(--line); }
 }
 
 @media (prefers-reduced-motion: reduce) {

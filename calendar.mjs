@@ -447,14 +447,14 @@ export function createCalendarService({
         snapshotStale,
         snapshotAgeDays,
         snapshotValidThrough,
-        snapshotLabel: snapshotStale ? "财报解读待更新" : `资料截至 ${company.released}`,
+        snapshotLabel: Number.isFinite(snapshotAgeDays) && snapshotAgeDays >= 0 ? `资料截至 ${company.released}` : "资料日期待核对",
       };
       const automaticIsFuture = validIsoDate(automatic?.date) && automatic.date >= today;
       const confirmedFallback = company.nextReportStatus === "confirmed"
         && validIsoDate(company.nextReportDate)
         && company.nextReportDate >= today;
 
-      if (confirmedFallback && (!automaticIsFuture || automatic.date !== company.nextReportDate)) return { ...company, ...snapshot };
+      if (confirmedFallback && (!automaticIsFuture || automatic.date !== company.nextReportDate)) return { ...company, ...snapshot, nextReportBasis: "company" };
 
       if (automaticIsFuture) {
         const confirmed = confirmedFallback && company.nextReportDate === automatic.date;
@@ -464,13 +464,17 @@ export function createCalendarService({
           nextReportDate: automatic.date,
           nextReportLabel: `${automatic.date}${automatic.timing ? ` · ${automatic.timing}` : ""}`,
           nextReportStatus: confirmed ? "confirmed" : "estimated",
+          nextReportBasis: confirmed ? "company" : "nasdaq",
           nextReportSource: confirmed
             ? company.nextReportSource
             : `https://www.nasdaq.com/market-activity/stocks/${nasdaqSymbol(company).toLowerCase()}/earnings`,
         };
       }
 
-      if (confirmedFallback) return { ...company, ...snapshot };
+      if (confirmedFallback) return { ...company, ...snapshot, nextReportBasis: "company" };
+      if (!Number.isFinite(snapshotAgeDays) || snapshotAgeDays < 0 || snapshotAgeDays > 120) {
+        return { ...company, ...snapshot, nextReportDate: null, nextReportEstimatedDate: null, nextReportStatus: "pending", nextReportBasis: null, nextReportLabel: "待核对下一期日程", nextReportSource: null };
+      }
       const estimate = estimatedQuarterDate(company.released, at);
       return {
         ...company,
@@ -479,6 +483,7 @@ export function createCalendarService({
         nextReportEstimatedDate: estimate,
         nextReportLabel: `预计 ${estimate} 前后 · 待官宣`,
         nextReportStatus: "estimated",
+        nextReportBasis: "quarterly-fallback",
         nextReportSource: null,
       };
     });
@@ -520,14 +525,15 @@ export function createCalendarService({
       },
       {
         indicatorId: "aiEarnings", label: "八家 AI 巨头财报", date: null,
-        event: "Nasdaq 自动更新日期；公司已官宣与市场预估分开标注",
+        event: "公司确认、Nasdaq 预估与季度推算分开标注",
         source: "https://www.nasdaq.com/market-activity/earnings",
-        companies: earnings.map(({ company, ticker, released, nextReportDate, nextReportLabel, nextReportStatus, nextReportSource }) => ({
+        companies: earnings.map(({ company, ticker, released, nextReportDate, nextReportLabel, nextReportStatus, nextReportSource, nextReportBasis }) => ({
           company,
           ticker,
           released,
           next: nextReportLabel || nextReportDate,
           status: nextReportStatus || "estimated",
+          basis: nextReportBasis,
           source: nextReportSource || null,
         })),
       },

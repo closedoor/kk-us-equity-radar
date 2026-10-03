@@ -164,6 +164,9 @@ async function main() {
       await mock(page, () => failed ? { status: 503, body: {} } : { body: fresh() });
       await page.goto(baseURL);
       await expect(page.locator("#errorBanner")).toContainText("503");
+      await expect(page.locator("#verdictLabel")).toHaveText("连接失败");
+      await expect(page.locator("#scoreGauge")).toHaveAttribute("aria-label", "综合市场风险分暂不可用");
+      assert.ok(await page.locator("#errorBanner").evaluate((element) => element.getBoundingClientRect().top < innerHeight));
       failed = false;
       await page.clock.runFor(15000);
       await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(12);
@@ -197,6 +200,48 @@ async function main() {
       await page.locator('#manualForm button[value="cancel"]').click();
       await expect(page.locator("#coverageValue")).toHaveText(`${baselineCoverage}%`);
       assert.equal(await page.evaluate(() => Boolean(window.injected)), false);
+    });
+    await scenario("partial market and calendar failures are visible from the overview", async (page) => {
+      await freeze(page);
+      let mode = "market";
+      await mock(page, () => {
+        const data = fresh();
+        data.calendarSync.sources = Object.fromEntries(Object.entries(data.calendarSync.sources).map(([key, source]) => [key, { ...source, error: mode === "calendar" && key === "bls" ? "calendar unavailable" : null }]));
+        if (mode === "market") data.errors = ["Oil source unavailable"];
+        return { body: data };
+      });
+      await page.goto(baseURL);
+      await expect(page.locator("#liveText")).toContainText("部分");
+      await expect(page.locator(".live-pill")).toHaveAttribute("data-state", "updating");
+      await expect(page.locator("#errorBanner")).toBeVisible();
+      assert.ok(await page.locator("#errorBanner").evaluate((element) => element.getBoundingClientRect().top < innerHeight));
+      mode = "calendar";
+      await page.locator("#refreshButton").click();
+      await expect(page.locator("#liveText")).toContainText("日程");
+      await expect(page.locator(".live-pill")).toHaveAttribute("data-state", "updating");
+      await expect(page.locator("#errorBanner")).toContainText("日程");
+      mode = "healthy";
+      await page.locator("#refreshButton").click();
+      await expect(page.locator("#liveText")).toHaveText("已连接 · 数据已更新");
+      await expect(page.locator("#errorBanner")).toBeHidden();
+    });
+    await scenario("financial cards retain historical dates and distinguish schedule evidence", async (page) => {
+      const data = fresh();
+      for (let index = 0; index < 3; index += 1) {
+        Object.assign(data.aiEarnings[index], { nextReportDate: "2026-12-15", nextReportLabel: "2026-12-15", nextReportStatus: index === 0 ? "confirmed" : "estimated", nextReportBasis: ["company", "nasdaq", "quarterly-fallback"][index] });
+      }
+      Object.assign(data.aiEarnings[3], { released: "2026-01-01", snapshotStale: true });
+      data.reminders[4].companies = data.aiEarnings.map((row) => ({ ticker: row.ticker, released: row.released, next: row.nextReportLabel, status: row.nextReportStatus, basis: row.nextReportBasis }));
+      await mock(page, () => ({ body: data }));
+      await page.goto(baseURL);
+      const cards = page.locator(".ai-company-card");
+      for (const [index, label] of ["公司确认", "Nasdaq 预估", "季度推算"].entries()) {
+        await expect(cards.nth(index).locator(".schedule-status")).toHaveText(label);
+        await expect(page.locator(".company-reminder-item").nth(index).locator("i")).toHaveText(label);
+      }
+      await expect(cards.nth(3).locator("time")).toContainText("2026-01-01");
+      await expect(cards.nth(3).locator(".ai-readout")).toContainText("历史表现");
+      await expect(cards.nth(3).locator(".ai-readout")).toContainText("历史指引");
     });
     await scenario("keyboard Enter saves manual input and Escape discards a draft", async (page) => {
       await mock(page, () => ({ body: fresh() }));
