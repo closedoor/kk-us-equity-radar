@@ -8,7 +8,11 @@ const outputDir = process.env.RADAR_SCREENSHOTS;
 
 async function main() {
   const fixture = JSON.parse(await fs.readFile(path.join(__dirname, "../dashboard-cache.json"), "utf8"));
-  const fresh = () => ({ ...structuredClone(fixture), generatedAt: new Date().toISOString(), errors: [], refreshing: false });
+  const fresh = () => {
+    const data = { ...structuredClone(fixture), generatedAt: new Date().toISOString(), errors: [], refreshing: false };
+    for (const source of Object.values(data.calendarSync?.sources || {})) source.error = null;
+    return data;
+  };
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined });
   let passed = 0;
   async function scenario(name, check, width = 1440, height = 960) {
@@ -219,6 +223,62 @@ async function main() {
       await page.clock.runFor(15000);
       await expect(page.locator("#errorBanner")).toBeHidden();
       await expect(page.locator('[data-filter="信用"]')).toHaveAttribute("aria-pressed", "true");
+    });
+    for (const [name, corrupt] of [
+      ["nested malformed payload cannot replace the last complete display", (data) => { data.aiEarnings[0].guidanceTone = { toString: null }; }],
+      ["malformed saved calendar cannot replace the last complete display", (data) => { data.calendarSchedule.earnings.NVDA = { date: "2026-11-18", timing: { toString: null } }; }],
+    ]) await scenario(name, async (page) => {
+      await freeze(page);
+      const valid = fresh();
+      const broken = structuredClone(valid);
+      corrupt(broken);
+      broken.indicators[0].title = "should not replace the previous board";
+      const calls = await mock(page, (count) => ({ body: count === 2 ? broken : valid }));
+      await page.goto(baseURL);
+      await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(12);
+      const before = await page.locator("#scoreValue").textContent();
+      await page.locator("#refreshButton").click();
+      await expect(page.locator("#errorBanner")).toContainText("数据格式异常");
+      await expect(page.locator("#scoreValue")).toHaveText(before);
+      await expect(page.locator("#indicator-oil .card-title")).toHaveText(valid.indicators[0].title);
+      await page.clock.runFor(15_000);
+      await expect.poll(() => calls.length).toBe(3);
+      await expect(page.locator("#errorBanner")).toBeHidden();
+      await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(12);
+    });
+    await scenario("refresh button retains keyboard focus after manual and background updates", async (page) => {
+      await freeze(page);
+      const calls = [];
+      let release;
+      await page.route("**/api/dashboard*", async (route) => {
+        calls.push(route.request().url());
+        if (calls.length >= 2) await new Promise((resolve) => { release = resolve; });
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(fresh()) });
+      });
+      await page.goto(baseURL);
+      await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(12);
+      const refresh = page.locator("#refreshButton");
+      await refresh.focus();
+      await page.keyboard.press("Enter");
+      await expect.poll(() => calls.length).toBe(2);
+      await expect(refresh).toBeDisabled();
+      release();
+      await expect(refresh).toBeEnabled();
+      await expect(refresh).toBeFocused();
+      await page.clock.runFor(15 * 60 * 1000);
+      await expect.poll(() => calls.length).toBe(3);
+      await expect(refresh).toBeDisabled();
+      release();
+      await expect(refresh).toBeEnabled();
+      await expect(refresh).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect.poll(() => calls.length).toBe(4);
+      await expect(refresh).toBeDisabled();
+      const other = page.getByRole("link", { name: "重要日期", exact: true });
+      await other.focus();
+      release();
+      await expect(refresh).toBeEnabled();
+      await expect(other).toBeFocused();
     });
     await scenario("a stalled response body times out and recovers automatically", async (page) => {
       await freeze(page);

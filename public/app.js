@@ -315,7 +315,7 @@ function renderAiEarnings(rows = [], layers = []) {
   els.aiCompanyGrid.innerHTML = rows.map((row) => {
     const nextReportLabel = row.nextReportLabel || row.nextReportDate || "待官方公布";
     const scheduleConfirmed = row.nextReportStatus === "confirmed";
-    const scheduleSource = row.nextReportSource ? `<a class="date-source" data-focus-key="report-date-${escapeHtml(row.ticker)}" href="${safeExternalUrl(row.nextReportSource)}" target="_blank" rel="noreferrer">核对日期</a>` : "";
+    const scheduleSource = row.nextReportSource ? `<a class="date-source" data-focus-key="report-date-${escapeHtml(row.ticker)}" aria-label="核对日期：${escapeHtml(row.company)} ${escapeHtml(row.ticker)} 下次财报" href="${safeExternalUrl(row.nextReportSource)}" target="_blank" rel="noreferrer">核对日期</a>` : "";
     return `<article class="ai-company-card${row.snapshotStale ? " snapshot-stale" : ""}">
     <div class="ai-card-head">
       <span class="ai-layer-pill">${escapeHtml(row.layer)}</span>
@@ -333,7 +333,7 @@ function renderAiEarnings(rows = [], layers = []) {
       <div><span>${row.snapshotStale ? "历史指引" : "下一期判断"}</span><p class="assessment ${safeTone(row.guidanceTone)}">${escapeHtml(row.guidanceAssessment)}</p></div>
     </div>
     <div class="ai-guidance-copy"><span>${row.snapshotStale ? "历史公司指引" : "公司指引"}</span><p>${escapeHtml(row.guidance)}</p><small>${escapeHtml(row.note)}</small></div>
-    <div class="ai-card-foot"><a data-focus-key="financial-${escapeHtml(row.ticker)}" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">查看官方财报</a><div class="ai-next-report"><span>下次财报 <strong>${escapeHtml(nextReportLabel)}</strong></span><i class="schedule-status ${scheduleConfirmed ? "confirmed" : "estimated"}">${scheduleLabel(row.nextReportStatus, row.nextReportBasis)}</i>${scheduleSource}</div></div>
+    <div class="ai-card-foot"><a data-focus-key="financial-${escapeHtml(row.ticker)}" aria-label="查看官方财报：${escapeHtml(row.company)} ${escapeHtml(row.ticker)} ${escapeHtml(row.period)}" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">查看官方财报</a><div class="ai-next-report"><span>下次财报 <strong>${escapeHtml(nextReportLabel)}</strong></span><i class="schedule-status ${scheduleConfirmed ? "confirmed" : "estimated"}">${scheduleLabel(row.nextReportStatus, row.nextReportBasis)}</i>${scheduleSource}</div></div>
   </article>`;
   }).join("");
 }
@@ -346,7 +346,7 @@ function renderReminders(rows = []) {
     const days = dateParts?.length === 3
       ? Math.round((Date.UTC(dateParts[0], dateParts[1] - 1, dateParts[2]) - todayUtc) / 86_400_000)
       : null;
-    const companyList = row.companies?.length ? `<div class="company-reminder-list">${row.companies.map((company) => `<div class="company-reminder-item"><b>${escapeHtml(company.ticker)}</b><em>上期 ${escapeHtml(company.released)}</em><em>下期 ${escapeHtml(company.next)}</em><i class="${company.status === "confirmed" ? "confirmed" : "estimated"}">${scheduleLabel(company.status, company.basis)}</i>${company.source ? `<a data-focus-key="company-date-${escapeHtml(company.ticker)}" href="${safeExternalUrl(company.source)}" target="_blank" rel="noreferrer">核对日期</a>` : ""}</div>`).join("")}</div>` : "";
+    const companyList = row.companies?.length ? `<div class="company-reminder-list">${row.companies.map((company) => `<div class="company-reminder-item"><b>${escapeHtml(company.ticker)}</b><em>上期 ${escapeHtml(company.released)}</em><em>下期 ${escapeHtml(company.next)}</em><i class="${company.status === "confirmed" ? "confirmed" : "estimated"}">${scheduleLabel(company.status, company.basis)}</i>${company.source ? `<a data-focus-key="company-date-${escapeHtml(company.ticker)}" aria-label="核对日期：${escapeHtml(company.ticker)} 下次财报" href="${safeExternalUrl(company.source)}" target="_blank" rel="noreferrer">核对日期</a>` : ""}</div>`).join("")}</div>` : "";
     const sourceLink = !row.companies?.length && row.linkLabel ? `<a class="reminder-source" data-focus-key="calendar-${escapeHtml(row.indicatorId)}" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">${escapeHtml(row.linkLabel)} <span aria-hidden="true">↗</span></a>` : "";
     const relativeLabel = days === null ? "" : days < 0 ? "日期已过" : days === 0 ? "今天" : `${days} 天后`;
     const dateLabel = row.date ? escapeHtml(row.date) : row.companies ? "逐家公司" : "待核对";
@@ -391,7 +391,7 @@ function sparklineSvg(points) {
 }
 
 function confidenceLabel(value) {
-  return ({ high: "高可信", proxy: "代理值", manual: "人工", medium: "中可信" })[value] || value;
+  return ({ high: "高可信", proxy: "代理值", manual: "人工", medium: "中可信", unavailable: "数据不足" })[value] || value;
 }
 
 function renderIndicators(data) {
@@ -423,22 +423,53 @@ function renderIndicators(data) {
 }
 
 function renderErrors(errors = []) {
-  if (state.loadError) {
-    els.error.hidden = false;
-    els.error.removeAttribute("title");
-    els.error.textContent = `无法更新数据：${state.loadError}。${state.data ? "已保留上次显示的数据，" : ""}请稍后重试。`;
-    return;
+  let message = els.error.querySelector(".error-message");
+  if (!message) {
+    message = document.createElement("p");
+    message.className = "error-message";
+    els.error.append(message);
   }
-  if (!errors.length) {
-    els.error.hidden = true;
-    els.error.removeAttribute("title");
-    return;
-  }
+  let details = els.error.querySelector("details");
+  const focused = document.activeElement;
+  const detailsFocused = details?.contains(focused);
   const visibleErrors = errors.slice(0, 3);
   const remaining = errors.length - visibleErrors.length;
-  els.error.hidden = false;
-  els.error.textContent = `部分数据源暂时不可用，当前显示的数据可能不完整或来自缓存：${visibleErrors.join("；")}${remaining ? `；另有 ${remaining} 个来源` : ""}`;
-  els.error.title = errors.join("\n");
+  const text = state.loadError
+    ? `无法更新数据：${state.loadError}。${state.data ? "已保留上次显示的数据，" : ""}请稍后重试。`
+    : errors.length ? `部分数据源暂时不可用，当前显示的数据可能不完整或来自缓存：${visibleErrors.join("；")}${remaining ? `；另有 ${remaining} 个来源` : ""}` : "";
+  els.error.hidden = !text;
+  els.error.removeAttribute("title");
+  if (message.textContent !== text) message.textContent = text;
+  if (!state.loadError && remaining) {
+    if (!details) {
+      details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.dataset.focusKey = "error-details";
+      details.append(summary, document.createElement("ul"));
+      els.error.append(details);
+    }
+    // Keep the native disclosure node so polling preserves its open state and focus.
+    details.hidden = false;
+    const summary = details.querySelector("summary");
+    const label = `查看全部 ${errors.length} 个来源详情`;
+    if (summary.textContent !== label) summary.textContent = label;
+    const list = details.querySelector("ul");
+    if (JSON.stringify(Array.from(list.children, item => item.textContent)) !== JSON.stringify(errors)) {
+      list.replaceChildren(...errors.map(error => {
+        const item = document.createElement("li");
+        item.textContent = error;
+        return item;
+      }));
+    }
+  } else if (details) {
+    details.hidden = true;
+    details.querySelector("ul").replaceChildren();
+  }
+  if (detailsFocused && (els.error.hidden || details.hidden)) {
+    requestAnimationFrame(() => {
+      if (document.activeElement === focused || document.activeElement === document.body) els.refresh.focus({ preventScroll: true });
+    });
+  }
 }
 
 function render() {
@@ -487,6 +518,7 @@ function scheduleRetry(delay) {
 
 function loadData(force = false) {
   if (activeLoad) return activeLoad;
+  const refreshHadFocus = document.activeElement === els.refresh;
   clearTimeout(retryTimer);
   retryTimer = null;
   activeLoad = (async () => {
@@ -529,6 +561,7 @@ function loadData(force = false) {
       els.refresh.classList.remove("loading");
       els.refresh.disabled = false;
       els.refresh.removeAttribute("aria-busy");
+      if (refreshHadFocus && document.activeElement === document.body) els.refresh.focus({ preventScroll: true });
       activeLoad = null;
       if (retryDelay !== null) scheduleRetry(retryDelay);
     }
@@ -608,8 +641,10 @@ els.drivers.addEventListener("click", (event) => {
   render();
   requestAnimationFrame(() => {
     const signal = document.getElementById(`indicator-${button.dataset.driverId}`);
+    if (!signal) return;
     if (event.detail === 0) signal?.focus({ preventScroll: true });
-    signal?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+    const headerHeight = document.querySelector(".topbar").getBoundingClientRect().height;
+    window.scrollTo({ top: window.scrollY + signal.getBoundingClientRect().top - headerHeight - 16, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
   });
 });
 els.manualForm.addEventListener("submit", (event) => {

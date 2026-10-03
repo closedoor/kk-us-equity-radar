@@ -6,24 +6,49 @@ export function isDashboardSnapshot(data) {
   const object = (row) => row !== null && typeof row === "object" && !Array.isArray(row);
   const rows = (value, check) => Array.isArray(value) && value.every(check);
   const optionalRows = (value, check) => value === undefined || rows(value, check);
+  const textFields = (row, keys) => keys.every((key) => row[key] == null || typeof row[key] === "string");
+  const optionalObject = (value, check) => value == null || (object(value) && check(value));
+  const timestamp = (value) => value == null || (typeof value === "string" && Number.isFinite(Date.parse(value)));
+  const calendarSources = (value) => optionalObject(value, (sources) => Object.values(sources).every((source) => object(source)
+    && textFields(source, ["mode", "url", "cpiUrl", "employmentUrl", "error"]) && timestamp(source.lastSuccessAt)));
+  const calendarSchedule = (schedule) => timestamp(schedule.updatedAt) && calendarSources(schedule.sources)
+    && optionalRows(schedule.cpi, (event) => object(event) && validDate(event.date) && textFields(event, ["period"]))
+    && optionalRows(schedule.employment, (event) => object(event) && validDate(event.date) && textFields(event, ["period"]))
+    && optionalRows(schedule.fomc, (event) => object(event) && validDate(event.date) && validDate(event.startDate)
+      && (event.projections === undefined || typeof event.projections === "boolean"))
+    && optionalObject(schedule.earnings, (events) => Object.values(events).every((event) => object(event) && validDate(event.date)
+      && textFields(event, ["timing", "status", "reportText"])))
+    && optionalObject(schedule.pastEarnings, (events) => Object.values(events).every(validDate));
+  const company = (row) => object(row) && typeof row.ticker === "string" && row.ticker.length > 0
+    && textFields(row, ["company", "layer", "period", "role", "impact", "released", "revenue", "netIncome", "marginLabel", "grossMargin", "resultTone", "resultAssessment", "guidanceTone", "guidanceAssessment", "guidance", "note", "source", "nextReportDate", "nextReportEstimatedDate", "nextReportLabel", "nextReportStatus", "nextReportBasis", "nextReportSource", "snapshotLabel", "snapshotValidThrough"])
+    && (row.snapshotStale === undefined || typeof row.snapshotStale === "boolean");
   return Boolean(object(data) && typeof data.generatedAt === "string" && Number.isFinite(Date.parse(data.generatedAt))
     && Number.isFinite(data.coverage) && data.coverage >= 0 && data.coverage <= 100
+    && (data.dataQualityVersion === undefined || (Number.isInteger(data.dataQualityVersion) && data.dataQualityVersion > 0))
+    && (data.refreshing === undefined || typeof data.refreshing === "boolean")
     && (data.scoringContext === undefined || object(data.scoringContext))
-    && rows(data.aiEarnings, (row) => object(row) && typeof row.ticker === "string" && row.ticker.length > 0)
+    && rows(data.aiEarnings, company)
     && data.aiEarnings.length > 0 && new Set(data.aiEarnings.map((row) => row.ticker)).size === data.aiEarnings.length
     && rows(data.categories, (row) => object(row) && typeof row.name === "string" && row.name.length > 0)
     && new Set(data.categories.map((row) => row.name)).size === data.categories.length
     && rows(data.indicators, (row) => object(row) && typeof row.id === "string" && Object.hasOwn(INDICATOR_WEIGHTS, row.id) && Number.isFinite(row.weight) && row.weight > 0
       && typeof row.available === "boolean" && typeof row.title === "string" && row.title.length > 0
+      && textFields(row, ["value", "detail", "description", "why", "date", "status", "confidence", "cadence", "unavailableReason"])
+      && optionalObject(row.source, (source) => textFields(source, ["url", "label"]))
+      && optionalObject(row.judgment, (judgment) => textFields(judgment, ["tone", "label", "text"]))
       && (row.available ? Number.isFinite(row.risk) : row.risk === null)
       && data.categories.some((category) => category.name === row.category)
       && (row.risk === null || (Number.isFinite(row.risk) && row.risk >= 0 && row.risk <= 100))
       && (row.points === null || Number.isFinite(row.points))
-      && optionalRows(row.sparkline, object) && (row.breakdown == null || rows(row.breakdown, object)))
+      && optionalRows(row.sparkline, (point) => object(point) && (point.value == null || Number.isFinite(point.value)))
+      && (row.breakdown == null || rows(row.breakdown, (metric) => object(metric) && textFields(metric, ["label", "value", "detail"]))))
     && data.indicators.length === Object.keys(INDICATOR_WEIGHTS).length
     && new Set(data.indicators.map((row) => row.id)).size === data.indicators.length
-    && optionalRows(data.aiChainLayers, (row) => object(row) && rows(row.tickers, (ticker) => typeof ticker === "string"))
-    && optionalRows(data.reminders, (row) => object(row) && (row.date == null || validDate(row.date)) && optionalRows(row.companies, object))
+    && optionalRows(data.aiChainLayers, (row) => object(row) && textFields(row, ["name", "description"]) && rows(row.tickers, (ticker) => typeof ticker === "string"))
+    && optionalRows(data.reminders, (row) => object(row) && textFields(row, ["label", "event", "source", "linkLabel", "indicatorId"])
+      && (row.date == null || validDate(row.date)) && optionalRows(row.companies, (item) => object(item) && textFields(item, ["ticker", "released", "next", "status", "basis", "source"])))
+    && optionalObject(data.calendarSchedule, calendarSchedule)
+    && optionalObject(data.calendarSync, (sync) => timestamp(sync.updatedAt) && calendarSources(sync.sources))
     && optionalRows(data.errors, (error) => typeof error === "string"));
 }
 

@@ -1,5 +1,6 @@
 import http from "node:http";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, rename, unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCalendarService } from "./calendar.mjs";
@@ -15,6 +16,7 @@ const host = process.env.HOST || "0.0.0.0";
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const FORCE_REFRESH_COOLDOWN_MS = 60 * 1000;
 const REQUEST_TIMEOUT_MS = 25_000;
+const MARKET_FETCH_BUDGET_MS = 90_000;
 const SECURITY_HEADERS = {
   "content-security-policy": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'",
   "referrer-policy": "strict-origin-when-cross-origin",
@@ -26,6 +28,7 @@ let dashboardCachedAt = 0;
 let lastDashboardAttemptAt = 0;
 let refreshPromise = null;
 let lastRefreshErrors = [];
+let dashboardWritePromise = Promise.resolve();
 
 const weights = INDICATOR_WEIGHTS;
 
@@ -240,9 +243,11 @@ function sourceUrl(seriesId) {
   return `https://fred.stlouisfed.org/series/${seriesId}`;
 }
 
-async function fetchText(url, headers = {}) {
+async function fetchText(url, headers = {}, deadline = Infinity) {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) throw new Error("Market fetch budget exhausted");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), Math.min(REQUEST_TIMEOUT_MS, remainingMs));
   try {
     const response = await fetch(url, {
       signal: controller.signal,
@@ -252,31 +257,35 @@ async function fetchText(url, headers = {}) {
       },
     });
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-    return await response.text();
+    const text = await response.text();
+    if (Date.now() >= deadline) throw new Error("Market fetch budget exhausted");
+    return text;
   } finally {
     clearTimeout(timer);
+    // Release unread error bodies as well as completed or timed-out requests.
+    controller.abort();
   }
 }
 
-async function fetchJson(url, headers) {
-  const text = await fetchText(url, headers);
+async function fetchJson(url, headers, deadline = Infinity) {
+  const text = await fetchText(url, headers, deadline);
   return JSON.parse(text);
 }
 
-async function fetchFred(id) {
+async function fetchFred(id, deadline = Infinity) {
   const start = new Date();
   start.setUTCFullYear(start.getUTCFullYear() - 3);
   const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${encodeURIComponent(id)}&cosd=${start.toISOString().slice(0, 10)}`;
-  const series = parseFredCsv(await fetchText(url));
+  const series = parseFredCsv(await fetchText(url, {}, deadline));
   return requireFreshSeries(series, { name: fredMeta[id]?.[0] || id, maxAgeDays: fredMaxAgeDays[id] || 120 });
 }
 
-async function fetchNasdaq(symbol, assetClass) {
+async function fetchNasdaq(symbol, assetClass, deadline = Infinity) {
   const start = new Date();
   start.setUTCFullYear(start.getUTCFullYear() - 2);
   const end = new Date();
   const url = `https://api.nasdaq.com/api/quote/${encodeURIComponent(symbol)}/historical?assetclass=${assetClass}&fromdate=${start.toISOString().slice(0, 10)}&todate=${end.toISOString().slice(0, 10)}&limit=5000`;
-  const json = await fetchJson(url);
+  const json = await fetchJson(url, undefined, deadline);
   const rows = json?.data?.tradesTable?.rows;
   if (!Array.isArray(rows)) throw new Error(json?.status?.bCodeMessage?.[0]?.errorMessage || `No data for ${symbol}`);
   const series = parseNasdaqRows(rows);
@@ -305,14 +314,19 @@ async function safe(name, promise) {
   }
 }
 
-async function retry(task, attempts = 2) {
+async function retry(task, attempts = 2, deadline = Infinity) {
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (Date.now() >= deadline) throw new Error("Market fetch budget exhausted");
     try {
       return await task();
     } catch (error) {
       lastError = error;
-      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 350 * attempt));
+      if (attempt < attempts) {
+        const delayMs = 350 * attempt;
+        if (Date.now() + delayMs >= deadline) break;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
     }
   }
   throw lastError;
@@ -349,15 +363,17 @@ function indicator({ id, title, category, weight, risk, value, detail, date, des
   };
 }
 
-async function buildDashboard() {
+async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
+  const budgetMs = Number.isFinite(fetchBudgetMs) ? Math.min(MARKET_FETCH_BUDGET_MS, Math.max(0, fetchBudgetMs)) : MARKET_FETCH_BUDGET_MS;
+  const deadline = Date.now() + budgetMs;
   const currentAiEarnings = calendarService.resolvedAiEarnings();
   const nextFomcDate = calendarService.nextFomc()?.date || "待官方公布";
   const fredIds = ["DCOILBRENTEU", "CPIAUCSL", "CPIAUCNS", "CPILFESL", "CPILFENS", "PCEPI", "PCEPILFE", "DFEDTARL", "DFEDTARU", "DGS2", "DGS10", "DFII10", "T10Y3M", "VIXCLS", "SP500", "BAMLH0A0HYM2", "DRTSCILM", "SAHMREALTIME", "ICSA", "NFCI", "UNRATE", "PAYEMS"];
   const marketSymbols = ["SPY", "RSP", "XLK", "XLF", "XLY", "XLC", "XLI", "XLV", "XLP", "XLE", "XLU", "XLRE", "XLB"];
 
   const [fredResults, marketResults] = await Promise.all([
-    mapLimit(fredIds, 2, async (id) => [id, await safe(id, retry(() => fetchFred(id)))]),
-    mapLimit(marketSymbols, 4, async (symbol) => [symbol, await safe(symbol, retry(() => fetchNasdaq(symbol, "etf")))]),
+    mapLimit(fredIds, 2, async (id) => [id, await safe(id, retry(() => fetchFred(id, deadline), 2, deadline))]),
+    mapLimit(marketSymbols, 4, async (symbol) => [symbol, await safe(symbol, retry(() => fetchNasdaq(symbol, "etf", deadline), 2, deadline))]),
   ]);
 
   const fred = Object.fromEntries(fredResults);
@@ -372,10 +388,17 @@ async function buildDashboard() {
     ? clamp(scale(brent20, 80, 110) * 0.75 + scale(brentLast?.value, 85, 115) * 0.25)
     : null;
 
-  const headlineCpi = getFred("CPIAUCSL");
-  const headlineCpiNsa = getFred("CPIAUCNS");
-  const coreCpi = getFred("CPILFESL");
-  const coreCpiNsa = getFred("CPILFENS");
+  const cpiIds = ["CPIAUCSL", "CPIAUCNS", "CPILFESL", "CPILFENS"];
+  const cpiInputs = cpiIds.map(getFred);
+  const cpiLatestMonths = cpiInputs.map((series) => latest(series)?.date.slice(0, 7));
+  const cpiMonth = cpiLatestMonths.every(Boolean) ? [...cpiLatestMonths].sort()[0] : null;
+  const cpiAligned = cpiMonth && cpiInputs.every((series) => series.some((point) => point.date.slice(0, 7) === cpiMonth));
+  const cpiAlignmentErrors = !cpiAligned
+    ? ["CPI 子数据缺少共同月份，暂停相关评分"]
+    : new Set(cpiLatestMonths).size > 1 ? [`CPI 来源月份不同，已对齐至 ${cpiMonth}，等待较新月份完整同步`] : [];
+  // Join all CPI adjustment variants to one period before calculating changes.
+  const [headlineCpi, headlineCpiNsa, coreCpi, coreCpiNsa] = cpiInputs.map((series) => cpiAligned
+    ? series.filter((point) => point.date.slice(0, 7) <= cpiMonth) : []);
   const headlinePce = getFred("PCEPI");
   const corePce = getFred("PCEPILFE");
   const headlineCpiYoy = monthlyPercentChange(headlineCpiNsa, 12);
@@ -449,9 +472,9 @@ async function buildDashboard() {
     ? average([inflationRisk, laborHeat])
     : null;
   const actualHikeRisk = Number.isFinite(fedChange) ? scale(fedChange, 0, 0.5) : null;
-  const fedRisk = Number.isFinite(marketHawkishness) && Number.isFinite(macroConstraint)
-    ? Math.max(actualHikeRisk || 0, clamp(marketHawkishness * 0.55 + macroConstraint * 0.45))
-    : actualHikeRisk;
+  const fedRisk = fedLowerLast && [actualHikeRisk, marketHawkishness, macroConstraint].every(Number.isFinite)
+    ? Math.max(actualHikeRisk, clamp(marketHawkishness * 0.55 + macroConstraint * 0.45))
+    : null;
 
   const realYield = getFred("DFII10");
   const nominal10y = getFred("DGS10");
@@ -481,7 +504,7 @@ async function buildDashboard() {
     : null;
   const ratesRisk = Number.isFinite(realYieldRisk) && Number.isFinite(yieldCurveRisk)
     ? clamp(realYieldRisk * 0.72 + yieldCurveRisk * 0.28)
-    : realYieldRisk;
+    : null;
 
   const vix = getFred("VIXCLS");
   const vixLast = latest(vix);
@@ -533,7 +556,7 @@ async function buildDashboard() {
     : null;
   const unemploymentRisk = Number.isFinite(unemploymentDeterioration) && Number.isFinite(unemploymentPolicyPressure)
     ? Math.max(unemploymentDeterioration, unemploymentPolicyPressure)
-    : unemploymentDeterioration;
+    : null;
   const payrollDeterioration = Number.isFinite(payroll3mAvg)
     ? scale(110 - payroll3mAvg, 0, 110)
     : null;
@@ -542,7 +565,7 @@ async function buildDashboard() {
     : null;
   const payrollRisk = Number.isFinite(payrollDeterioration) && Number.isFinite(payrollPolicyPressure)
     ? Math.max(payrollDeterioration, payrollPolicyPressure)
-    : payrollDeterioration;
+    : null;
 
   const spy = getMarket("SPY");
   const rsp = getMarket("RSP");
@@ -572,10 +595,10 @@ async function buildDashboard() {
   const nfciRisk = nfciLast ? scale(nfciLast.value, -0.5, 0.5) : null;
   const unemploymentComposite = Number.isFinite(unemploymentRisk) && Number.isFinite(laborRisk)
     ? clamp(unemploymentRisk * 0.65 + laborRisk * 0.35)
-    : unemploymentRisk;
+    : null;
   const creditComposite = [creditRisk, lendingRisk, nfciRisk].every(Number.isFinite)
     ? clamp(creditRisk * 0.65 + lendingRisk * 0.25 + nfciRisk * 0.10)
-    : creditRisk;
+    : null;
 
 
   const indicators = [
@@ -589,7 +612,7 @@ async function buildDashboard() {
       id: "inflation", title: "CPI / PCE 通胀趋势", category: "通胀与政策", weight: weights.inflation, risk: inflationRisk,
       value: Number.isFinite(headlineCpiYoy) ? `${round(headlineCpiYoy, 1)}%` : "暂无数据", detail: `整体 CPI 同比；三个月年化 ${Number.isFinite(headlineCpi3m) ? round(headlineCpi3m, 1) : "--"}%`,
       date: latest(headlineCpiNsa)?.date || latest(headlineCpi)?.date, description: "同比采用 BLS 未季调正式口径，月率与三个月年化采用季调数据；重点看核心 CPI、核心 PCE 的短期趋势。卡片日期表示最新数据期，不冒充官方发布日期。", why: "通胀黏性决定美联储能否降息，也决定估值压力会持续多久。",
-      source: { label: "BLS / BEA / FRED · CPI 与 PCE", url: "https://www.bls.gov/news.release/cpi.nr0.htm" }, cadence: "月度", confidence: "high", sparkline: spark(headlineCpi, 18), methodology: "整体 CPI 三个月年化和同比占 60%，核心 PCE 与核心 CPI 占 40%。",
+      source: { label: "BLS / BEA / FRED · CPI 与 PCE", url: "https://www.bls.gov/news.release/cpi.nr0.htm" }, cadence: "月度", confidence: Number.isFinite(inflationRisk) ? "high" : "unavailable", unavailableReason: "子数据不足", sparkline: spark(headlineCpi, 18), methodology: "CPI 四条季调与未季调序列先对齐同月；整体 CPI 三个月年化和同比占 60%，核心 PCE 与核心 CPI 占 40%。",
       breakdown: [
         { label: "CPI", value: Number.isFinite(headlineCpiYoy) ? `${round(headlineCpiYoy, 1)}%` : "--", detail: `${monthLabel(latest(headlineCpiNsa) || latest(headlineCpi))} · 月率 ${signedPercent(headlineCpiMom)}` },
         { label: "核心 CPI", value: Number.isFinite(coreCpiYoy) ? `${round(coreCpiYoy, 1)}%` : "--", detail: `${monthLabel(latest(coreCpiNsa) || latest(coreCpi))} · 月率 ${signedPercent(coreCpiMom)}` },
@@ -602,7 +625,7 @@ async function buildDashboard() {
       id: "fed", title: "美联储政策周期", category: "通胀与政策", weight: weights.fed, risk: fedRisk,
       value: fedLast && fedLowerLast ? `${round(fedLowerLast.value, 2)}%–${round(fedLast.value, 2)}%` : "暂无数据", detail: `当前联邦基金目标区间；下次会议 ${nextFomcDate}；2 年期 ${twoYearLast ? round(twoYearLast.value, 2) : "--"}%`,
       date: fedLast?.date, description: "用联邦基金目标区间、2 年期美债和宏观约束判断市场是否在重新定价政策路径。", why: "政策收紧会压制估值和融资；2 年期利率比未经自动核验的概率快照更适合持续监测。",
-      source: { label: "Federal Reserve / FRED · 政策利率", url: sourceUrl("DFEDTARU") }, cadence: "交易日 / 会议", confidence: "high", sparkline: spark(twoYear, 90), methodology: "市场利率重定价、实际政策变化、通胀和就业约束共同评分；不再展示过期的会议概率快照。",
+      source: { label: "Federal Reserve / FRED · 政策利率", url: sourceUrl("DFEDTARU") }, cadence: "交易日 / 会议", confidence: Number.isFinite(fedRisk) ? "high" : "unavailable", unavailableReason: "子数据不足", sparkline: spark(twoYear, 90), methodology: "市场利率重定价、实际政策变化、通胀和就业约束共同评分；子数据不足时不计分。",
       breakdown: [
         { label: "政策目标下限", value: fedLowerLast ? `${round(fedLowerLast.value, 2)}%` : "--", detail: fedLowerLast?.date || "" },
         { label: "政策目标上限", value: fedLast ? `${round(fedLast.value, 2)}%` : "--", detail: fedLast?.date || "" },
@@ -618,7 +641,7 @@ async function buildDashboard() {
       id: "rates", title: "10年期美债与实际利率", category: "通胀与政策", weight: weights.rates, risk: ratesRisk,
       value: nominalLast ? `${round(nominalLast.value, 2)}%` : "暂无数据", detail: `10 年期名义收益率；实际利率 ${realLast ? round(realLast.value, 2) : "--"}%；10Y-3M ${yieldCurveLast ? `${yieldCurveLast.value >= 0 ? "+" : ""}${round(yieldCurveLast.value, 2)}%` : "--"}`,
       date: nominalLast?.date, description: "同时看 10 年期名义与实际利率、上涨速度，以及倒挂后重新变陡的周期信号。", why: "实际利率决定股票折现压力，期限结构则反映融资与衰退风险。",
-      source: { label: "U.S. Treasury / FRED · 10Y", url: "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve" }, cadence: "交易日", confidence: "high", sparkline: spark(nominal10y, 90), methodology: "实际与名义收益率压力占 72%，期限曲线周期风险占 28%。",
+      source: { label: "U.S. Treasury / FRED · 10Y", url: "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve" }, cadence: "交易日", confidence: Number.isFinite(ratesRisk) ? "high" : "unavailable", unavailableReason: "子数据不足", sparkline: spark(nominal10y, 90), methodology: "实际与名义收益率压力占 72%，期限曲线周期风险占 28%；两组输入齐全才计分。",
       breakdown: [
         { label: "10年期名义", value: nominalLast ? `${round(nominalLast.value, 2)}%` : "--", detail: nominalLast?.date || "" },
         { label: "10年期实际", value: realLast ? `${round(realLast.value, 2)}%` : "--", detail: realLast?.date || "" },
@@ -635,13 +658,13 @@ async function buildDashboard() {
       id: "unemployment", title: "美国失业率", category: "就业与经济", weight: weights.unemployment, risk: unemploymentComposite,
       value: unemploymentLast ? `${round(unemploymentLast.value, 1)}%` : "暂无数据", detail: `三个月 ${Number.isFinite(unemployment3mChange) ? `${unemployment3mChange >= 0 ? "+" : ""}${round(unemployment3mChange, 1)}` : "--"} 个百分点；Sahm ${sahmLast ? round(sahmLast.value, 2) : "--"}`,
       date: unemploymentLast?.date, description: "重点看三个月平均失业率的上升速度，并用 Sahm 规则和初请失业金交叉验证。", why: "就业恶化会削弱消费和盈利，并可能把估值调整升级为衰退型熊市。",
-      source: { label: "BLS / FRED · Unemployment / Sahm", url: sourceUrl("UNRATE") }, cadence: "月度/周度", confidence: "high", sparkline: spark(unemployment, 24), methodology: "失业率变化占 65%，Sahm 与初请变化占 35%。",
+      source: { label: "BLS / FRED · Unemployment / Sahm", url: sourceUrl("UNRATE") }, cadence: "月度/周度", confidence: Number.isFinite(unemploymentComposite) ? "high" : "unavailable", unavailableReason: "子数据不足", sparkline: spark(unemployment, 24), methodology: "失业率变化与政策压力占 65%，Sahm 与初请变化占 35%；子数据不足时不计分。",
     }),
     indicator({
       id: "payrolls", title: "非农就业数据", category: "就业与经济", weight: weights.payrolls, risk: payrollRisk,
       value: Number.isFinite(payrollLatestChange) ? `${round(payrollLatestChange, 0)}k` : "暂无数据", detail: `三个月平均 ${Number.isFinite(payroll3mAvg) ? round(payroll3mAvg, 0) : "--"}k；六个月平均 ${Number.isFinite(payroll6mAvg) ? round(payroll6mAvg, 0) : "--"}k`,
       date: payrollLast?.date, description: "观察三个月平均、历史修正、平均工时和就业是否只集中于少数行业。", why: "单月数据噪声很大，持续转弱才意味着需求与企业盈利下行。",
-      source: { label: "BLS / FRED · Nonfarm Payrolls", url: sourceUrl("PAYEMS") }, cadence: "月度", confidence: "high", sparkline: spark(payrolls, 24), methodology: "取三个月就业恶化与高通胀下的政策约束风险中较高值。",
+      source: { label: "BLS / FRED · Nonfarm Payrolls", url: sourceUrl("PAYEMS") }, cadence: "月度", confidence: Number.isFinite(payrollRisk) ? "high" : "unavailable", unavailableReason: "子数据不足", sparkline: spark(payrolls, 24), methodology: "取三个月就业恶化与高通胀下的政策约束风险中较高值；两组输入齐全才计分。",
     }),
     resolveAiIndicator(indicator({
       id: "aiEarnings", title: "AI 产业链财报与指引", category: "盈利与AI", weight: weights.aiEarnings, risk: null,
@@ -653,7 +676,12 @@ async function buildDashboard() {
       id: "credit", title: "信用利差与银行信贷", category: "信用", weight: weights.credit, risk: creditComposite,
       value: creditLast ? `${round(creditLast.value * 100, 0)} bp` : "暂无数据", detail: `高收益债 OAS；SLOOS 净收紧 ${lendingLast ? `${round(lendingLast.value, 1)}%` : "--"}；NFCI ${nfciLast ? round(nfciLast.value, 2) : "--"}`,
       date: creditLast?.date, description: "把高收益债利差、银行贷款标准与综合金融条件合并成最高权重的信用信号。", why: "信用压力决定企业能否融资，是系统性风险从市场传向实体经济的关键通道。",
-      source: { label: "FRED / Fed SLOOS · Credit", url: sourceUrl("BAMLH0A0HYM2") }, cadence: "交易日/季度", confidence: "high", sparkline: spark(credit), methodology: "高收益债利差占 65%，SLOOS 占 25%，NFCI 占 10%。",
+      source: { label: "FRED / Fed SLOOS · Credit", url: sourceUrl("BAMLH0A0HYM2") }, cadence: "交易日/季度", confidence: Number.isFinite(creditComposite) ? "high" : "unavailable", unavailableReason: "子数据不足", sparkline: spark(credit), methodology: "高收益债利差占 65%，SLOOS 占 25%，NFCI 占 10%；三项齐全才计分。",
+      breakdown: [
+        { label: "高收益债 OAS", value: creditLast ? `${round(creditLast.value * 100, 0)} bp` : "--", detail: creditLast?.date || "" },
+        { label: "SLOOS 净收紧", value: lendingLast ? `${round(lendingLast.value, 1)}%` : "--", detail: lendingLast?.date || "" },
+        { label: "NFCI", value: nfciLast ? String(round(nfciLast.value, 2)) : "--", detail: nfciLast?.date || "" },
+      ],
     }),
     indicator({
       id: "earningsBreadth", title: "标普 500 整体盈利预期", category: "盈利与AI", weight: weights.earningsBreadth, risk: null,
@@ -685,6 +713,7 @@ async function buildDashboard() {
   });
 
   return {
+    dataQualityVersion: 1,
     generatedAt: new Date().toISOString(),
     ...model,
     scoringContext,
@@ -708,6 +737,7 @@ async function buildDashboard() {
       ],
     },
     errors: [
+      ...cpiAlignmentErrors,
       ...fredResults.filter(([, result]) => !result.ok).map(([id, result]) => `${fredMeta[id]?.[0] || id}: ${result.error}`),
       ...marketResults.filter(([, result]) => !result.ok).map(([id, result]) => `${id}: ${result.error}`),
     ],
@@ -724,6 +754,49 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
+function persistDashboard(snapshot) {
+  const contents = JSON.stringify(snapshot);
+  const temporaryFile = `${dashboardCacheFile}.${randomUUID()}.tmp`;
+  dashboardWritePromise = dashboardWritePromise
+    .then(async () => {
+      try {
+        await writeFile(temporaryFile, contents, { flag: "wx" });
+        await rename(temporaryFile, dashboardCacheFile);
+      } finally {
+        await unlink(temporaryFile).catch((error) => {
+          if (error.code !== "ENOENT") console.warn(`[cache] cleanup failed: ${error.message}`);
+        });
+      }
+    })
+    .catch((error) => console.warn(`[cache] write failed: ${error.message}`));
+  return dashboardWritePromise;
+}
+
+function resolveDashboardCalendar(snapshot) {
+  const nextFomcDate = calendarService.nextFomc()?.date || "待官方公布";
+  const indicators = snapshot.indicators.map((item) => {
+    if (item.id !== "fed") return item;
+    const twoYear = item.breakdown?.find((row) => row.label === "2 年期美债")?.value;
+    const historicalYield = item.sparkline?.at(-1)?.value;
+    const twoYearLabel = typeof twoYear === "string" ? twoYear : Number.isFinite(historicalYield) ? `${round(historicalYield, 2)}%` : "--";
+    return { ...item, detail: `当前联邦基金目标区间；下次会议 ${nextFomcDate}；2 年期 ${twoYearLabel}` };
+  });
+  return projectDashboard({
+    ...snapshot,
+    indicators,
+    reminders: calendarService.buildReminders(),
+    aiEarnings: calendarService.resolvedAiEarnings(),
+    calendarSchedule: calendarService.snapshot(),
+    calendarSync: calendarService.syncStatus(),
+  });
+}
+
+function publishDashboard(snapshot = dashboardCache) {
+  if (!snapshot) return Promise.resolve(null);
+  dashboardCache = resolveDashboardCalendar(snapshot);
+  return persistDashboard(dashboardCache).then(() => dashboardCache);
+}
+
 function refreshDashboard(force = false) {
   if (refreshPromise) return refreshPromise;
   const cooldownMs = force ? FORCE_REFRESH_COOLDOWN_MS : CACHE_TTL_MS;
@@ -731,22 +804,34 @@ function refreshDashboard(force = false) {
     return Promise.resolve(dashboardCache);
   }
   lastDashboardAttemptAt = Date.now();
-  refreshPromise = calendarService.refresh({ force })
+  const calendarRefresh = Promise.resolve()
+    .then(() => calendarService.refresh({ force }))
     .catch((error) => console.warn(`[calendar] refresh failed: ${error.message}`))
+    .then(() => publishDashboard());
+  const marketRefresh = Promise.resolve()
     .then(() => buildDashboard())
     .then((next) => {
       lastRefreshErrors = next.errors;
-      if (shouldReplaceDashboard(dashboardCache, next)) {
-        dashboardCache = next;
+      const resolved = resolveDashboardCalendar(next);
+      if (shouldReplaceDashboard(dashboardCache, resolved)) {
+        dashboardCache = resolved;
         dashboardCachedAt = Date.now();
       }
-      dashboardCache = { ...dashboardCache, calendarSchedule: calendarService.snapshot(), calendarSync: calendarService.syncStatus() };
-      writeFile(dashboardCacheFile, JSON.stringify(dashboardCache)).catch((error) => console.warn(`[cache] write failed: ${error.message}`));
-      return dashboardCache;
+      return publishDashboard();
     })
     .catch((error) => {
       console.warn(`[dashboard] refresh failed: ${error.message}`);
       lastRefreshErrors = [error.message];
+      return dashboardCache;
+    });
+  // Market publication is independent; keep polling until calendars also settle.
+  refreshPromise = Promise.allSettled([marketRefresh, calendarRefresh])
+    .then((results) => {
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed) {
+        console.warn(`[dashboard] refresh failed: ${failed.reason.message}`);
+        lastRefreshErrors = [failed.reason.message];
+      }
       return dashboardCache;
     })
     .finally(() => { refreshPromise = null; });
@@ -819,6 +904,10 @@ const server = http.createServer((req, res) => {
 try {
   dashboardCache = JSON.parse(await readFile(dashboardCacheFile, "utf8"));
   if (!isDashboardSnapshot(dashboardCache)) throw new Error("Invalid dashboard cache");
+  // Legacy error snapshots predate composite-dependency integrity checks.
+  if (dashboardCache.dataQualityVersion === undefined && dashboardCache.errors?.length) {
+    throw new Error("Unverified composite integrity in legacy dashboard cache");
+  }
   dashboardCachedAt = Math.min(Date.now(), Date.parse(dashboardCache.generatedAt) || 0);
   lastRefreshErrors = Array.isArray(dashboardCache.errors) ? dashboardCache.errors : [];
   calendarService.hydrate(dashboardCache.calendarSchedule);

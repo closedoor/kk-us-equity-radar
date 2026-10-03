@@ -7,6 +7,7 @@ import net from "node:net";
 import http from "node:http";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
+import { isDashboardSnapshot } from "./public/dashboard-state.js";
 
 const fixture = JSON.parse(await readFile(new URL("./dashboard-cache.json", import.meta.url), "utf8"));
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -43,7 +44,7 @@ async function withOfflineServer(cache, check, { stalled = false, preload = null
     const finished = async () => {
       while (Date.now() < deadline) {
         const result = await read();
-        if (result.status === 200 && !result.body.refreshing && result.body.errors.length) return result.body;
+        if (result.status === 200 && !result.body.refreshing) return result.body;
         await delay(100);
       }
       assert.fail(`Refresh did not finish: ${output}`);
@@ -90,6 +91,21 @@ test("an incomplete disk signal board cannot bootstrap a reassuring score", asyn
     const after = await finished();
     assert.equal(after.score, null);
     assert.equal(after.indicators.length, 12);
+  });
+});
+
+test("a malformed saved calendar cannot enter service hydration", async () => {
+  const cache = structuredClone(fixture);
+  cache.generatedAt = new Date().toISOString();
+  cache.calendarSchedule.earnings.NVDA = { date: "2026-11-18", timing: { toString: null } };
+  await withOfflineServer(cache, async ({ read, finished }) => {
+    const first = await read();
+    assert.equal(first.status, 202);
+    assert.equal(first.body.warming, true);
+    const after = await finished();
+    assert.equal(after.indicators.length, 12);
+    assert.equal(after.score, null);
+    assert.equal(isDashboardSnapshot(after), true);
   });
 });
 
@@ -196,6 +212,91 @@ function marketStub({ missingStart = false, staleSectors = false } = {}) {
   `;
   return { preload, expectedDate };
 }
+
+function completeSourcesStub({ missing = [], laggedCpi = false, missingCpiMonth = false } = {}) {
+  return `
+    const now = new Date();
+    const end = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
+    const days = (value, count = 800, step = 1) => Array.from({length: count}, (_, index) => ({
+      date: new Date(Date.parse(end) - (count - 1 - index) * step * 86400000).toISOString().slice(0, 10), value
+    }));
+    const months = (value = null) => Array.from({length: 36}, (_, index) => ({
+      date: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 36 + index, 1)).toISOString().slice(0, 10),
+      value: value === null ? 100 * 1.003 ** index : value
+    }));
+    const series = {
+      DCOILBRENTEU: days(90), CPIAUCSL: months(), CPIAUCNS: months(), CPILFESL: months(), CPILFENS: months(),
+      PCEPI: months(), PCEPILFE: months(), DFEDTARL: days(3.75), DFEDTARU: days(4), DGS2: days(5),
+      DGS10: days(4.2), DFII10: days(1.3), T10Y3M: days(-1), VIXCLS: days(17), SP500: days(5000),
+      BAMLH0A0HYM2: days(3), DRTSCILM: months(40), SAHMREALTIME: months(0.5), ICSA: days(240000, 60, 7),
+      NFCI: days(0.5, 60, 7), UNRATE: months(4.2), PAYEMS: months().map((row, index) => ({...row, value: 160000 + index * 250}))
+    };
+    if (${laggedCpi}) {
+      series.CPIAUCNS.pop(); series.CPILFENS.pop();
+      series.CPIAUCSL.at(-1).value = series.CPIAUCSL.at(-2).value * 1.1;
+    }
+    if (${missingCpiMonth}) series.CPIAUCSL.splice(-2, 1);
+    globalThis.fetch = async (raw) => {
+      const url = new URL(raw);
+      if (url.pathname.endsWith('/fredgraph.csv')) {
+        const id = url.searchParams.get('id');
+        if (${JSON.stringify(missing)}.includes(id)) throw new Error('test missing ' + id);
+        return new Response('DATE,' + id + '\\n' + series[id].map(row => row.date + ',' + row.value).join('\\n'));
+      }
+      const symbol = url.pathname.match(/\\/quote\\/([^/]+)\\/historical/)?.[1];
+      if (symbol) return new Response(JSON.stringify({data: {tradesTable: {rows: days(100, 300).map(row => {
+        const [year, month, day] = row.date.split('-'); return {date: month + '/' + day + '/' + year, close: '100'};
+      })}}}));
+      throw new Error('test calendar unavailable');
+    };
+  `;
+}
+
+test("missing composite dependencies cannot retain complete scoring weight", async () => {
+  for (const [missing, ids] of [
+    ["NFCI", ["credit"]], ["DRTSCILM", ["credit"]], ["T10Y3M", ["rates"]],
+    ["SAHMREALTIME", ["unemployment"]], ["ICSA", ["unemployment"]], ["DGS2", ["fed"]],
+    ["DFEDTARL", ["fed"]], ["PCEPILFE", ["inflation", "fed", "unemployment", "payrolls"]],
+  ]) {
+    await withOfflineServer({}, async ({ finished }) => {
+      const data = await finished();
+      for (const id of ids) {
+        const row = data.indicators.find((item) => item.id === id);
+        assert.equal(row.available, false, missing + ' -> ' + id);
+        assert.equal(row.risk, null);
+        assert.equal(row.points, null);
+        assert.match(row.unavailableReason, /子数据|数据不足/);
+      }
+      assert.ok(data.coverage < 90, missing);
+      assert.equal(data.coverage, data.indicators.filter(row => row.available).reduce((sum, row) => sum + row.weight, 0));
+      assert.ok(data.errors.some(error => error.includes(missing)));
+    }, { preload: completeSourcesStub({ missing: [missing] }) });
+  }
+});
+
+test("staggered CPI sources use one common month for levels and changes", async () => {
+  await withOfflineServer({}, async ({ finished }) => {
+    const data = await finished();
+    const row = data.indicators.find(item => item.id === "inflation");
+    assert.equal(row.available, true);
+    assert.match(row.breakdown[0].detail, /月率 \+0\.3%/);
+    assert.doesNotMatch(row.breakdown[0].detail, /月率 \+10%/);
+    const change = (1.003 ** 12 - 1) * 100;
+    const expected = Math.round(((change - 2.5) / 4.5 * 0.35 + (change - 2.5) / 2.5 * 0.25
+      + (change - 2.2) / 2.3 * 0.25 + (change - 2.2) / 1.8 * 0.15) * 1000) / 10;
+    assert.equal(row.risk, expected);
+    assert.ok(data.errors.some(error => /CPI.*月份.*对齐/.test(error)));
+  }, { preload: completeSourcesStub({ laggedCpi: true }) });
+});
+
+test("a missing common CPI month pauses scoring instead of selecting an older substitute", async () => {
+  await withOfflineServer({}, async ({ finished }) => {
+    const row = (await finished()).indicators.find(item => item.id === "inflation");
+    assert.equal(row.available, false);
+    assert.equal(row.risk, null);
+    assert.match(row.unavailableReason, /子数据|数据不足/);
+  }, { preload: completeSourcesStub({ laggedCpi: true, missingCpiMonth: true }) });
+});
 
 test("breadth compares the same start and end dates when a fund updates late", async () => {
   const { preload, expectedDate } = marketStub();

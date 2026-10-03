@@ -1,13 +1,13 @@
 {
   "name": "us-equity-risk-radar",
-  "version": "4.7.1",
+  "version": "4.7.2",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
     "dev": "node --watch server.mjs",
-    "check:browser": "node scripts/browser-smoke.cjs",
-    "check": "node --check server.mjs && node --check public/app.js && node --test calendar.test.mjs market-data.test.mjs risk-model.test.mjs dashboard-state.test.mjs dashboard-client.test.mjs server.test.mjs"
+    "check:browser": "node scripts/browser-smoke.cjs && node scripts/product-audit.cjs",
+    "check": "node --check server.mjs && node --check public/app.js && node --test calendar.test.mjs market-data.test.mjs risk-model.test.mjs dashboard-state.test.mjs dashboard-client.test.mjs server.test.mjs backend-reliability.test.mjs"
   },
   "engines": {
     "node": ">=18"

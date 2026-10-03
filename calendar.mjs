@@ -191,17 +191,71 @@ export function parseFomcCalendar(html) {
 }
 
 export function parseNasdaqEarningsDate(payload) {
-  const data = typeof payload === "string" ? JSON.parse(payload)?.data : payload?.data;
+  const response = typeof payload === "string" ? JSON.parse(payload) : payload;
+  if (!response || typeof response !== "object" || Array.isArray(response) || !Object.hasOwn(response, "data")) {
+    throw new Error("Nasdaq earnings payload invalid: missing data envelope");
+  }
+  if (response.status !== undefined && (!response.status || typeof response.status !== "object" || Array.isArray(response.status))) {
+    throw new Error("Nasdaq earnings payload invalid: malformed status");
+  }
+  const statusCode = response?.status?.rCode == null ? NaN : Number(response.status.rCode);
+  if (response.status && (!["string", "number"].includes(typeof response.status.rCode) || !Number.isInteger(statusCode) || statusCode < 100 || statusCode > 599)) {
+    throw new Error("Nasdaq earnings payload invalid: malformed status code");
+  }
+  const businessMessages = response?.status?.bCodeMessage;
+  const errors = (Array.isArray(businessMessages) ? businessMessages : [businessMessages])
+    .map((message) => typeof message === "string" ? message
+      : typeof message?.errorMessage === "string" && message.errorMessage.trim() ? message.errorMessage
+        : message?.code != null && String(message.code).trim() && Number(message.code) !== 0 ? `business code ${message.code}` : null)
+    .filter((message) => typeof message === "string" && message.trim());
+  if ((Number.isFinite(statusCode) && (statusCode < 200 || statusCode >= 300)) || errors.length) {
+    throw new Error(`Nasdaq earnings API error${Number.isFinite(statusCode) ? ` (${statusCode})` : ""}${errors.length ? `: ${errors.join("; ")}` : ""}`);
+  }
+  if (businessMessages != null && !(Array.isArray(businessMessages) ? businessMessages : [businessMessages]).every((message) =>
+    typeof message === "string" || (message && typeof message === "object" && !Array.isArray(message)
+      && Object.hasOwn(message, "errorMessage") && (message.errorMessage == null || typeof message.errorMessage === "string")))) {
+    throw new Error("Nasdaq earnings payload invalid: malformed business messages");
+  }
+  const data = response?.data;
+  // Explicit empty results, labeled-empty announcements, and pending notices are successful no-date responses.
+  if (data === null) return null;
+  if (!data || typeof data !== "object" || Array.isArray(data)
+    || !["announcement", "reportText"].some((field) => Object.hasOwn(data, field))) {
+    throw new Error("Nasdaq earnings payload invalid: missing earnings fields");
+  }
+  for (const field of ["announcement", "reportText"]) {
+    if (data[field] != null && typeof data[field] !== "string") {
+      throw new Error(`Nasdaq earnings payload invalid: ${field} must be text`);
+    }
+  }
   const announcement = data?.announcement || "";
   const reportText = data?.reportText || "";
-  const namedDate = announcement.match(/([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})/);
-  const numericDate = reportText.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
-  const date = namedDate
-    ? isoDate(Number(namedDate[3]), monthNumbers[namedDate[1].toLowerCase()], Number(namedDate[2]))
-    : numericDate
-      ? isoDate(Number(numericDate[3]), Number(numericDate[1]), Number(numericDate[2]))
-      : null;
-  if (!date) return null;
+  const texts = [announcement.replace(/^Earnings announcement\*?\s+for\s+[^:]+:\s*/i, ""), reportText];
+  const pendingNotice = /\b(?:not (?:yet )?(?:been )?(?:announced|available|scheduled|provided)|has(?:n't| not) (?:yet )?(?:been )?provided|to be (?:announced|determined)|pending|TBD)\b/i;
+  const dates = [];
+  let unrecognizedDate = false;
+  for (const text of texts) {
+    const named = text.match(/([A-Za-z]+)\.?\s+(\d{1,2}),\s*(\d{4})/);
+    const numeric = text.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
+    if (named) dates.push(isoDate(Number(named[3]), monthNumbers[named[1].toLowerCase()], Number(named[2])));
+    if (numeric) dates.push(isoDate(Number(numeric[3]), Number(numeric[1]), Number(numeric[2])));
+    if (!named && !numeric && /\b(?:expected\*? on|report(?: earnings)? on|scheduled for|(?:earnings|report) date\s*[:=])\s+["']?\w/i.test(text.replace(pendingNotice, ""))) {
+      unrecognizedDate = true;
+    }
+  }
+  if (dates.some((date) => !date) || new Set(dates).size > 1) {
+    throw new Error("Nasdaq earnings payload invalid: invalid or conflicting advertised date");
+  }
+  if (unrecognizedDate) {
+    throw new Error("Nasdaq earnings payload invalid: unrecognized advertised date");
+  }
+  const date = dates[0] || null;
+  if (!date) {
+    if (texts.some((value) => value.trim()) && !texts.some((value) => pendingNotice.test(value))) {
+      throw new Error("Nasdaq earnings payload invalid: no date or pending notice");
+    }
+    return null;
+  }
   const timing = /before market open/i.test(reportText)
     ? "盘前"
     : /after market close/i.test(reportText)
@@ -224,18 +278,12 @@ function nextEvent(events, now) {
   return (events || []).find((event) => event.date >= today) || null;
 }
 
-function estimatedQuarterDate(released, now) {
-  const today = dateInTimeZone(now);
-  const baseDate = validIsoDate(released) ? released : today;
-  const [year, month, day] = baseDate.split("-").map(Number);
-  let offset = 3;
-  while (true) {
-    const target = addMonth(year, month, offset);
-    const lastDay = new Date(Date.UTC(target.year, target.month, 0)).getUTCDate();
-    const candidate = isoDate(target.year, target.month, Math.min(day, lastDay));
-    if (candidate >= today) return candidate;
-    offset += 3;
-  }
+function estimatedQuarterDate(released) {
+  if (!validIsoDate(released)) return null;
+  const [year, month, day] = released.split("-").map(Number);
+  const target = addMonth(year, month, 3);
+  const lastDay = new Date(Date.UTC(target.year, target.month, 0)).getUTCDate();
+  return isoDate(target.year, target.month, Math.min(day, lastDay));
 }
 
 function validCalendar(value) {
@@ -357,9 +405,11 @@ export function createCalendarService({
         return { ticker: company.ticker, event: null, error: error.message };
       }
     }));
+    const failed = rows.filter((row) => row.error).map((row) => row.ticker);
     return {
       events: Object.fromEntries(rows.filter((row) => row.event).map((row) => [row.ticker, row.event])),
-      failed: rows.filter((row) => row.error).map((row) => row.ticker),
+      failed,
+      successfulCount: rows.length - failed.length,
     };
   }
 
@@ -394,7 +444,7 @@ export function createCalendarService({
       sources.fomc = { ...sources.fomc, error: fomcResult.reason?.message || "calendar fetch failed" };
     }
 
-    if (earningsResult.status === "fulfilled" && Object.keys(earningsResult.value.events).length) {
+    if (earningsResult.status === "fulfilled" && earningsResult.value.successfulCount > 0) {
       // Keep passed dates before the provider rolls its feed to the next quarter.
       rememberPastEarnings();
       state.earnings = { ...state.earnings, ...earningsResult.value.events };
@@ -404,7 +454,9 @@ export function createCalendarService({
     } else {
       const error = earningsResult.status === "rejected"
         ? earningsResult.reason?.message || "calendar fetch failed"
-        : "Nasdaq did not return any usable earnings dates";
+        : earningsResult.value.failed.length
+          ? `财报日程暂不可用：${earningsResult.value.failed.join("、")}`
+          : "Nasdaq did not return any usable earnings dates";
       sources.earnings = { ...sources.earnings, error };
     }
 
@@ -437,8 +489,11 @@ export function createCalendarService({
       const confirmedSchedule = company.nextReportStatus === "confirmed" && isLaterQuarter(company.nextReportDate);
       const reportDates = (confirmedSchedule ? [company.nextReportDate] : [automatic?.date, state.pastEarnings[company.ticker]])
         .filter(isLaterQuarter);
+      const estimate = estimatedQuarterDate(company.released);
+      // Only company confirmation may replace the first-quarter cap; automatic dates may only shorten it.
+      const expiryDates = confirmedSchedule ? reportDates : [...reportDates, ...(estimate ? [estimate] : [])];
       const validThroughDates = validIsoDate(company.released)
-        ? [new Date(Date.parse(`${company.released}T00:00:00Z`) + 120 * DAY_MS).toISOString().slice(0, 10), ...reportDates]
+        ? [new Date(Date.parse(`${company.released}T00:00:00Z`) + 120 * DAY_MS).toISOString().slice(0, 10), ...expiryDates]
         : [];
       const snapshotValidThrough = validThroughDates.sort()[0] || null;
       const snapshotStale = !Number.isFinite(snapshotAgeDays) || snapshotAgeDays < 0
@@ -472,10 +527,9 @@ export function createCalendarService({
       }
 
       if (confirmedFallback) return { ...company, ...snapshot, nextReportBasis: "company" };
-      if (!Number.isFinite(snapshotAgeDays) || snapshotAgeDays < 0 || snapshotAgeDays > 120) {
+      if (snapshotStale || !estimate || estimate < today) {
         return { ...company, ...snapshot, nextReportDate: null, nextReportEstimatedDate: null, nextReportStatus: "pending", nextReportBasis: null, nextReportLabel: "待核对下一期日程", nextReportSource: null };
       }
-      const estimate = estimatedQuarterDate(company.released, at);
       return {
         ...company,
         ...snapshot,

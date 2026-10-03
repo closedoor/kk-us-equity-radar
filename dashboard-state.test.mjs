@@ -97,6 +97,34 @@ test("snapshots require the complete signal board and unambiguous availability",
   assert.equal(projectDashboard(oldPoints, now).score, projectDashboard(sample(), now).score);
 });
 
+test("nested display and financial fields cannot bypass snapshot validation", () => {
+  const edits = [
+    (data) => { data.aiEarnings[0].guidanceTone = { toString: null }; },
+    (data) => { data.aiEarnings[0].source = { toString: null }; },
+    (data) => { data.aiEarnings[0].snapshotStale = "false"; },
+    (data) => { data.refreshing = "false"; },
+    (data) => { data.dataQualityVersion = "1"; },
+    (data) => { data.indicators[0].value = { toString: null }; },
+    (data) => { data.indicators[0].source.label = []; },
+    (data) => { data.indicators[0].judgment = { tone: {}, label: "bad" }; },
+    (data) => { data.indicators[0].breakdown = [{ label: {}, value: "0" }]; },
+    (data) => { data.calendarSync = { updatedAt: "invalid", sources: {} }; },
+    (data) => { data.calendarSync.sources.bls = { error: {} }; },
+    (data) => { data.calendarSchedule.earnings.NVDA = { date: "2026-11-18", timing: { toString: null } }; },
+    (data) => { data.calendarSchedule.sources.bls = { mode: { toString: null } }; },
+    (data) => { data.calendarSchedule.fomc[0].startDate = "2026-02-31"; },
+    (data) => { data.calendarSchedule.cpi[0].period = {}; },
+    (data) => { data.calendarSchedule.pastEarnings.NVDA = "not-a-date"; },
+    (data) => { data.reminders[0].event = { toString: null }; },
+  ];
+  for (const edit of edits) {
+    const data = sample();
+    edit(data);
+    assert.equal(isDashboardSnapshot(data), false, edit.toString());
+  }
+  assert.equal(isDashboardSnapshot(sample()), true);
+});
+
 test("overnight projections cannot show a passed macro date as the next event", () => {
   const data = sample();
   data.reminders = [{ label: "CPI", date: "2026-09-06", event: "CPI", scheduleStatus: "confirmed" }];

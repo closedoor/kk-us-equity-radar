@@ -81,6 +81,152 @@ test("parses Nasdaq earnings date and timing", () => {
   assert.equal(event.status, "estimated");
 });
 
+// Captured from /api/analyst/{AVGO,MU}/earnings-date on 2026-10-03, both HTTP 200.
+const capturedPendingEarnings = {
+  AVGO: {
+    data: {
+      reportText: "Our vendor, Zacks Investment Research, hasn't provided us with the upcoming earnings report date.",
+      heading: "AVGO Earnings Date",
+      announcement: "Earnings announcement* for AVGO: ",
+      eQRResposeModel: {
+        text: ['AVGO has a "high" Earnings Quality Ranking (EQR) for the 21st consecutive week. Earnings quality refers to the extent to which current earnings predict future earnings. "High-quality" earnings are expected to persist, while "low-quality" earnings do not. EQR is a weekly ranking of relative earnings quality for a large universe of publicly traded US equities. Companies are compared to peers in their industry. Find out more about EQR data.'],
+        boldText: null,
+        dataLinkUrl: { label: "Find out more about EQR data", value: "https://data.nasdaq.com/databases/EQR" },
+      },
+    },
+    message: null,
+    status: { rCode: 200, bCodeMessage: null, developerMessage: null },
+  },
+  MU: {
+    data: {
+      reportText: "Our vendor, Zacks Investment Research, hasn't provided us with the upcoming earnings report date.",
+      heading: "MU Earnings Date",
+      announcement: "Earnings announcement* for MU: ",
+      eQRResposeModel: { text: null, boldText: null, dataLinkUrl: null },
+    },
+    message: null,
+    status: { rCode: 200, bCodeMessage: null, developerMessage: null },
+  },
+  // Parent supplied these same pending fields from the live SKHY response.
+  SKHY: {
+    data: {
+      reportText: "Our vendor, Zacks Investment Research, hasn't provided us with the upcoming earnings report date.",
+      announcement: "Earnings announcement* for SKHY: ",
+    },
+    status: { rCode: 200, bCodeMessage: null, developerMessage: null },
+  },
+};
+
+test("live AVGO, MU, and SKHY labeled-empty announcements are legitimate pending responses", () => {
+  for (const payload of Object.values(capturedPendingEarnings)) {
+    assert.equal(parseNasdaqEarningsDate(JSON.stringify(payload)), null);
+  }
+  assert.equal(parseNasdaqEarningsDate({ data: { announcement: "Earnings announcement* for TEST: ", reportText: "" }, status: { rCode: 200 } }), null);
+});
+
+test("parses the live NVDA analyst earnings-date response", () => {
+  // Captured from /api/analyst/NVDA/earnings-date on 2026-10-03, HTTP 200.
+  const payload = {
+    data: {
+      reportText: "NVIDIA Corporation Common Stock is estimated to report earnings on  11/18/2026. The upcoming earnings date is derived from an algorithm based on a company's historical reporting dates. Our vendor, Zacks Investment Research, might revise this date in the future, once the company announces the actual earnings date. According to Zacks Investment Research, based on  13 analysts' forecasts, the consensus EPS forecast for the quarter is $2.47.  The reported EPS for the same quarter last year was $1.24.",
+      heading: "NVDA Earnings Date",
+      announcement: "Earnings announcement* for NVDA: Nov 18, 2026",
+      eQRResposeModel: { text: null, boldText: null, dataLinkUrl: null },
+    },
+    message: null,
+    status: { rCode: 200, bCodeMessage: null, developerMessage: null },
+  };
+  const event = parseNasdaqEarningsDate(JSON.stringify(payload));
+  assert.equal(event.date, "2026-11-18");
+  assert.equal(event.status, "estimated");
+  assert.equal(event.reportText, payload.data.reportText);
+});
+
+test("Nasdaq supports numeric announcement dates with or without a reportText date", () => {
+  for (const reportText of ["", "Expected on 11/18/2026 after market close."]) {
+    const event = parseNasdaqEarningsDate({
+      data: { announcement: "Earnings announcement* for NVDA: 11/18/2026", reportText },
+      status: { rCode: 200, bCodeMessage: null },
+    });
+    assert.equal(event.date, "2026-11-18");
+  }
+});
+
+test("ancillary announcement text cannot override a valid reportText date", () => {
+  for (const announcement of ["Earnings announcement* for NVDA: ", "This estimate is based on historical reporting dates.", "NVIDIA is expected to report earnings."]) {
+    const event = parseNasdaqEarningsDate({
+      data: { announcement, reportText: "Expected on 11/18/2026 before market open." },
+      status: { rCode: 200, bCodeMessage: null },
+    });
+    assert.equal(event.date, "2026-11-18");
+    assert.equal(event.timing, "盘前");
+  }
+});
+
+test("Nasdaq success without an announced date is pending, not an API failure", () => {
+  for (const data of [
+    null,
+    { announcement: null, reportText: "" },
+    { announcement: "", reportText: "The next earnings date has not been announced." },
+    { reportText: "Expected on TBD." },
+    { announcement: "Earnings announcement* for TEST: not yet announced.", reportText: "Next earnings date: pending." },
+    { announcement: "Earnings announcement* for TEST: ", reportText: "The next earnings date has not been provided." },
+  ]) {
+    assert.equal(parseNasdaqEarningsDate({ data, status: { rCode: 200, bCodeMessage: null } }), null);
+  }
+  assert.equal(parseNasdaqEarningsDate({ data: null, status: { rCode: 200, bCodeMessage: [{ code: 0, errorMessage: "" }] } }), null);
+  assert.equal(parseNasdaqEarningsDate({
+    data: { reportText: "Expected on 10/15/2026 before market open." },
+    status: { rCode: 200, bCodeMessage: null },
+  }).date, "2026-10-15");
+});
+
+test("Nasdaq rejects payload-reported failures even when HTTP succeeds or a date is present", () => {
+  const errors = [
+    [{ data: null, status: { rCode: 400, bCodeMessage: [{ code: 400, errorMessage: "No data available" }] } }, "Nasdaq earnings API error (400): No data available"],
+    [{ data: null, status: { rCode: "503", bCodeMessage: null } }, "Nasdaq earnings API error (503)"],
+    [{ data: { reportText: "Expected on 10/15/2026." }, status: { rCode: 200, bCodeMessage: [{ code: 1001, errorMessage: "Invalid symbol" }] } }, "Nasdaq earnings API error (200): Invalid symbol"],
+    [{ data: null, status: { rCode: 200, bCodeMessage: [{ code: 400, errorMessage: "" }] } }, "Nasdaq earnings API error (200): business code 400"],
+  ];
+  for (const [payload, message] of errors) {
+    assert.throws(() => parseNasdaqEarningsDate(JSON.stringify(payload)), { message });
+  }
+});
+
+test("Nasdaq rejects malformed envelopes and date field types instead of reporting pending", () => {
+  const malformed = [
+    null, [], {}, { status: { rCode: 200 } }, { data: [] }, { data: "pending" }, { data: {} },
+    { data: { announcement: 0 } }, { data: { reportText: false } },
+    { data: null, status: "OK" }, { data: null, status: {} },
+    { data: null, status: { rCode: "OK" } },
+    { data: null, status: { rCode: 200, bCodeMessage: [42] } },
+  ];
+  for (const payload of malformed) {
+    assert.throws(() => parseNasdaqEarningsDate(JSON.stringify(payload)), /Nasdaq earnings payload invalid/, JSON.stringify(payload));
+  }
+});
+
+test("Nasdaq rejects invalid, unrecognized, or conflicting advertised dates", () => {
+  const malformed = [
+    { announcement: "Earnings announcement* for TEST: Feb 30, 2026" },
+    { reportText: "Expected on 02/31/2026." },
+    { announcement: "Earnings announcement* for TEST: Unknown 15, 2026" },
+    { reportText: "Expected on not-a-date." },
+    { reportText: "Expected on 2026-02-31." },
+    { reportText: "Unexpected response" },
+    { announcement: "Oct 15, 2026", reportText: "Expected on 13/31/2026." },
+    { announcement: "Oct 15, 2026", reportText: "Expected on not-a-date." },
+    { announcement: "Pending", reportText: "Expected on not-a-date." },
+    { announcement: "Feb 30, 2026", reportText: "Expected on 10/15/2026." },
+    { announcement: "Oct 15, 2026", reportText: "Expected on 10/16/2026." },
+    { announcement: "02/31/2026", reportText: "Expected on 10/15/2026." },
+    { announcement: "10/15/2026", reportText: "Expected on 10/16/2026." },
+  ];
+  for (const data of malformed) {
+    assert.throws(() => parseNasdaqEarningsDate({ data, status: { rCode: 200, bCodeMessage: null } }), /Nasdaq earnings payload invalid/, JSON.stringify(data));
+  }
+});
+
 test("calendar service uses automatic dates and keeps confirmed company dates", async () => {
   const aiEarnings = [{
     company: "Microsoft",
@@ -158,7 +304,8 @@ test("marks a company snapshot stale after its confirmed next report has passed"
   const [company] = service.resolvedAiEarnings();
   assert.equal(company.snapshotStale, true);
   assert.equal(company.snapshotLabel, "资料截至 2026-05-20");
-  assert.match(company.nextReportLabel, /待官宣/);
+  assert.equal(company.nextReportStatus, "pending");
+  assert.equal(company.nextReportEstimatedDate, null);
 });
 
 test("marks a company snapshot stale after an automatically estimated report date passes", () => {
@@ -183,7 +330,87 @@ test("marks a company snapshot stale after an automatically estimated report dat
   const [company] = service.resolvedAiEarnings();
   assert.equal(company.snapshotStale, true);
   assert.equal(company.snapshotLabel, "资料截至 2026-06-03");
-  assert.match(company.nextReportLabel, /2026-12-03/);
+  assert.equal(company.nextReportStatus, "pending");
+  assert.equal(company.nextReportEstimatedDate, null);
+});
+
+test("a cold-start snapshot expires at its first expected quarter instead of skipping it", async () => {
+  const service = createCalendarService({
+    fetchText: async () => { throw new Error("temporary outage"); },
+    logger: { warn() {} },
+    now: () => new Date("2026-10-03T12:00:00Z"),
+    aiEarnings: [{ company: "Micron", ticker: "MU", released: "2026-06-24", guidanceTone: "positive" }],
+  });
+  await service.refresh();
+  const [company] = service.resolvedAiEarnings();
+  assert.equal(company.snapshotAgeDays, 101);
+  assert.equal(company.snapshotValidThrough, "2026-09-24");
+  assert.equal(company.snapshotStale, true);
+  assert.equal(company.nextReportStatus, "pending");
+  assert.equal(company.nextReportDate, null);
+  assert.equal(company.nextReportEstimatedDate, null);
+  assert.equal(company.nextReportBasis, null);
+  assert.equal(company.nextReportSource, null);
+  const restarted = createCalendarService({ fetchText: async () => "", aiEarnings: [{ ticker: "MU", released: "2026-06-24" }], now: () => new Date("2026-10-03T12:00:00Z") });
+  restarted.hydrate(service.snapshot());
+  assert.equal(restarted.resolvedAiEarnings()[0].snapshotStale, true);
+});
+
+test("a cold June 24 snapshot cannot be revived by a December 24 provider date on October 3", async () => {
+  const config = {
+    fetchText: earningsRefreshFixture({ MU: {
+      data: { reportText: "Expected on 12/24/2026 after market close." },
+      status: { rCode: 200, bCodeMessage: null },
+    } }),
+    now: () => new Date("2026-10-03T12:00:00Z"),
+    aiEarnings: [{ ticker: "MU", released: "2026-06-24", guidanceTone: "positive" }],
+  };
+  const service = createCalendarService(config);
+  await service.refresh();
+  assert.deepEqual(service.snapshot().pastEarnings, {});
+  const [row] = service.resolvedAiEarnings();
+  assert.equal(row.snapshotValidThrough, "2026-09-24");
+  assert.equal(row.snapshotStale, true);
+  assert.equal(row.nextReportDate, "2026-12-24");
+  assert.equal(row.nextReportStatus, "estimated");
+  const restarted = createCalendarService(config);
+  restarted.hydrate(service.snapshot());
+  assert.equal(restarted.resolvedAiEarnings()[0].snapshotValidThrough, "2026-09-24");
+  assert.equal(restarted.resolvedAiEarnings()[0].snapshotStale, true);
+  const updated = createCalendarService({ ...config, aiEarnings: [{ ticker: "MU", released: "2026-09-30" }] });
+  updated.hydrate(service.snapshot());
+  assert.equal(updated.resolvedAiEarnings()[0].snapshotStale, false);
+});
+
+test("the first quarterly boundary clamps month-end and expires after New York midnight", () => {
+  let current = new Date("2026-05-01T03:59:59Z");
+  const service = createCalendarService({ fetchText: async () => "", aiEarnings: [{ ticker: "TEST", released: "2026-01-31" }], now: () => current });
+  const [before] = service.resolvedAiEarnings();
+  assert.equal(before.snapshotValidThrough, "2026-04-30");
+  assert.equal(before.snapshotStale, false);
+  assert.equal(before.nextReportEstimatedDate, "2026-04-30");
+  current = new Date("2026-05-01T04:00:00Z");
+  const [after] = service.resolvedAiEarnings();
+  assert.equal(after.snapshotValidThrough, "2026-04-30");
+  assert.equal(after.snapshotStale, true);
+  assert.equal(after.nextReportStatus, "pending");
+  assert.equal(after.nextReportEstimatedDate, null);
+});
+
+test("only company-confirmed dates can extend the first-quarter boundary; automatic dates can shorten it", () => {
+  const service = createCalendarService({
+    fetchText: async () => "", now: () => new Date("2026-10-03T12:00:00Z"),
+    aiEarnings: [
+      { ticker: "CONFIRMED", released: "2026-07-01", nextReportDate: "2026-10-20", nextReportStatus: "confirmed" },
+      { ticker: "PROVIDER", released: "2026-07-01" },
+      { ticker: "EARLIER", released: "2026-07-01" },
+      { ticker: "CAPPED", released: "2026-07-01", nextReportDate: "2026-12-01", nextReportStatus: "confirmed" },
+    ],
+  });
+  service.hydrate({ earnings: { PROVIDER: { date: "2026-10-21", status: "estimated" }, EARLIER: { date: "2026-09-25" } } });
+  const rows = service.resolvedAiEarnings();
+  assert.deepEqual(rows.map((row) => row.snapshotValidThrough), ["2026-10-20", "2026-10-01", "2026-09-25", "2026-10-29"]);
+  assert.deepEqual(rows.map((row) => row.snapshotStale), [false, true, true, false]);
 });
 
 test("does not stale a fresh snapshot when the automatic estimate is only one day later", () => {
@@ -371,7 +598,7 @@ test("retries failed calendar sources sooner than the normal refresh interval", 
 });
 
 test("company-confirmed dates take precedence over conflicting estimates", () => {
-  const service = createCalendarService({ fetchText: async () => "", now: () => new Date("2026-09-06T12:00:00Z"), aiEarnings: [{
+  const service = createCalendarService({ fetchText: async () => "", now: () => new Date("2026-09-25T12:00:00Z"), aiEarnings: [{
     ticker: "TEST", released: "2026-06-24", nextReportDate: "2026-09-30", nextReportLabel: "2026-09-30 · 盘后", nextReportStatus: "confirmed", nextReportSource: "https://example.com/ir",
   }] });
   service.hydrate({ earnings: { TEST: { date: "2026-09-25" } } });
@@ -379,6 +606,8 @@ test("company-confirmed dates take precedence over conflicting estimates", () =>
   assert.equal(row.nextReportDate, "2026-09-30");
   assert.equal(row.nextReportStatus, "confirmed");
   assert.equal(row.nextReportSource, "https://example.com/ir");
+  assert.equal(row.snapshotValidThrough, "2026-09-30");
+  assert.equal(row.snapshotStale, false);
   service.hydrate({ earnings: { TEST: { date: "2026-09-03" } } });
   assert.equal(service.resolvedAiEarnings()[0].snapshotStale, false);
 });
@@ -426,4 +655,127 @@ test("partial earnings failures preserve successful dates and report the failed 
   assert.equal(service.snapshot().earnings.GOOD.date, "2026-10-15");
   assert.equal(service.snapshot().earnings.FAIL.date, "2026-10-16");
   assert.match(service.syncStatus().sources.earnings.error, /FAIL/);
+});
+
+function earningsRefreshFixture(payloads, onRequest = () => {}) {
+  return async (url) => {
+    onRequest(url);
+    if (url.includes("bls.ics")) return "BEGIN:VEVENT\nDTSTART:20261014T083000\nSUMMARY:Consumer Price Index for September 2026\nEND:VEVENT\nBEGIN:VEVENT\nDTSTART:20261106T083000\nSUMMARY:Employment Situation for October 2026\nEND:VEVENT";
+    if (url.includes("fomccalendars")) return '<h4><a>2026 FOMC Meetings</a></h4><div class="fomc-meeting__month"><strong>October</strong></div><div class="fomc-meeting__date">27-28</div>';
+    const ticker = url.match(/\/analyst\/([^/]+)\/earnings-date/)?.[1];
+    if (ticker && Object.hasOwn(payloads, ticker)) return JSON.stringify(payloads[ticker]);
+    throw new Error(`unexpected URL ${url}`);
+  };
+}
+
+test("HTTP-200 API failures preserve prior dates and retry after 30 minutes", async () => {
+  let current = new Date("2026-10-03T12:00:00Z");
+  let earningsRequests = 0;
+  const service = createCalendarService({
+    fetchText: earningsRefreshFixture({
+      GOOD: { data: { reportText: "Expected on 10/15/2026." }, status: { rCode: 200, bCodeMessage: null } },
+      FAIL: { data: null, status: { rCode: 400, bCodeMessage: [{ code: 400, errorMessage: "No data available" }] } },
+      PENDING: { data: null, status: { rCode: 200, bCodeMessage: null } },
+    }, (url) => { if (url.includes("earnings-date")) earningsRequests += 1; }),
+    logger: { warn() {} }, now: () => current,
+    aiEarnings: ["GOOD", "FAIL", "PENDING"].map((ticker) => ({ ticker, released: "2026-07-15" })),
+  });
+  service.hydrate({ earnings: { FAIL: { date: "2026-10-16" } } });
+  await service.refresh();
+  assert.equal(service.snapshot().earnings.GOOD.date, "2026-10-15");
+  assert.equal(service.snapshot().earnings.FAIL.date, "2026-10-16");
+  assert.equal(service.snapshot().earnings.PENDING, undefined);
+  assert.equal(service.syncStatus().sources.earnings.error, "财报日程暂不可用：FAIL");
+  assert.equal(service.syncStatus().sources.bls.error, null);
+  assert.equal(service.syncStatus().sources.fomc.error, null);
+  assert.equal(earningsRequests, 3);
+  current = new Date("2026-10-03T12:29:00Z");
+  await service.refresh();
+  assert.equal(earningsRequests, 3);
+  current = new Date("2026-10-03T12:31:00Z");
+  await service.refresh();
+  assert.equal(earningsRequests, 6);
+});
+
+test("all successful pending earnings responses clear old errors without inventing dates or fast retries", async () => {
+  let current = new Date("2026-10-03T12:00:00Z");
+  let earningsRequests = 0;
+  const service = createCalendarService({
+    fetchText: earningsRefreshFixture({
+      NULL: { data: null, status: { rCode: 200, bCodeMessage: null } },
+      TEXT: { data: { reportText: "The next earnings date has not been announced." }, status: { rCode: 200, bCodeMessage: null } },
+      ...capturedPendingEarnings,
+    }, (url) => { if (url.includes("earnings-date")) earningsRequests += 1; }),
+    logger: { warn() {} }, now: () => current,
+    aiEarnings: ["NULL", "TEXT", "AVGO", "MU", "SKHY"].map((ticker) => ({ ticker, released: "2026-07-15" })),
+  });
+  service.hydrate({ sources: { earnings: { mode: "nasdaq-live", lastSuccessAt: "2026-10-02T12:00:00Z", error: "old outage" } } });
+  await service.refresh();
+  assert.deepEqual(service.snapshot().earnings, {});
+  assert.equal(service.syncStatus().sources.earnings.error, null);
+  assert.equal(service.syncStatus().sources.earnings.mode, "nasdaq-live");
+  assert.equal(service.syncStatus().sources.earnings.lastSuccessAt, "2026-10-03T12:00:00.000Z");
+  current = new Date("2026-10-03T12:31:00Z");
+  await service.refresh();
+  assert.equal(earningsRequests, 5);
+});
+
+test("all API failures retain the last earnings success timestamp and saved history", async () => {
+  const service = createCalendarService({
+    fetchText: earningsRefreshFixture({ FAIL: { data: null, status: { rCode: 503, bCodeMessage: null } } }),
+    logger: { warn() {} }, now: () => new Date("2026-10-03T12:00:00Z"),
+    aiEarnings: [{ ticker: "FAIL", released: "2026-07-15" }],
+  });
+  service.hydrate({ earnings: { FAIL: { date: "2026-10-16" } }, sources: { earnings: {
+    mode: "nasdaq-live", lastSuccessAt: "2026-10-02T12:00:00Z", error: null,
+  } } });
+  await service.refresh();
+  assert.equal(service.snapshot().earnings.FAIL.date, "2026-10-16");
+  assert.equal(service.syncStatus().sources.earnings.lastSuccessAt, "2026-10-02T12:00:00Z");
+  assert.equal(service.syncStatus().sources.earnings.error, "财报日程暂不可用：FAIL");
+});
+
+test("HTTP-200 malformed responses fail only their tickers, preserve saved dates, and retry", async () => {
+  let current = new Date("2026-10-03T12:00:00Z");
+  let earningsRequests = 0;
+  const warnings = [];
+  const payloads = {
+    GOOD: { data: { reportText: "Expected on 10/15/2026." }, status: { rCode: 200 } },
+    PENDING: { data: null, status: { rCode: 200 } },
+    ENVELOPE: { status: { rCode: 200 } },
+    DATE: { data: { reportText: "Expected on 02/31/2026." }, status: { rCode: 200 } },
+    TEXT: { data: { reportText: "Expected on not-a-date." }, status: { rCode: 200 } },
+  };
+  const service = createCalendarService({
+    fetchText: earningsRefreshFixture(payloads, (url) => { if (url.includes("earnings-date")) earningsRequests += 1; }),
+    logger: { warn(message) { warnings.push(message); } }, now: () => current,
+    aiEarnings: Object.keys(payloads).map((ticker) => ({ ticker, released: "2026-07-15" })),
+  });
+  const savedDates = Object.fromEntries(["ENVELOPE", "DATE", "TEXT"].map((ticker) => [ticker, { date: "2026-10-16" }]));
+  service.hydrate({ earnings: savedDates });
+  await service.refresh();
+  assert.equal(service.syncStatus().sources.earnings.error, "财报日程暂不可用：ENVELOPE、DATE、TEXT");
+  assert.equal(service.snapshot().earnings.GOOD.date, "2026-10-15");
+  assert.equal(service.snapshot().earnings.PENDING, undefined);
+  for (const ticker of Object.keys(savedDates)) assert.deepEqual(service.snapshot().earnings[ticker], savedDates[ticker]);
+  assert.equal(warnings.length, 3);
+  assert.ok(warnings.every((warning) => warning.includes("Nasdaq earnings payload invalid")));
+  current = new Date("2026-10-03T12:29:00Z");
+  await service.refresh();
+  assert.equal(earningsRequests, 5);
+  current = new Date("2026-10-03T12:31:00Z");
+  await service.refresh();
+  assert.equal(earningsRequests, 10);
+});
+
+test("all malformed earnings bodies retain the last successful source timestamp", async () => {
+  const service = createCalendarService({
+    fetchText: earningsRefreshFixture({ FAIL: { data: {} } }),
+    logger: { warn() {} }, now: () => new Date("2026-10-03T12:00:00Z"),
+    aiEarnings: [{ ticker: "FAIL", released: "2026-07-15" }],
+  });
+  service.hydrate({ sources: { earnings: { mode: "nasdaq-live", lastSuccessAt: "2026-10-02T12:00:00Z", error: null } } });
+  await service.refresh();
+  assert.equal(service.syncStatus().sources.earnings.lastSuccessAt, "2026-10-02T12:00:00Z");
+  assert.equal(service.syncStatus().sources.earnings.error, "财报日程暂不可用：FAIL");
 });
