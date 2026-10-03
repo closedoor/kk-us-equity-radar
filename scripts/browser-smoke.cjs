@@ -417,6 +417,14 @@ async function main() {
       await page.clock.runFor(2500);
       await expect.poll(() => calls.length).toBe(2);
       await expect(source).toBeFocused();
+      await page.locator("#scoreMethodology summary").click();
+      const methodologySource = page.locator(".methodology-sources a").first();
+      await methodologySource.focus();
+      const beforeMethodologyRefresh = calls.length;
+      await page.clock.runFor(15 * 60 * 1000);
+      await expect.poll(() => calls.length).toBeGreaterThan(beforeMethodologyRefresh);
+      await expect(methodologySource).toBeFocused();
+      await expect(page.locator("#scoreMethodology")).toHaveAttribute("open", "");
       const edit = page.locator("#indicator-aiEarnings .manual-edit");
       await edit.focus();
       await edit.press("Enter");

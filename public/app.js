@@ -232,7 +232,7 @@ function renderMethodology(data) {
     <table class="weight-table"><caption>指标权重 · 合计 100%</caption><thead><tr><th scope="col">指标</th><th scope="col">权重</th><th scope="col">当前状态</th></tr></thead>
       <tbody>${data.indicators.map((row) => `<tr data-weight-id="${escapeHtml(row.id)}"><th scope="row">${escapeHtml(row.title)}</th><td>${row.weight}%</td><td>${row.overridden ? "人工覆盖" : row.available ? "有效" : "不计分"}</td></tr>`).join("")}</tbody>
     </table>
-    <p class="methodology-sources">设计参考：<a href="https://www.federalreserve.gov/financial-stability/types-of-financial-system-vulnerabilities-and-risks.htm" target="_blank" rel="noopener noreferrer">美联储风险框架</a>、<a href="https://www.chicagofed.org/research/data/nfci/about" target="_blank" rel="noopener noreferrer">芝加哥联储金融条件</a>、<a href="https://www.spglobal.com/spdji/en/indices/equity/sp-500-equal-weight-index/" target="_blank" rel="noopener noreferrer">标普等权指数口径</a>。上述来源不代表对本模型权重的认可。</p>`;
+    <p class="methodology-sources">设计参考：<a href="https://www.federalreserve.gov/financial-stability/types-of-financial-system-vulnerabilities-and-risks.htm" target="_blank" rel="noopener noreferrer" data-focus-key="methodology-source-fed">美联储风险框架</a>、<a href="https://www.chicagofed.org/research/data/nfci/about" target="_blank" rel="noopener noreferrer" data-focus-key="methodology-source-nfci">芝加哥联储金融条件</a>、<a href="https://www.spglobal.com/spdji/en/indices/equity/sp-500-equal-weight-index/" target="_blank" rel="noopener noreferrer" data-focus-key="methodology-source-breadth">标普等权指数口径</a>。上述来源不代表对本模型权重的认可。</p>`;
 }
 
 function renderCategories(categories) {
