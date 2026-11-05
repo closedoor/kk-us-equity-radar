@@ -194,7 +194,7 @@ async function main() {
       const errors = Array.from({ length: count }, (_, i) => `Source ${i + 1}: temporarily unavailable`);
       await load(page, () => ({ ...fresh(), errors }));
       const banner = page.locator("#errorBanner");
-      await expect(banner).toContainText("部分数据源暂时不可用");
+      await expect(banner).toContainText("部分数据或研究资料仍待核对");
       for (const error of errors.slice(0, 3)) await expect(banner).toContainText(error);
       measurements.initialText = await banner.textContent();
       const details = banner.locator("details");

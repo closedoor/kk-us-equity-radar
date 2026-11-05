@@ -5,6 +5,13 @@ on:
     branches:
       - main
       - codex/radar-qa-*
+    paths:
+      - 'public/**'
+      - '**.mjs'
+      - 'scripts/**'
+      - 'fixtures/**'
+      - 'package.json'
+      - '.github/workflows/product-qa.yml'
 
 permissions:
   contents: read
