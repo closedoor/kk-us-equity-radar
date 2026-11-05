@@ -1,0 +1,104 @@
+name: Product browser QA
+
+on:
+  push:
+    branches:
+      - main
+      - codex/radar-qa-*
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CI: true
+      RADAR_URL: http://127.0.0.1:4173
+      RADAR_SCREENSHOTS: ${{ github.workspace }}/qa-artifacts
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      # CI tooling only: keep the product free of runtime dependencies/lockfiles.
+      - name: Install pinned browser tooling
+        run: |
+          npm install --no-save --package-lock=false @playwright/test@1.57.0
+          npx --no-install playwright install --with-deps --no-shell chromium
+          sudo apt-get install -y fonts-noto-cjk
+          node <<'NODE'
+          const fs = require('node:fs');
+          const executable = require('playwright').chromium.executablePath();
+          if (/headless[_-]shell/.test(executable)) throw new Error('Full Chromium is required for real minimum-font profile preferences');
+          fs.accessSync(executable, fs.constants.X_OK);
+          fs.appendFileSync(process.env.GITHUB_ENV, `CHROME_PATH=${executable}\n`);
+          NODE
+      - name: Start isolated recorded-data fixture service
+        id: fixture
+        run: |
+          mkdir -p "$RADAR_SCREENSHOTS"
+          node scripts/ci-fixture-server.mjs > "$RADAR_SCREENSHOTS/fixture-server.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/radar-qa-server.pid"
+          node <<'NODE'
+          (async () => {
+            const deadline = Date.now() + 10000;
+            while (Date.now() < deadline) {
+              try {
+                const response = await fetch(`${process.env.RADAR_URL}/api/dashboard`, {signal: AbortSignal.timeout(1000)});
+                const data = await response.json();
+                if (response.ok && data.indicators?.length === 12) return;
+              } catch {}
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            throw new Error('Fixture service did not become ready');
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+          NODE
+      - name: Run complete interaction smoke suite
+        if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
+        run: node scripts/browser-smoke.cjs 2>&1 | tee "$RADAR_SCREENSHOTS/browser-smoke.log"
+      - name: Run complete product and genuine minimum-font suite
+        if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
+        run: node scripts/product-audit.cjs 2>&1 | tee "$RADAR_SCREENSHOTS/product-audit.log"
+      - name: Capture desktop and mobile viewport journeys
+        if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
+        run: node scripts/ci-screenshots.cjs 2>&1 | tee "$RADAR_SCREENSHOTS/viewport-journeys.log"
+      - name: Verify all seven genuine minimum-font cases ran
+        if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const data = JSON.parse(fs.readFileSync(path.join(process.env.RADAR_SCREENSHOTS, 'product-results.json'), 'utf8'));
+          const cases = data.scenarios.filter(row => row.name.startsWith('minfont20-'));
+          if (cases.length !== 7 || cases.some(row => row.passed !== true || row.skipped)) {
+            throw new Error(`Expected seven actual passing minimum-font cases: ${JSON.stringify(cases.map(({name, passed, skipped, error}) => ({name, passed, skipped, error})))}`);
+          }
+          console.log('Seven real full-Chromium minimum-font preference cases passed (zero skips).');
+          NODE
+      - name: Stop fixture service
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/radar-qa-server.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/radar-qa-server.pid")" 2>/dev/null || true
+          fi
+      - name: Retain screenshots, measurements and logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: radar-product-qa-${{ github.run_id }}-${{ github.run_attempt }}
+          path: qa-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
