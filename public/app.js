@@ -62,6 +62,7 @@ const els = {
   aiCompanyGrid: document.querySelector("#aiCompanyGrid"),
   reminderGrid: document.querySelector("#reminderGrid"),
   calendarSyncStatus: document.querySelector("#calendarSyncStatus"),
+  publicationStatus: document.querySelector("#publicationStatus"),
 };
 
 function setLiveStatus(text, status = "updating") {
@@ -226,11 +227,13 @@ function renderSummary(data) {
   const offline = navigator.onLine === false;
   const marketFailed = Boolean(data.errors?.length);
   const calendarFailed = Object.values(data.calendarSync?.sources || {}).some((source) => source?.error);
-  const status = offline || state.loadError ? "error" : data.cacheExpired || data.refreshing || state.syncPending || data.stale || marketFailed || calendarFailed ? "updating" : "connected";
+  const publicationFailed = Boolean(data.publicationErrors?.length);
+  const status = offline || state.loadError ? "error" : data.cacheExpired || data.refreshing || state.syncPending || data.stale || marketFailed || calendarFailed || publicationFailed ? "updating" : "connected";
   setLiveStatus(offline ? "离线 · 暂用已有数据" : state.loadError ? "连接失败" : data.cacheExpired ? "缓存已过期 · 等待新数据" : data.refreshing || state.syncPending
     ? `后台更新中 · 暂用${cacheAge}缓存`
     : marketFailed ? "部分来源失败 · 暂用已有数据"
     : calendarFailed ? "日程部分同步失败"
+    : publicationFailed ? "官方发布进度待核对 · 见详情"
     : data.stale
       ? `更新暂缓 · 暂用${cacheAge}缓存`
       : "已连接 · 数据已更新", status);
@@ -485,10 +488,16 @@ function render() {
   renderAiEarnings(data.aiEarnings, data.aiChainLayers);
   renderReminders(data.reminders);
   renderCalendarSync(data.calendarSync);
+  renderPublicationChecks(data.publicationChecks);
   const calendarErrors = Object.entries(data.calendarSync?.sources || {}).filter(([, source]) => source?.error)
     .map(([key]) => `${({ bls: "CPI / 就业", fomc: "美联储", earnings: "财报" })[key] || key}日程来源暂不可用`);
-  renderErrors([...(data.errors || []), ...calendarErrors]);
+  renderErrors([...(data.errors || []), ...calendarErrors, ...(data.publicationErrors || [])]);
   if (focusKey) document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`)?.focus({ preventScroll: true });
+}
+
+function renderPublicationChecks(checks = []) {
+  els.publicationStatus.hidden = checks.length === 0;
+  els.publicationStatus.innerHTML = checks.length ? `<strong>CPI / 就业发布核验</strong><span>${checks.map((row) => `<a data-focus-key="publication-${escapeHtml(row.kind)}" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">${escapeHtml(row.label)}</a>：${escapeHtml(row.message)}`).join("；")}</span>` : "";
 }
 
 function renderInitialState() {

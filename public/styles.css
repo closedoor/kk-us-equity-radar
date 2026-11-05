@@ -105,6 +105,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, .indicator-card:focu
 .band-labels { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-top: 8px; color: #cbd1c8; font: 8px var(--mono); text-align: center; }
 
 .category-strip { display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.publication-status { display: flex; flex-wrap: wrap; gap: 6px 14px; padding-block: 14px; color: var(--muted); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.publication-status strong { color: var(--ink); }
+.publication-status a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; }
 .category-item { padding: 24px 22px; border-right: 1px solid var(--line); }
 .category-item:first-child { padding-left: 0; }.category-item:last-child { border-right: 0; }
 .category-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 13px; }

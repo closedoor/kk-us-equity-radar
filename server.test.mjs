@@ -23,7 +23,7 @@ async function withOfflineServer(cache, check, { stalled = false, preload = null
   await new Promise((resolve) => reservation.close(resolve));
   let child;
   try {
-    for (const name of ["server.mjs", "calendar.mjs", "market-data.mjs", "package.json", "public"]) {
+    for (const name of ["server.mjs", "calendar.mjs", "publication.mjs", "market-data.mjs", "package.json", "public"]) {
       await cp(new URL(name, import.meta.url), path.join(dir, name), { recursive: true });
     }
     // Keep historical scenario dates independent of the current production quarter.
@@ -117,6 +117,77 @@ test("a malformed saved calendar cannot enter service hydration", async () => {
     assert.equal(after.score, null);
     assert.equal(isDashboardSnapshot(after), true);
   });
+});
+
+const publicationClock = "2026-10-15T16:00:00.000Z";
+const publicationClockPreload = `
+  const PublicationNativeDate = Date;
+  globalThis.Date = class extends PublicationNativeDate {
+    constructor(...args) { super(...(args.length ? args : [${JSON.stringify(publicationClock)}])); }
+    static now() { return PublicationNativeDate.parse(${JSON.stringify(publicationClock)}); }
+  };
+`;
+const publicationHeaders = {
+  cpi: "Transmission of material in this release is embargoed until 8:30 a.m. (ET) Wednesday, October 14, 2026 USDL-26-1574 CONSUMER PRICE INDEX - SEPTEMBER 2026",
+  employment: "Transmission of material in this news release is embargoed until USDL-26-1549 8:30 a.m. (ET) Friday, October 2, 2026 THE EMPLOYMENT SITUATION - SEPTEMBER 2026",
+};
+
+test("a newly verified release immediately removes obsolete cached CPI dependencies while markets are still pending", async () => {
+  const cache = { ...fixture, generatedAt: publicationClock, errors: [], indicators: fixture.indicators.map((row) =>
+    row.id === "inflation" ? { ...row, date: "2026-08-01" } : row) };
+  const preload = publicationClockPreload + `
+    const publicationHeaders = ${JSON.stringify(publicationHeaders)};
+    globalThis.fetch = async (value, { signal }) => {
+      const url = new URL(value);
+      if (url.pathname === "/news.release/cpi.nr0.htm") return new Response(publicationHeaders.cpi);
+      if (url.pathname === "/news.release/empsit.nr0.htm") return new Response(publicationHeaders.employment);
+      return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("test pending source")), { once: true }));
+    };
+  `;
+  await withOfflineServer(cache, async ({ read, dir }) => {
+    let body;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      ({ body } = await read());
+      if (body.publicationChecks?.some((row) => row.kind === "cpi" && row.status === "lagging")) break;
+      await delay(20);
+    }
+    assert.equal(body.generatedAt, cache.generatedAt);
+    assert.equal(body.refreshing, true);
+    assert.equal(body.publicationSchedule.sources.cpi.period, "2026-09");
+    assert.equal(body.coverage, 57);
+    assert.equal(body.score, null);
+    assert.equal(body.action.key, "unavailable");
+    for (const id of ["inflation", "fed", "unemployment", "payrolls"]) assert.equal(body.indicators.find((row) => row.id === id).available, false, id);
+    assert.equal(body.indicators.find((row) => row.id === "inflation").value, cache.indicators.find((row) => row.id === "inflation").value);
+    assert.deepEqual(body.errors, []);
+    assert.ok(body.publicationErrors.some((message) => message.includes("2026-09") && message.includes("2026-08")));
+    await delay(100);
+    const stored = JSON.parse(await readFile(path.join(dir, "dashboard-cache.json"), "utf8"));
+    assert.equal(stored.publicationSchedule.sources.cpi.period, "2026-09");
+  }, { preload });
+});
+
+test("verified publication evidence survives an offline restart and cannot be displaced by a more complete obsolete cache", async () => {
+  const cache = { ...fixture, generatedAt: publicationClock, errors: [], indicators: fixture.indicators.map((row) =>
+    row.id === "inflation" ? { ...row, date: "2026-08-01" } : row),
+    publicationSchedule: { version: 1, sources: {
+      cpi: { period: "2026-09", publishedAt: "2026-10-14T12:30:00.000Z", checkedAt: "2026-10-14T13:00:00.000Z", source: "https://www.bls.gov/news.release/cpi.nr0.htm", error: null },
+      employment: null,
+    } },
+  };
+  await withOfflineServer(cache, async ({ read, finished }) => {
+    const first = await read();
+    const after = await finished();
+    for (const { body } of [first, { body: after }]) {
+      assert.equal(body.generatedAt, cache.generatedAt);
+      assert.equal(body.publicationSchedule.sources.cpi.period, "2026-09");
+      assert.equal(body.coverage, 57);
+      assert.equal(body.score, null);
+      assert.equal(body.indicators.find((row) => row.id === "inflation").available, false);
+    }
+    assert.match(after.publicationSchedule.sources.cpi.error, /test publication outage/);
+    assert.equal(after.publicationSchedule.sources.cpi.checkedAt, cache.publicationSchedule.sources.cpi.checkedAt);
+  }, { preload: publicationClockPreload + `globalThis.fetch = async () => { throw new Error("test publication outage"); };` });
 });
 
 test("an expired cache cannot supply a total score, even before or after an upstream failure", async () => {

@@ -9,6 +9,9 @@
 - `public/`
 - `server.mjs`
 - `earnings-data.mjs`
+- `publication.mjs`
+- `publication.test.mjs`
+- `publication-state.test.mjs`
 - `calendar.mjs`
 - `calendar.test.mjs`
 - `market-data.mjs`

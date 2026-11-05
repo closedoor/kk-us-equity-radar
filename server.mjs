@@ -8,6 +8,7 @@ import { parseFredCsv, parseNasdaqRows, requireFreshSeries, monthlyPercentChange
 import { computeScores, actionFor, INDICATOR_WEIGHTS, normalizeIndicator, SCORING_VERSION, SCORING_NOTE } from "./public/risk-model.js";
 import { projectDashboard, resolveAiIndicator, shouldReplaceDashboard, isDashboardSnapshot } from "./public/dashboard-state.js";
 import { aiEarnings, aiChainLayers } from "./earnings-data.mjs";
+import { createPublicationService } from "./publication.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
@@ -34,6 +35,7 @@ let dashboardWritePromise = Promise.resolve();
 const weights = INDICATOR_WEIGHTS;
 
 const calendarService = createCalendarService({ fetchText, aiEarnings });
+const publicationService = createPublicationService({ fetchText });
 
 const fredMeta = {
   DCOILBRENTEU: ["Brent 现货", "日度"],
@@ -663,6 +665,7 @@ function resolveDashboardCalendar(snapshot) {
     aiEarnings: calendarService.resolvedAiEarnings(),
     calendarSchedule: calendarService.snapshot(),
     calendarSync: calendarService.syncStatus(),
+    publicationSchedule: publicationService.snapshot(),
   });
 }
 
@@ -683,11 +686,18 @@ function refreshDashboard(force = false) {
     .then(() => calendarService.refresh({ force }))
     .catch((error) => console.warn(`[calendar] refresh failed: ${error.message}`))
     .then(() => publishDashboard());
+  const publicationRefresh = Promise.resolve()
+    .then(() => publicationService.refresh({ force }))
+    .catch((error) => console.warn(`[publication] refresh failed: ${error.message}`))
+    .then(() => publishDashboard());
   const marketRefresh = Promise.resolve()
     .then(() => buildDashboard())
     .then((next) => {
       lastRefreshErrors = next.errors;
       const resolved = resolveDashboardCalendar(next);
+      // Official evidence may make a previously higher-coverage cache obsolete.
+      // Project both candidates before the existing cache-retention comparison.
+      if (dashboardCache) dashboardCache = resolveDashboardCalendar(dashboardCache);
       if (shouldReplaceDashboard(dashboardCache, resolved)) {
         dashboardCache = resolved;
         dashboardCachedAt = Date.now();
@@ -699,8 +709,8 @@ function refreshDashboard(force = false) {
       lastRefreshErrors = [error.message];
       return dashboardCache;
     });
-  // Market publication is independent; keep polling until calendars also settle.
-  refreshPromise = Promise.allSettled([marketRefresh, calendarRefresh])
+  // Market publication is independent; calendars and publication checks also settle.
+  refreshPromise = Promise.allSettled([marketRefresh, calendarRefresh, publicationRefresh])
     .then((results) => {
       const failed = results.find((result) => result.status === "rejected");
       if (failed) {
@@ -743,6 +753,7 @@ async function handleRequest(req, res) {
       aiEarnings: calendarService.resolvedAiEarnings(),
       calendarSchedule: calendarService.snapshot(),
       calendarSync: calendarService.syncStatus(),
+      publicationSchedule: publicationService.snapshot(),
       errors: lastRefreshErrors.length ? lastRefreshErrors : dashboardCache.errors,
       cache: !force && cacheAgeMs < CACHE_TTL_MS,
       stale: cacheAgeMs >= CACHE_TTL_MS,
@@ -786,6 +797,7 @@ try {
   dashboardCachedAt = Math.min(Date.now(), Date.parse(dashboardCache.generatedAt) || 0);
   lastRefreshErrors = Array.isArray(dashboardCache.errors) ? dashboardCache.errors : [];
   calendarService.hydrate(dashboardCache.calendarSchedule);
+  publicationService.hydrate(dashboardCache.publicationSchedule);
 } catch {
   dashboardCache = null;
 }

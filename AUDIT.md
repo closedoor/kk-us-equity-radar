@@ -214,3 +214,33 @@ MSFT/GOOG/AMZN gross margins were recomputed from reported revenue and cost/gros
 - Font-blocking directed checks: five passed. Synthetic model sensitivity scenarios: ten executed; these are not historical backtests. `git diff --check` passed.
 
 Remaining limitations: R01 publication-aware freshness is still based on observation age, not guaranteed official latest-period reconciliation for every source; EPS revision breadth remains unconnected and excluded. Financial commentary remains a reviewed snapshot, not automatic earnings interpretation. Physical iOS/Android, other browser engines, full assistive technology, real Chrome minimum-font preferences in this environment, Node 18 and a long production load/soak test were not verified. Live deployment acceptance is tracked separately from the local evidence above.
+
+## Continued maintenance — v4.7.4 / 2026-11-05
+
+Base: main `ae2f8214fd96505762ec3c2b3c7447a40041ff62`. The prior release and durable QA record were read before this work. The advertised original local directory did not exist, so work used a clean clone under `/tmp/kk-us-equity-radar-next-20261105`, leaving other local projects untouched.
+
+### R01: verified publication lower bounds, scoped to CPI and headline employment
+
+- `publication.mjs` reads the two canonical BLS latest-release pages. It requires a report period and an embargo timestamp from the release header, validates actual calendar dates and weekday/zone consistency, and converts Eastern wall time with `America/New_York`, including DST. A future scheduled date or pre-embargo page cannot establish that data have been released.
+- Evidence stores source URL, report month, actual release time, last successful `checkedAt`, and failure `attemptedAt` separately. A failed recheck retains the known lower bound and the earlier successful check time. Older returned pages and restart hydration cannot roll the known period backward; same-period corrections cannot postpone its first proven release.
+- `public/publication-state.js` validates cached/API evidence and is shared by server and browser scoring. It treats the CPI indicator's aligned date as the common month of all four CPI variants; it checks UNRATE/PAYEMS separately. Known lag removes only complete dependent indicators, preserving their old observed values and dates for reading. Unknown, malformed or future evidence does not become a false reason to remove scores. Data ahead of a cached official lower bound remain usable and are disclosed.
+- The rule is applied during every dashboard projection, before cache-retention comparisons, and when the API responds. This closes the route where an obsolete higher-coverage cache could otherwise continue scoring. Coverage and scoring thresholds still come from the existing shared model.
+- Publication fetching runs alongside market/calendar refreshes, without delaying existing-cache responses or early market publication. The server's automatic cadence remains 15 minutes; the service's 5-minute error retry eligibility is not a promise of a separate 5-minute scheduler.
+- The page shows a separate CPI/employment verification notice and links to the official releases. Publication verification errors are distinct from market errors, but are visible in the overview and source details.
+
+Dependency propagation: lagging CPI suspends inflation, policy, unemployment composite and payroll composite; lagging UNRATE suspends unemployment composite and policy; lagging PAYEMS suspends payroll composite and policy. This follows existing formula dependencies, not new weights. Sahm is an independent real-time/vintage series and is not forced to update at BLS's timestamp.
+
+### Evidence and tests
+
+- Current official release headers were read from https://www.bls.gov/news.release/cpi.nr0.htm and https://www.bls.gov/news.release/empsit.nr0.htm. As of this check, both reported September 2026; actual release times were October 14 / October 2 at 08:30 ET. The November 6 employment schedule was not treated as already published.
+- Baseline on this Mac: 115 original automatic tests passed. Final package check command: 149 passed, zero failures/skips/cancellations, Node 24.22.1. The bundled Node executed the same `package.json` check commands because npm was not on the local PATH.
+- New coverage: 20 parser/service cases, 12 shared-publication-state cases, and two HTTP integration cases. Cases cover real release-header layouts, HTML/entities, DST and cross-year/delayed periods, embargo boundary, unknown/malformed/contradictory evidence, monotonic lower bounds, retries/coalescing, dependency propagation and unchanged inputs.
+- HTTP evidence: when markets remain pending, a newly verified September CPI against August cached observations removes four dependencies, reduces a 90% fixture to 57%, pauses the aggregate score, preserves raw values and persists the evidence. An offline restart with the same evidence keeps the obsolete cache excluded and preserves the last successful check time.
+- Live local production-code run, isolated cache, real upstream network: 12 indicators, coverage 90%, score 45.4, no market or publication errors. CPI proof `2026-09` / `2026-10-14T12:30:00.000Z`; employment proof `2026-09` / `2026-10-02T12:30:00.000Z`. Both matched the source months. Snapshot generated `2026-11-05T11:13:28.220Z`. HTML v4.7.4 and the new public module returned HTTP 200.
+- Static bindings: 57 unique HTML IDs, 46 static script ID references, none missing. Syntax and `git diff --check` passed.
+
+### Limits retained
+
+Full Mac Chrome was found, but it aborted in application registration (`RegisterApplication` / `TransformProcessType`) before reaching a page. The seven actual minimum-font preference cases remain unexecuted, not passed or product failures. No permission escalation was attempted. The v4.7.3 browser counts are historical and are not reused as v4.7.4 visual acceptance.
+
+R01 is only partly addressed: this release establishes verified lower bounds for CPI and headline employment, not publication reconciliation for PCE, credit, Sahm or all market inputs. It does not verify reported numerical values, seasonally adjusted revisions or real-time vintages. Unknown evidence falls back to existing age checks with explicit disclosure. It does not claim instant detection between 15-minute refreshes, historical predictive calibration, real-device acceptance or a long production soak. Online release verification is separate from the local evidence above.

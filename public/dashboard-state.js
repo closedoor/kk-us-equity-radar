@@ -1,4 +1,5 @@
 import { computeScores, actionFor, INDICATOR_WEIGHTS, normalizeIndicator, SCORING_VERSION, SCORING_NOTE } from "./risk-model.js";
+import { applyPublicationChecks, isPublicationSchedule } from "./publication-state.js";
 
 export const MAX_MARKET_CACHE_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -48,6 +49,7 @@ export function isDashboardSnapshot(data) {
     && optionalRows(data.reminders, (row) => object(row) && textFields(row, ["label", "event", "source", "linkLabel", "indicatorId"])
       && (row.date == null || validDate(row.date)) && optionalRows(row.companies, (item) => object(item) && textFields(item, ["ticker", "released", "next", "status", "basis", "source"])))
     && optionalObject(data.calendarSchedule, calendarSchedule)
+    && (data.publicationSchedule == null || isPublicationSchedule(data.publicationSchedule))
     && optionalObject(data.calendarSync, (sync) => timestamp(sync.updatedAt) && calendarSources(sync.sources))
     && optionalRows(data.errors, (error) => typeof error === "string"));
 }
@@ -127,7 +129,8 @@ export function projectDashboard(data, nowMs = Date.now()) {
   const cacheAgeMs = Math.max(0, nowMs - Date.parse(data.generatedAt)) || 0;
   const aiEarnings = resolveAiSnapshots(data.aiEarnings, nowMs);
   const reminders = resolveReminders(data.reminders, aiEarnings, nowMs);
-  const indicators = data.indicators.map((previous) => {
+  const publication = applyPublicationChecks(data.indicators, data.publicationSchedule, nowMs);
+  const indicators = publication.indicators.map((previous) => {
     const item = { ...previous, weight: INDICATOR_WEIGHTS[previous.id] ?? previous.weight };
     if (item.id === "aiEarnings") return resolveAiIndicator(item, aiEarnings);
     if (!expired || !item.available) return { ...item };
@@ -139,6 +142,6 @@ export function projectDashboard(data, nowMs = Date.now()) {
     const weight = items.reduce((sum, item) => sum + item.weight, 0);
     return { ...category, weight, score: weight ? Math.round(items.reduce((sum, item) => sum + item.points, 0) / weight * 1000) / 10 : null };
   });
-  return { ...data, ...model, aiEarnings, reminders, indicators, categories, cacheAgeMs, stale: expired || cacheAgeMs >= 15 * 60_000, cacheExpired: expired,
+  return { ...data, ...model, aiEarnings, reminders, indicators, categories, publicationChecks: publication.checks, publicationErrors: publication.errors, cacheAgeMs, stale: expired || cacheAgeMs >= 15 * 60_000, cacheExpired: expired,
     methodology: { ...data.methodology, version: SCORING_VERSION, note: SCORING_NOTE }, action: actionFor(model.score, model.coverage) };
 }
