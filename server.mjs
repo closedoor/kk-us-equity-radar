@@ -11,6 +11,8 @@ import { aiEarnings, aiChainLayers } from "./earnings-data.mjs";
 import { createPublicationService } from "./publication.mjs";
 import { createEarningsMonitor } from "./earnings-monitor.mjs";
 import { hydrateSourceLedger, updateSourceLedger } from "./source-revisions.mjs";
+import { fetchLicensedMarketPulse } from "./market-pulse-source.mjs";
+import { marketPulseReference } from "./market-pulse-reference.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
@@ -19,6 +21,8 @@ const productVersion = JSON.parse(await readFile(path.join(__dirname, "package.j
 const buildCommit = /^[a-f0-9]{40}$/.test(process.env.RENDER_GIT_COMMIT || "") ? process.env.RENDER_GIT_COMMIT : null;
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";
+const marketPulseFeed = process.env.RADAR_MARKET_PULSE_URL?.trim();
+const marketPulseToken = process.env.RADAR_MARKET_PULSE_TOKEN;
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const FORCE_REFRESH_COOLDOWN_MS = 60 * 1000;
 const REQUEST_TIMEOUT_MS = 25_000;
@@ -36,6 +40,36 @@ let refreshPromise = null;
 let lastRefreshErrors = [];
 let dashboardWritePromise = Promise.resolve();
 let sourceLedger = hydrateSourceLedger(null);
+let pulseRequest = null;
+let pulseCache = null;
+let pulseAttemptAt = -Infinity;
+
+function readMarketPulse() {
+  if (!marketPulseFeed) return marketPulseReference;
+  if (pulseRequest) return pulseRequest;
+  if (pulseCache && Date.now() - pulseAttemptAt < 60_000) return pulseCache;
+  pulseAttemptAt = Date.now();
+  pulseRequest = fetchLicensedMarketPulse({ url: marketPulseFeed, token: marketPulseToken })
+    .then(result => {
+      // Keep the last observed quote on a source outage; its observation time
+      // stays unchanged and the client independently checks its eligibility.
+      const quotes = new Map((pulseCache?.quotes || []).map(row => [row.symbol, row]));
+      for (const row of result.quotes) {
+        const previous = quotes.get(row.symbol);
+        if (previous && (Date.parse(row.at) < Date.parse(previous.at)
+          || (row.date === previous.date && previous.session === "close" && row.session !== "close"))) continue;
+        quotes.set(row.symbol, row);
+      }
+      pulseCache = { ...result, mode: "feed", quotes: [...quotes.values()] };
+      return pulseCache;
+    })
+    .catch(() => {
+      pulseCache = { mode: "feed", checkedAt: new Date().toISOString(), quotes: pulseCache?.quotes || [], errors: ["市场报价暂未同步"] };
+      return pulseCache;
+    })
+    .finally(() => { pulseRequest = null; });
+  return pulseRequest;
+}
 
 const weights = INDICATOR_WEIGHTS;
 
@@ -757,6 +791,11 @@ async function handleRequest(req, res) {
     url = new URL(req.url, "http://localhost");
   } catch {
     return sendJson(res, 400, { error: "Invalid request URL" });
+  }
+
+  if (url.pathname === "/api/market-pulse") {
+    if (req.method === "HEAD") return sendJson(res, 200, null);
+    return sendJson(res, 200, await readMarketPulse());
   }
 
   if (url.pathname === "/api/dashboard") {

@@ -42,12 +42,28 @@ async function main() {
         await expect(page.locator("#aiCompanyGrid .ai-company-card")).toHaveCount(8);
         await expect(page.locator("#reminderGrid .reminder-card")).toHaveCount(5);
         await expect(page.locator("#refreshButton")).toBeEnabled();
+        await expect(page.locator("#pulseStatus")).toContainText("已核对记录");
         await page.evaluate(() => document.fonts.ready);
-        entry.layout = await page.evaluate(() => ({ viewport: innerWidth, scrollWidth: document.documentElement.scrollWidth, score: document.querySelector("#scoreValue").textContent, header: document.querySelector(".topbar").getBoundingClientRect().toJSON() }));
+        entry.layout = await page.evaluate(() => {
+          const rect = (selector) => document.querySelector(selector).getBoundingClientRect().toJSON();
+          return { viewport: innerWidth, height: innerHeight, scrollWidth: document.documentElement.scrollWidth,
+            score: document.querySelector("#scoreValue").textContent, header: rect(".topbar"), peek: rect("#overview"),
+            scoreValue: rect("#scoreValue"), verdict: rect("#verdictLabel"), details: rect("#marketPulse") };
+        });
         assert.ok(entry.layout.scrollWidth <= size.width + 1, "Initial layout must not overflow horizontally");
         assert.ok(Number.isFinite(Number(entry.layout.score)) && entry.layout.score !== "--", "Healthy fixture must render a real score");
+        assert.ok([entry.layout.peek, entry.layout.scoreValue, entry.layout.verdict].every((box) => box.top >= entry.layout.header.bottom && box.bottom <= entry.layout.height),
+          "First viewport must show the pressure summary, structure score and verdict");
+        assert.ok(entry.layout.peek.bottom < entry.layout.scoreValue.top && entry.layout.verdict.bottom < entry.layout.details.top,
+          "The first summary and structural score must precede the detailed quotes");
         await shot("overview");
         await shot("full-page", { fullPage: true });
+        await activate(page.locator('#overview a[href="#marketPulse"]'));
+        await expect(page).toHaveURL(/#marketPulse$/);
+        await expect(page.locator("#pulseQuotes .pulse-quote")).toHaveCount(6);
+        await expect(page.locator('.pulse-quote[data-symbol="VXSMH"] time')).toBeVisible();
+        await expect(page.locator('.pulse-quote[data-symbol="VXSMH"] a')).toHaveAttribute("href", "https://www.cboe.com/us/indices/dashboard/vxsmh/");
+        await page.locator("#marketPulse").screenshot({ path: path.join(outputDir, `${size.name}-market-pulse.png`), animations: "disabled", scale: "css" });
         if (await page.locator("#modelValidation").count()) {
           await expect(page.locator("#modelHistory")).toHaveAttribute("data-state", "available");
           await expect(page.locator("#forwardValidation")).toHaveAttribute("data-state", "available");
