@@ -94,8 +94,8 @@ async function main() {
     await page.keyboard.press("Tab");
     await expect(page.locator(".driver-item").first()).toBeFocused();
     measurements.destinations = [];
-    for (const hash of ["#calendar", "#ai", "#signals", "#overview"]) {
-      const link = page.locator(`.section-nav a[href="${hash}"]`);
+    for (const hash of ["#calendar", "#ai", "#signals", "#overview", "#marketPulse"]) {
+      const link = page.locator(hash === "#marketPulse" ? '#overview a[href="#marketPulse"]' : `.section-nav a[href="${hash}"]`);
       await link.focus();
       await page.keyboard.press("Enter");
       const position = await page.evaluate(hash => { const heading = document.querySelector(hash).querySelector("h1, h2").getBoundingClientRect(); return { hash, top: heading.top, bottom: heading.bottom, header: document.querySelector(".topbar").getBoundingClientRect().bottom, height: innerHeight }; }, hash);

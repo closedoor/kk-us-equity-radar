@@ -150,6 +150,14 @@ function dateInTimeZone(date = new Date(), timeZone = "America/New_York") {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+function trackTopbarHeight() {
+  const topbar = document.querySelector(".topbar");
+  if (!topbar) return;
+  const update = () => document.documentElement.style.setProperty("--topbar-height", `${Math.ceil(topbar.getBoundingClientRect().height)}px`);
+  update();
+  if (typeof ResizeObserver === "function") new ResizeObserver(update).observe(topbar);
+}
+
 function riskMeta(score) {
   if (score > 75) return { label: "红色警报", color: "#cc3a2d", description: "多项规则指标处于高压力区，应核对流动性、信用事件与盈利下修。分数不代表下跌概率或后续回撤幅度。" };
   if (score > 60) return { label: "橙色警报", color: "#e46e31", description: "规则指标显示当前压力升高，信用、盈利与价格趋势需要逐项核查。" };
@@ -1103,6 +1111,7 @@ setInterval(() => {
   if (crossedMarketDay()) refreshAfterInactivity();
 }, 60_000);
 
+trackTopbarHeight();
 loadData();
 loadMarketPulse();
 setInterval(() => {

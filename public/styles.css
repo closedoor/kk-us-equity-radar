@@ -364,6 +364,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, .indicator-card:focu
 .source-revisions li small { color: var(--muted); }
 
 .pulse-peek { margin-top: 18px; padding: 9px 13px; border: 1px solid var(--line); border-left: 3px solid var(--amber); background: rgba(255,255,255,.28); }
+#overview, #marketPulse { scroll-margin-top: max(92px, calc(var(--topbar-height, 0px) + 8px)); }
 .pulse-peek[data-level="severe"] { border-left-color: var(--red); background: rgba(204,58,45,.07); }
 .pulse-peek-heading { display: flex; justify-content: space-between; gap: 6px 12px; align-items: baseline; flex-wrap: wrap; }
 .pulse-peek h1 { margin: 0; font-size: 16px; line-height: 1.3; }
@@ -406,9 +407,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, .indicator-card:focu
 .pulse-errors summary { width: fit-content; min-height: 30px; cursor: pointer; }
 .pulse-errors summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 @media (max-width: 900px) {
+  #overview, #marketPulse { scroll-margin-top: max(140px, 10em, calc(var(--topbar-height, 0px) + 8px)); }
   .pulse-quotes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 640px) {
+  #overview, #marketPulse { scroll-margin-top: max(152px, 12em, calc(var(--topbar-height, 0px) + 8px)); }
   .pulse-peek { margin-top: 10px; padding: 7px 10px; }
   .hero { gap: 14px; padding-top: 13px; }
   .hero h2 { font-size: 30px; }
