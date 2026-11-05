@@ -686,6 +686,7 @@ async function main() {
       await expect(page.locator('[data-driver-id="oil"]')).toHaveCount(0);
       await expect(page.locator(".driver-item").first()).toBeFocused();
       await page.keyboard.press("Enter");
+      await page.clock.runFor(20);
       await expect(page.locator("#indicator-credit")).toBeFocused();
     });
     await scenario("a delayed close event cannot steal the return target of a reopened manual dialog", async (page) => {
