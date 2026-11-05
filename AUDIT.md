@@ -1,5 +1,11 @@
 # Independent Product Audit
 
+## November 5, 2026 Selloff Review
+
+- Production at 23:14 UTC: score 43.9, effective weight 90%, and no transport error. The VIX, breadth and S&P inputs all carried November 4 as the observation date. The FRED VIX close was 16.61; the November 5 Cboe delayed close-window observation was 28.18. A successful fetch did not make the older market observations current.
+- The 22% market group contributed 3.001 raw points out of 31.893. The structural calculation was 31.893 / 90 × 100 = 35.44, plus 8.44 from the dominant stagflation/policy chain and no co-movement uplift. Replacing just the VIX observation, with all other inputs fixed, would have produced approximately 44.6. The volatility and market components deliberately use multi-day averages, relative performance and longer moving averages. The existing partial historical evidence does not justify fitting new long-horizon weights to this session.
+- The independent pulse confirms a broad selloff with SPX −4.36% and RSP −2.80%, alongside separate semiconductor and growth pressure. It checks New York dates, session phase and timestamps before comparisons; unavailable or out-of-date inputs suppress current alerts. The pulse never changes the structural model or its historical samples. The dated review uses Cboe and Nasdaq reference observations; ongoing public quote display requires an authorized source (see [deployment contract](./DEPLOY.md#当日市场压力数据)).
+
 ## Scope And Status
 
 - Started: 2026-10-03. Baseline: product 4.7.1, scoring 4.7.0, commit 686d5f9.

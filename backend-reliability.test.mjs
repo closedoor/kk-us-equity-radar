@@ -92,7 +92,7 @@ async function isolatedServer(cache, check) {
   const dir = await mkdtemp(path.join(tmpdir(), "radar-reliability-test-"));
   const instances = [];
   try {
-    for (const name of ["server.mjs", "calendar.mjs", "publication.mjs", "earnings-monitor.mjs", "source-revisions.mjs", "market-data.mjs", "package.json", "public"]) {
+    for (const name of ["server.mjs", "calendar.mjs", "publication.mjs", "earnings-monitor.mjs", "source-revisions.mjs", "market-data.mjs", "market-pulse-source.mjs", "market-pulse-reference.mjs", "package.json", "public"]) {
       await cp(new URL(name, import.meta.url), path.join(dir, name), { recursive: true });
     }
     // Fixed-clock reliability scenarios use fixed financial snapshots as well.

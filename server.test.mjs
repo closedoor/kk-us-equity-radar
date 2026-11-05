@@ -8,6 +8,8 @@ import http from "node:http";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
 import { isDashboardSnapshot } from "./public/dashboard-state.js";
+import { isMarketPulseSnapshot, projectMarketPulse } from "./public/market-pulse.js";
+import { marketPulseReference } from "./market-pulse-reference.mjs";
 
 const fixture = JSON.parse(await readFile(new URL("./dashboard-cache.json", import.meta.url), "utf8"));
 const earningsFixture = JSON.parse(await readFile(new URL("./fixtures/earnings-data.json", import.meta.url), "utf8"));
@@ -29,7 +31,7 @@ const stalledFetchPreload = `
   });
 `;
 
-async function withOfflineServer(cache, check, { stalled = false, preload = null } = {}) {
+async function withOfflineServer(cache, check, { stalled = false, preload = null, marketPulseUrl = "" } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "radar-server-test-"));
   const reservation = net.createServer();
   reservation.listen(0, "127.0.0.1");
@@ -38,7 +40,7 @@ async function withOfflineServer(cache, check, { stalled = false, preload = null
   await new Promise((resolve) => reservation.close(resolve));
   let child;
   try {
-    for (const name of ["server.mjs", "calendar.mjs", "publication.mjs", "earnings-monitor.mjs", "source-revisions.mjs", "market-data.mjs", "package.json", "public"]) {
+    for (const name of ["server.mjs", "calendar.mjs", "publication.mjs", "earnings-monitor.mjs", "source-revisions.mjs", "market-data.mjs", "market-pulse-source.mjs", "market-pulse-reference.mjs", "package.json", "public"]) {
       await cp(new URL(name, import.meta.url), path.join(dir, name), { recursive: true });
     }
     // Keep historical scenario dates independent of the current production quarter.
@@ -48,7 +50,7 @@ async function withOfflineServer(cache, check, { stalled = false, preload = null
       ? stalledFetchPreload
       : 'globalThis.fetch = async () => { throw new Error("test upstream outage"); };'));
     child = spawn(process.execPath, ["--import", path.join(dir, "offline.mjs"), path.join(dir, "server.mjs")], {
-      cwd: dir, env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) }, stdio: ["ignore", "pipe", "pipe", "ipc"],
+      cwd: dir, env: { ...process.env, HOST: "127.0.0.1", PORT: String(port), RADAR_MARKET_PULSE_URL: marketPulseUrl, RADAR_MARKET_PULSE_TOKEN: "" }, stdio: ["ignore", "pipe", "pipe", "ipc"],
     });
     let output = "";
     child.stdout.on("data", (chunk) => { output += chunk; });
@@ -96,6 +98,62 @@ async function withOfflineServer(cache, check, { stalled = false, preload = null
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+test("the dated market review confirms the observed selloff and expires without changing the dashboard", async () => {
+  const at = "2026-11-05T23:20:00.000Z";
+  await withOfflineServer({ ...fixture, generatedAt: new Date().toISOString() }, async ({ read, request }) => {
+    const before = await read();
+    const res = await request({ path: "/api/market-pulse" });
+    assert.equal(res.status, 200);
+    const data = JSON.parse(res.body);
+    assert.ok(isMarketPulseSnapshot(data));
+    assert.equal(data.mode, "reference");
+    assert.equal(data.quotes.find((row) => row.symbol === "VXSMH").value, 65.89);
+    assert.equal(projectMarketPulse(data, at).broad.level, "severe");
+    assert.notEqual(projectMarketPulse(data, "2026-11-06T16:00:00.000Z").status, "current");
+    const after = await read();
+    assert.equal(after.body.score, before.body.score);
+    assert.equal(after.body.coverage, before.body.coverage);
+  });
+});
+
+test("a slow configured quote feed coalesces requests without blocking the structural dashboard", async () => {
+  const marketPulseUrl = "https://market-feed.example.test/snapshot";
+  const now = "2026-11-05T23:20:00.000Z";
+  const { mode, ...providerPayload } = marketPulseReference;
+  const preload = publicationClockPreload.replaceAll(publicationClock, now) + `
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    process.on('message', message => { if (message.type === 'release-pulse') release(); });
+    globalThis.fetch = async (value) => {
+      if (String(value) !== ${JSON.stringify(marketPulseUrl)}) throw new Error('test upstream outage');
+      process.stdout.write('TEST_FETCH');
+      await gate;
+      return Response.json(${JSON.stringify(providerPayload)});
+    };
+  `;
+  await withOfflineServer({ ...fixture, generatedAt: now }, async ({ read, request, requestCount, send }) => {
+    assert.equal((await request({ path: "/api/market-pulse", method: "HEAD" })).status, 200);
+    assert.equal(requestCount(), 0);
+    const pulls = Promise.all([request({ path: "/api/market-pulse" }), request({ path: "/api/market-pulse" })]);
+    try {
+      const dashboard = await read();
+      assert.equal(dashboard.status, 200);
+      assert.ok(Number.isFinite(dashboard.body.score));
+    } finally {
+      await send({ type: "release-pulse" });
+    }
+    const [first, second] = await pulls;
+    const data = JSON.parse(first.body);
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(second.body, first.body);
+    assert.equal(data.mode, "feed");
+    assert.ok(isMarketPulseSnapshot(data));
+    assert.equal(data.quotes.find((row) => row.symbol === "VIX")?.value, 28.18);
+    assert.equal(requestCount(), 1);
+  }, { preload, marketPulseUrl });
+});
 
 test("a malformed disk cache returns warming status instead of crashing the HTTP service", async () => {
   await withOfflineServer({}, async ({ read, finished }) => {

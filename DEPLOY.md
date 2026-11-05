@@ -26,6 +26,10 @@
 - `calendar.test.mjs`
 - `market-data.mjs`
 - `market-data.test.mjs`
+- `market-pulse-source.mjs`
+- `market-pulse-source.test.mjs`
+- `market-pulse-reference.mjs`
+- `market-pulse.test.mjs`
 - `risk-model.test.mjs`
 - `dashboard-state.test.mjs`
 - `dashboard-client.test.mjs`
@@ -128,3 +132,10 @@ https://kk-us-equity-radar.onrender.com
 ## 注意
 
 Render 免费服务 15 分钟没人访问会休眠。朋友第一次打开可能需要等大约一分钟。
+## 当日市场压力数据
+
+默认发布一份有纽约日期的市场核对记录，并直接链接 Cboe 官方 VIX、VXSMH 页面。默认部署不从公开报价网页自动抓取或持续转载数据。接通获得公开展示授权的行情服务后，在服务端设置 `RADAR_MARKET_PULSE_URL` 为该服务的 HTTPS JSON 快照 URL；如需凭证，设置 `RADAR_MARKET_PULSE_TOKEN` 为 Bearer token。变量与凭证不发往浏览器。
+
+接口契约为 `{checkedAt, quotes, errors}`。每个 `quotes` 元素为 `{symbol, value, changePercent, date, at, session, source}`。标的限 `SPX`、`RSP`、`QQQ`、`SMH`、`VIX`、`VXSMH`，不得重复。`date` 为纽约交易日 `YYYY-MM-DD`，`at` 为带明确时区的观察时间，`session` 为 `regular`、`close` 或 `unconfirmed`，`source` 为该报价可公开点击的 HTTPS 来源页。`changePercent` 相对上一常规收盘，无法核实则为 `null`；`errors` 是可以公开的简短状态文案。请勿把请求时间作为报价时间，也勿把盘后变动或没有收盘证据的延时报价标为 `close`。
+
+行情访问与 `/api/dashboard` 相互独立。行情服务失败会保留已有报价和原观察时间，页面重新核对是否仍具备判定条件；历史记录不能替代当天未到的报价。公开站自动分发的授权范围需按供应商核对；Cboe 对开放网站的延时报价展示有单独的许可条款。

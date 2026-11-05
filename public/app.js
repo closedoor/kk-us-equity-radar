@@ -2,6 +2,7 @@ import { computeScores, actionFor, MIN_SCORE_COVERAGE, normalizeIndicator } from
 import { projectDashboard, cacheExpired } from "./dashboard-state.js";
 import { requestDashboard } from "./dashboard-client.js";
 import { mergeManualOverrides } from "./manual-state.js";
+import { isMarketPulseSnapshot, projectMarketPulse } from "./market-pulse.js";
 
 const manualConfig = [
   { id: "aiEarnings", label: "AI 产业链财报风险", help: "当云资本开支、芯片指引或库存出现新变化时，可调整风险值。" },
@@ -20,6 +21,10 @@ const state = {
   displayValidity: null,
 };
 let manualDraft = {};
+const PULSE_INTERVAL_MS = 2 * 60_000;
+const pulseState = { snapshot: null, controller: null, error: null, lastAttemptAt: 0 };
+const pulseSymbols = [["VIX", "标普隐含波动"], ["VXSMH", "半导体隐含波动"], ["SPX", "标普 500"], ["RSP", "标普等权 ETF"], ["QQQ", "纳指 100 ETF"], ["SMH", "半导体 ETF"]];
+const nyQuoteTime = new Intl.DateTimeFormat("en-GB", { timeZone: "America/New_York", hourCycle: "h23", hour: "2-digit", minute: "2-digit" });
 
 const els = {
   score: document.querySelector("#scoreValue"),
@@ -71,6 +76,16 @@ const els = {
   forwardValidation: document.querySelector("#forwardValidation"),
   sourceRevisions: document.querySelector("#sourceRevisions"),
   revisionList: document.querySelector("#revisionList"),
+  pulsePeek: document.querySelector("#overview"),
+  pulsePeekStatus: document.querySelector("#pulsePeekStatus"),
+  pulsePeekVix: document.querySelector("#pulsePeekVix"),
+  pulsePeekVxsmh: document.querySelector("#pulsePeekVxsmh"),
+  pulseStatus: document.querySelector("#pulseStatus"),
+  pulseQuotes: document.querySelector("#pulseQuotes"),
+  pulseJudgments: document.querySelector("#pulseJudgments"),
+  pulseErrors: document.querySelector("#pulseErrors"),
+  pulseRefresh: document.querySelector("#pulseRefresh"),
+  structureTiming: document.querySelector("#structureTiming"),
 };
 
 function setLiveStatus(text, status = "updating") {
@@ -203,7 +218,7 @@ function renderSummary(data) {
   els.gauge.style.visibility = score === null ? "hidden" : "visible";
   els.marker.hidden = score === null;
   els.marker.style.left = `calc(${clamp(score ?? 0)}% - 1px)`;
-  els.scoreGauge?.setAttribute("aria-label", score === null ? "综合市场风险分暂不可用" : `综合市场风险分 ${score.toFixed(1)} 分`);
+  els.scoreGauge?.setAttribute("aria-label", score === null ? "综合结构风险分暂不可用" : `综合结构风险分 ${score.toFixed(1)} 分`);
   els.verdict.textContent = meta.label;
   const stagflationDominant = Number.isFinite(data.stagflationScore)
     && data.stagflationScore > 40
@@ -216,6 +231,7 @@ function renderSummary(data) {
   els.verdictDot.style.background = meta.color;
   els.coverage.textContent = Number.isFinite(data.coverage) ? `${data.coverage}%` : "--";
   els.updated.textContent = formatDate(data.generatedAt);
+  renderStructureTiming();
   const availableCount = data.indicators.filter((item) => item.available).length;
   const manual = data.indicators.filter((item) => item.overridden);
   const reviews = manual.map((item) => manualReviewInfo(state.overrides[item.id]));
@@ -307,6 +323,133 @@ function safeExternalUrl(value) {
     return ["http:", "https:"].includes(url.protocol) ? escapeHtml(url.href) : "#";
   } catch {
     return "#";
+  }
+}
+
+function renderStructureTiming() {
+  if (!els.structureTiming) return;
+  const rows = [["vix", "VIX"], ["breadth", "宽度"], ["sp500", "SPX"]].map(([id, label]) => ({
+    label, date: state.data?.indicators.find((item) => item.id === id)?.date || null,
+  }));
+  const today = dateInTimeZone();
+  const lag = rows.some(({ date }) => date && date < today);
+  const sameDate = rows[0].date && rows.every(({ date }) => date === rows[0].date);
+  const dates = sameDate ? `VIX / 宽度 / SPX：${rows[0].date}` : rows.map(({ label, date }) => `${label} ${date || "待核对"}`).join(" · ");
+  els.structureTiming.dataset.lag = String(lag);
+  els.structureTiming.textContent = `${dates}。${lag ? "部分日度输入早于纽约今日；" : "日度模型输入；"}盘中报价不计入本分。`;
+}
+
+function pulsePercent(value, digits = 2) {
+  return Number.isFinite(value) ? `${value > 0 ? "+" : ""}${value.toFixed(digits)}%` : "涨跌待核对";
+}
+
+function pulseSourceName(url) {
+  const host = new URL(url).hostname.replace(/^www\./, "");
+  return host === "cboe.com" ? "Cboe" : host === "nasdaq.com" ? "Nasdaq" : host;
+}
+
+function renderMarketPulse() {
+  if (!els.pulseStatus) return;
+  const pulse = projectMarketPulse(pulseState.snapshot);
+  const blocked = navigator.onLine === false || Boolean(pulseState.error);
+  const reference = pulse.mode === "reference";
+  const loading = Boolean(pulseState.controller);
+  const usable = !blocked && (pulse.status === "current" || pulse.status === "last-close");
+  const current = usable && pulse.status === "current";
+  const bySymbol = new Map(pulse.quotes.map((quote) => [quote.symbol, quote]));
+  const broad = { severe: "大盘急跌", pressure: "大盘承压", none: "大盘未触发急跌", unconfirmed: "大盘待核对" }[pulse.broad.level];
+  const sectorSelloff = pulse.sector.flags.some((flag) => flag.symbol !== "VXSMH" && flag.level === "severe");
+  const sector = { severe: sectorSelloff ? "板块急跌" : "板块波动升高", pressure: "板块承压", none: "板块未触发压力", unconfirmed: "板块待核对" }[pulse.sector.level];
+  const shortDate = pulse.date?.split("-").slice(1).map(Number).join("/");
+  const scope = pulse.session === "close" ? (reference ? "收盘参考" : "收盘段") : "盘中延时";
+  const datedScope = shortDate ? `${shortDate} ${scope}` : scope;
+  const shortStatus = navigator.onLine === false ? "离线 · 当日压力待判断"
+    : pulseState.error ? "报价连接异常 · 当日压力待判断"
+      : current ? `${datedScope} · ${broad} · ${sector}`
+        : usable ? `${shortDate ? `${shortDate} ` : ""}最近收盘 · 当日压力待判断`
+          : pulse.status === "stale" ? "历史报价 · 当日压力待判断"
+            : loading ? "正在读取当日报价 · 压力待判断" : "独立行情待同步 · 可看官方报价";
+  if (els.pulsePeekStatus.textContent !== shortStatus) els.pulsePeekStatus.textContent = shortStatus;
+  els.pulsePeek.dataset.state = blocked ? "unavailable" : pulse.status;
+  els.pulsePeek.dataset.level = current && (pulse.broad.level === "severe" || pulse.sector.level === "severe") ? "severe" : "neutral";
+  for (const [symbol, target] of [["VIX", els.pulsePeekVix], ["VXSMH", els.pulsePeekVxsmh]]) {
+    const row = bySymbol.get(symbol);
+    const valid = usable && row?.state === pulse.status;
+    target.textContent = valid ? `${symbol} ${row.value.toFixed(2)}${Number.isFinite(row.changePercent) ? ` ${pulsePercent(row.changePercent, 1)}` : ""}` : `${symbol} —`;
+  }
+  const checkedAt = pulse.checkedAt ? new Date(pulse.checkedAt) : null;
+  const timeNote = checkedAt ? ` · 核对于 ${dateInTimeZone(checkedAt)} ${nyQuoteTime.format(checkedAt)}（纽约）` : "";
+  const status = blocked ? `${shortStatus}。下方如有数值，仅为上次记录。`
+    : reference && pulse.quotes.length ? `已核对记录 · 查看官方最新报价。${pulse.label}；这些数值不会自动更新。`
+      : pulse.status === "unavailable" ? `${shortStatus}。缺失报价不代表市场平静。`
+        : `${pulse.label}${pulse.errors.length ? " · 部分来源待核对" : ""}${loading ? " · 正在核对更新" : ""}。`;
+  els.pulseStatus.textContent = `${status}${timeNote}${pulse.ruleNote ? ` ${pulse.ruleNote}` : ""}`;
+  if (reference && document.activeElement === els.pulseRefresh) document.querySelector(".pulse-official a")?.focus({ preventScroll: true });
+  els.pulseRefresh.hidden = reference;
+  els.pulseRefresh.textContent = loading ? "正在读取报价" : pulse.mode === "feed" ? "刷新报价" : "重试读取报价";
+  els.pulseRefresh.setAttribute("aria-disabled", String(loading || navigator.onLine === false));
+
+  const judgments = [["broad", "大盘广度"], ["sector", "板块与成长"], ["volatility", "隐含波动"]].map(([kind, title]) => {
+    const row = usable ? pulse[kind] : { level: "unconfirmed", label: "待判断", detail: "暂无可比较的有效报价。" };
+    return `<article class="pulse-judgment" data-kind="${kind}" data-level="${escapeHtml(row.level)}"><h3>${title}</h3><strong>${escapeHtml(row.label)}</strong><p>${escapeHtml(row.detail)}</p></article>`;
+  }).join("");
+  if (els.pulseJudgments.innerHTML !== judgments) els.pulseJudgments.innerHTML = judgments;
+  const quotes = pulseSymbols.map(([symbol, label]) => {
+    const row = bySymbol.get(symbol);
+    const at = row?.at ? new Date(row.at) : null;
+    const session = row?.session === "regular" ? "延时报价" : row?.session === "close"
+      ? reference && ["VIX", "VXSMH", "SPX"].includes(symbol) ? "延时 · 收盘段" : reference ? "常规收盘" : "收盘段"
+      : "时段未确认";
+    const rowState = blocked ? "unconfirmed" : row?.state || "unconfirmed";
+    const qualifier = !row ? "报价暂缺" : blocked ? `${session} · 上次记录` : rowState === "stale" ? `${session} · 历史记录` : rowState === "unconfirmed" ? `${session} · 待核对` : rowState === "last-close" ? `${session} · 最近收盘` : session;
+    const date = row?.date ? `<time datetime="${escapeHtml(row.at || row.date)}">${escapeHtml(row.date)}${at ? ` ${nyQuoteTime.format(at)}` : " · 时点待核对"}</time>` : "<span>观测日期待核对</span>";
+    const change = row?.changePercent;
+    return `<article class="pulse-quote" data-symbol="${symbol}" data-state="${rowState}"><h3>${symbol} <span>${label}</span></h3><p class="pulse-quote-reading"><strong>${Number.isFinite(row?.value) ? row.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}</strong><span class="pulse-quote-change" data-move="${change < 0 ? "down" : change > 0 ? "up" : "flat"}" aria-label="日变化：${pulsePercent(change)}">${pulsePercent(change)}</span></p><p class="pulse-quote-time"><span>${qualifier}</span>${date}</p>${row ? `<a class="pulse-quote-source" data-focus-key="pulse-source-${symbol}" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer" aria-label="${symbol} 报价来源：${escapeHtml(pulseSourceName(row.source))}">${escapeHtml(pulseSourceName(row.source))} ↗</a>` : ""}</article>`;
+  }).join("");
+  if (els.pulseQuotes.innerHTML !== quotes) {
+    const focused = els.pulseQuotes.contains(document.activeElement) ? document.activeElement : null;
+    els.pulseQuotes.innerHTML = quotes;
+    if (focused && document.activeElement === document.body) {
+      const key = focused.dataset.focusKey;
+      (els.pulseQuotes.querySelector(`[data-focus-key="${CSS.escape(key || "")}"]`) || els.pulsePeek.querySelector("a")).focus({ preventScroll: true });
+    }
+  }
+  const errors = [...(pulseState.error ? [pulseState.error] : []), ...pulse.errors];
+  const list = errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("");
+  const errorList = els.pulseErrors.querySelector("ul");
+  const hidingFocused = !errors.length && els.pulseErrors.contains(document.activeElement);
+  if (errorList.innerHTML !== list) errorList.innerHTML = list;
+  els.pulseErrors.hidden = !errors.length;
+  if (hidingFocused) els.pulsePeek.querySelector("a").focus({ preventScroll: true });
+  renderStructureTiming();
+}
+
+async function loadMarketPulse() {
+  if (!els.pulseStatus || pulseState.controller) return;
+  if (navigator.onLine === false) { renderMarketPulse(); return; }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12_000);
+  pulseState.controller = controller;
+  pulseState.lastAttemptAt = Date.now();
+  renderMarketPulse();
+  try {
+    const response = await fetch("/api/market-pulse", { signal: controller.signal, cache: "no-store" });
+    if (!response.ok) throw new Error("报价接口暂不可用。");
+    const snapshot = await response.json();
+    if (!isMarketPulseSnapshot(snapshot)) throw new Error("报价资料格式异常。");
+    if (pulseState.controller !== controller) return;
+    pulseState.snapshot = snapshot;
+    pulseState.error = null;
+  } catch (error) {
+    if (pulseState.controller !== controller) return;
+    pulseState.error = controller.signal.aborted ? "报价请求超时。" : error instanceof SyntaxError ? "报价资料格式异常。" : "暂时无法读取报价。";
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
+    if (pulseState.controller === controller) {
+      pulseState.controller = null;
+      renderMarketPulse();
+    }
   }
 }
 
@@ -478,7 +621,7 @@ function renderIndicators(data) {
     const status = ["critical", "high", "watch", "low", "unavailable"].includes(item.status) ? item.status : "unavailable";
     return `<article class="indicator-card" id="indicator-${escapeHtml(item.id)}" data-focus-key="signal-${escapeHtml(item.id)}" tabindex="-1" data-category="${escapeHtml(item.category)}">
       <div class="card-head">
-        <div><span class="card-index">${index} · ${escapeHtml(item.category)} · 权重 ${escapeHtml(item.weight)}</span><h3 class="card-title">${escapeHtml(item.title)}</h3></div>
+        <div><span class="card-index">${index} · ${escapeHtml(item.category)} · 权重 ${escapeHtml(item.weight)}${item.id === "vix" ? " · 日度模型输入" : ""}</span><h3 class="card-title">${escapeHtml(item.title)}</h3></div>
         <span class="risk-chip ${status}">${escapeHtml(chipText)}</span>
       </div>
       <div class="card-main">
@@ -712,7 +855,7 @@ function renderInitialState() {
   const failed = Boolean(state.loadError);
   els.verdict.textContent = failed ? "连接失败" : "正在同步数据";
   els.verdictDescription.textContent = failed ? "暂时无法读取数据，请稍后重试。" : "正在同步首批数据，完成后自动显示。";
-  els.scoreGauge.setAttribute("aria-label", "综合市场风险分暂不可用");
+  els.scoreGauge.setAttribute("aria-label", "综合结构风险分暂不可用");
   els.gauge.style.visibility = "hidden";
   els.marker.hidden = true;
   els.actionLabel.textContent = "等待有效数据";
@@ -821,7 +964,11 @@ function openManual(focusId = null) {
   if (focusId) setTimeout(() => els.manualFields.querySelector(`[data-id="${focusId}"] .manual-risk`)?.focus(), 50);
 }
 
-els.refresh.addEventListener("click", () => loadData(true));
+els.refresh.addEventListener("click", () => {
+  loadData(true);
+  loadMarketPulse();
+});
+els.pulseRefresh?.addEventListener("click", () => loadMarketPulse());
 els.manualButton.addEventListener("click", () => openManual());
 els.reviewManual.addEventListener("click", () => openManual(manualConfig.find(({ id }) => state.overrides[id] && manualReviewInfo(state.overrides[id]).needsReview)?.id));
 els.closeManual.addEventListener("click", () => els.manualDialog.close());
@@ -911,9 +1058,22 @@ function revalidateDisplay() {
   if (state.data && state.displayValidity !== `${dateInTimeZone()}:${cacheExpired(state.data)}`) render();
 }
 
-document.addEventListener("visibilitychange", refreshAfterInactivity);
-window.addEventListener("online", refreshAfterInactivity);
+document.addEventListener("visibilitychange", () => {
+  refreshAfterInactivity();
+  if (document.visibilityState !== "visible") return;
+  renderMarketPulse();
+  if (!pulseState.snapshot || pulseState.error || (pulseState.snapshot.mode !== "reference" && Date.now() - pulseState.lastAttemptAt >= PULSE_INTERVAL_MS)) loadMarketPulse();
+});
+window.addEventListener("online", () => {
+  refreshAfterInactivity();
+  if (document.visibilityState === "visible") loadMarketPulse();
+});
 window.addEventListener("offline", () => {
+  const pulseRequest = pulseState.controller;
+  pulseState.controller = null;
+  pulseRequest?.abort();
+  pulseState.error = "网络已断开。";
+  renderMarketPulse();
   state.loadError = "网络已断开";
   render();
   if (!state.data) {
@@ -939,10 +1099,15 @@ window.addEventListener("storage", (event) => {
 
 setInterval(() => {
   revalidateDisplay();
+  if (document.visibilityState === "visible") renderMarketPulse();
   if (crossedMarketDay()) refreshAfterInactivity();
 }, 60_000);
 
 loadData();
+loadMarketPulse();
+setInterval(() => {
+  if (document.visibilityState === "visible" && navigator.onLine !== false && pulseState.snapshot?.mode !== "reference" && Date.now() - pulseState.lastAttemptAt >= PULSE_INTERVAL_MS) loadMarketPulse();
+}, PULSE_INTERVAL_MS);
 setInterval(() => {
   if (document.visibilityState === "visible" && navigator.onLine !== false) loadData();
 }, 15 * 60 * 1000);

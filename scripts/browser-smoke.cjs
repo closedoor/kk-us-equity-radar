@@ -5,6 +5,20 @@ const { chromium, expect } = require("playwright/test");
 
 const baseURL = process.env.RADAR_URL || "http://127.0.0.1:4173";
 const outputDir = process.env.RADAR_SCREENSHOTS;
+const pulseDay = "2026-11-05";
+const pulseNow = `${pulseDay}T20:20:00.000Z`;
+
+function marketPulseFixture(mode = "feed") {
+  const reference = mode === "reference";
+  const at = `${pulseDay}T${reference ? "21:00" : "20:15"}:00.000Z`;
+  return { mode, checkedAt: reference ? `${pulseDay}T21:20:00.000Z` : pulseNow, errors: [],
+    quotes: [["VIX", 19.3, 17.25], ["VXSMH", 42.1, 9.12], ["SPX", 6635, -3.4], ["RSP", 183, -2.8], ["QQQ", 593, -4.2], ["SMH", 298, -5.6]].map(([symbol, value, changePercent]) => ({
+      symbol, value, changePercent, at, date: pulseDay, session: reference ? "close" : "regular",
+      source: ["VIX", "VXSMH", "SPX"].includes(symbol)
+        ? `https://www.cboe.com/us/indices/dashboard/${symbol.toLowerCase()}/`
+        : `https://www.nasdaq.com/market-activity/etf/${symbol.toLowerCase()}`,
+    })) };
+}
 
 async function main() {
   const fixture = JSON.parse(await fs.readFile(path.join(__dirname, "../dashboard-cache.json"), "utf8"));
@@ -60,10 +74,10 @@ async function main() {
         await page.goto(baseURL);
         await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(12);
         await page.evaluate(() => document.fonts.ready);
-        assert.ok(await page.evaluate(() => ["#scoreValue", "#verdictLabel"].every((selector) => {
+        assert.ok(await page.evaluate(() => ["#pulseTitle", "#pulsePeekStatus", "#pulsePeekVix", "#pulsePeekVxsmh", "#scoreValue", "#verdictLabel"].every((selector) => {
           const box = document.querySelector(selector).getBoundingClientRect();
           return box.top >= document.querySelector(".topbar").getBoundingClientRect().bottom && box.bottom <= innerHeight;
-        })), "The score and verdict must be readable without scrolling");
+        })), "The pressure summary, structural score and verdict must be readable without scrolling");
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
         if (outputDir) {
           await fs.mkdir(outputDir, { recursive: true });
@@ -71,6 +85,105 @@ async function main() {
         }
       }, width, 740);
     }
+    await scenario("market pulse distinguishes a broad selloff from sector pressure without changing the structure score", async (page) => {
+      await page.clock.install({ time: new Date(pulseNow) });
+      await page.clock.pauseAt(new Date(pulseNow));
+      const data = { ...fresh(), generatedAt: pulseNow };
+      for (const row of data.indicators) if (["vix", "breadth", "sp500"].includes(row.id)) row.date = "2026-11-04";
+      const dashboardCalls = await mock(page, () => ({ body: data }));
+      const pulse = marketPulseFixture();
+      await page.route("**/api/market-pulse", (route) => route.fulfill({ json: pulse }));
+      await page.goto(baseURL);
+      await expect(page.locator("#overview")).toHaveAttribute("data-level", "severe");
+      await expect(page.locator("#pulsePeekStatus")).toContainText("大盘急跌");
+      await expect(page.locator("#pulsePeekVix")).toContainText("19.30 +17.3%");
+      await expect(page.locator("#pulsePeekVxsmh")).toContainText("42.10 +9.1%");
+      await expect(page.locator("#structureTiming")).toContainText("2026-11-04");
+      await expect(page.locator("#structureTiming")).toContainText("部分日度输入早于纽约今日");
+      await expect(page.locator("#indicator-vix")).toContainText("日度模型输入");
+      await expect(page.locator("#scoreValue")).toHaveText(/^\d+(?:\.\d+)?$/);
+      const score = await page.locator("#scoreValue").textContent();
+      const coverage = await page.locator("#coverageValue").textContent();
+      await page.locator('#overview a[href="#marketPulse"]').click();
+      await expect(page).toHaveURL(/#marketPulse$/);
+      await expect(page.locator("#pulseQuotes .pulse-quote")).toHaveCount(6);
+      await expect(page.locator('[data-kind="broad"]')).toHaveAttribute("data-level", "severe");
+      await expect(page.locator('[data-kind="sector"]')).toHaveAttribute("data-level", "severe");
+      const smh = page.locator('.pulse-quote[data-symbol="SMH"]');
+      await expect(smh).toContainText("-5.60%");
+      await expect(smh.locator("time")).toHaveText("2026-11-05 15:15");
+      await expect(smh.locator("a")).toHaveAttribute("href", "https://www.nasdaq.com/market-activity/etf/smh");
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+      if (outputDir) {
+        await fs.mkdir(outputDir, { recursive: true });
+        await page.locator("#marketPulse").screenshot({ path: path.join(outputDir, "market-pulse-selloff-320.png"), animations: "disabled" });
+      }
+      pulse.quotes.find(({ symbol }) => symbol === "RSP").changePercent = -0.4;
+      await page.locator("#pulseRefresh").click();
+      await expect(page.locator('[data-kind="broad"]')).toHaveAttribute("data-level", "none");
+      await expect(page.locator('[data-kind="broad"]')).toContainText("未确认广泛扩散");
+      await expect(page.locator('[data-kind="sector"]')).toHaveAttribute("data-level", "severe");
+      await expect(page.locator("#scoreValue")).toHaveText(score);
+      await expect(page.locator("#coverageValue")).toHaveText(coverage);
+      assert.equal(dashboardCalls.length, 1, "Quote refresh must not fetch or replace the dashboard");
+    }, 320, 740);
+    await scenario("market pulse remains explicitly unconfirmed during a response body timeout and recovers independently", async (page) => {
+      await page.clock.install({ time: new Date(pulseNow) });
+      await page.clock.pauseAt(new Date(pulseNow));
+      await mock(page, () => ({ body: { ...fresh(), generatedAt: pulseNow } }));
+      await page.route("**/api/market-pulse", (route) => route.fulfill({ json: marketPulseFixture() }));
+      await page.addInitScript(() => {
+        const original = window.fetch;
+        let stalled = false;
+        window.fetch = async (...args) => {
+          if (args[0] === "/api/market-pulse" && !stalled) {
+            stalled = true;
+            return { ok: true, json: () => new Promise((_resolve, reject) => {
+              args[1].signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+            }) };
+          }
+          return original(...args);
+        };
+      });
+      await page.goto(baseURL);
+      await expect(page.locator("#scoreValue")).toHaveText(/^\d+(?:\.\d+)?$/);
+      const score = await page.locator("#scoreValue").textContent();
+      await expect(page.locator("#pulsePeekStatus")).toContainText("压力待判断");
+      await expect(page.locator('[data-kind="broad"]')).toHaveAttribute("data-level", "unconfirmed");
+      await expect(page.locator("#pulsePeekVix")).toHaveText("VIX —");
+      await page.clock.runFor(12_100);
+      await expect(page.locator("#pulsePeekStatus")).toContainText("报价连接异常");
+      await page.locator("#pulseErrors summary").click();
+      await expect(page.locator("#pulseErrors li")).toHaveText("报价请求超时。");
+      await page.locator("#pulseRefresh").click();
+      await expect(page.locator("#overview")).toHaveAttribute("data-state", "current");
+      await expect(page.locator("#pulseErrors")).toBeHidden();
+      await expect(page.locator("#pulsePeekVix")).toContainText("19.30");
+      await expect(page.locator("#scoreValue")).toHaveText(score);
+    });
+    await scenario("market pulse reference quotes age into dated historical records and are not automatically refreshed", async (page) => {
+      const reference = marketPulseFixture("reference");
+      const time = new Date(reference.checkedAt);
+      await page.clock.install({ time });
+      await page.clock.pauseAt(time);
+      await mock(page, () => ({ body: { ...fresh(), generatedAt: reference.checkedAt } }));
+      let calls = 0;
+      await page.route("**/api/market-pulse", (route) => { calls += 1; return route.fulfill({ json: reference }); });
+      await page.goto(baseURL);
+      await expect(page.locator("#pulsePeekStatus")).toContainText("11/5 收盘参考");
+      await expect(page.locator("#pulseStatus")).toContainText("这些数值不会自动更新");
+      await expect(page.locator("#pulseRefresh")).toBeHidden();
+      await page.clock.fastForward(new Date("2026-11-06T14:31:00Z").getTime() - time.getTime());
+      await expect(page.locator("#overview")).toHaveAttribute("data-state", "stale");
+      await expect(page.locator("#pulsePeekStatus")).toContainText("历史报价 · 当日压力待判断");
+      await expect(page.locator("#pulsePeekVxsmh")).toHaveText("VXSMH —");
+      await expect(page.locator("#pulsePeekVxsmh")).toHaveAttribute("href", "https://www.cboe.com/us/indices/dashboard/vxsmh/");
+      const vxsmh = page.locator('.pulse-quote[data-symbol="VXSMH"]');
+      await expect(vxsmh).toContainText("42.10");
+      await expect(vxsmh).toContainText("历史记录");
+      await expect(vxsmh.locator("time")).toHaveText("2026-11-05 16:00");
+      assert.equal(calls, 1, "Historical reference snapshots must not advertise feed-like updates");
+    });
     await scenario("product audit: stale manual judgments are disclosed and explicitly reconfirmed", async (page) => {
       await freeze(page);
       const updatedAt = new Date(Date.now() - 60 * 86_400_000).toISOString();
@@ -314,7 +427,7 @@ async function main() {
       await page.goto(baseURL);
       await expect(page.locator("#errorBanner")).toContainText("503");
       await expect(page.locator("#verdictLabel")).toHaveText("连接失败");
-      await expect(page.locator("#scoreGauge")).toHaveAttribute("aria-label", "综合市场风险分暂不可用");
+      await expect(page.locator("#scoreGauge")).toHaveAttribute("aria-label", "综合结构风险分暂不可用");
       assert.ok(await page.locator("#errorBanner").evaluate((element) => element.getBoundingClientRect().top < innerHeight));
       failed = false;
       await page.clock.runFor(15000);
@@ -812,7 +925,7 @@ async function main() {
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
       await expect(page.locator("#actionCallout > span")).toHaveText("当前研究重点");
       await expect(page.locator(".action-note")).toContainText("不能据此校准个人仓位");
-      await expect(page.locator(".footer")).toContainText("v4.8.0");
+      await expect(page.locator(".footer")).toContainText("v4.8.1");
       if (outputDir) await page.locator("#modelValidation").screenshot({ path: path.join(outputDir, "model-history-forward-390.png"), animations: "disabled" });
     }, 390);
     await scenario("auxiliary validation report failures and body timeouts never block the dashboard", async (page) => {

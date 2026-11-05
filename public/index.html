@@ -28,22 +28,29 @@
     <p class="storage-notice shell" id="storageNotice" role="alert" hidden></p>
     <div class="error-banner shell" id="errorBanner" role="alert" hidden></div>
     <main id="top">
-      <section class="hero shell" id="overview">
+      <section class="pulse-peek shell" id="overview" aria-labelledby="pulseTitle">
+        <div class="pulse-peek-heading"><h1 id="pulseTitle">当日市场压力</h1><a href="#marketPulse">查看报价与来源</a></div>
+        <div id="pulsePeekStatus" class="pulse-peek-status" role="status" aria-live="polite">正在读取当日报价 · 压力待判断</div>
+        <div class="pulse-peek-values"><a id="pulsePeekVix" href="https://www.cboe.com/us/indices/dashboard/vix/" target="_blank" rel="noreferrer" title="查看 VIX 官方最新报价">VIX —</a><a id="pulsePeekVxsmh" href="https://www.cboe.com/us/indices/dashboard/vxsmh/" target="_blank" rel="noreferrer" title="查看 VXSMH 官方最新报价">VXSMH —</a></div>
+      </section>
+      <section class="hero shell" id="structure" aria-labelledby="structureTitle">
         <div class="hero-copy">
           <p class="eyebrow">US EQUITY RISK MONITOR · 12 SIGNALS</p>
-          <h1>当前美股<br />风险有多高？</h1>
+          <h2 id="structureTitle">美股结构风险</h2>
           <p class="hero-intro">用 12 项高权重信号衡量市场脆弱度，同时拆分“滞胀 / 政策压力”和“衰退 / 信用压力”。基础分、主导风险链与共振修正全部公开显示。</p>
+          <p class="hero-intro-short">12 项结构信号，观察市场脆弱度。</p>
           <div class="hero-meta">
             <div><span>数据覆盖</span><strong id="coverageValue">--</strong></div>
-            <div><span>数据抓取时间</span><strong id="updatedValue">--</strong></div>
+            <div><span>模型快照时间</span><strong id="updatedValue">--</strong></div>
             <div><span>刷新频率</span><strong>15 分钟</strong></div>
           </div>
         </div>
 
         <div class="score-panel" id="scorePanel">
-          <div class="score-topline"><span>综合市场风险强度</span><span id="scoreDelta">等待数据</span><span class="score-clarification">规则评分 · 非下跌概率</span></div>
+          <div class="score-topline"><span>综合结构风险</span><span id="scoreDelta">等待数据</span><span class="score-clarification">规则评分 · 非下跌概率</span></div>
+          <p id="structureTiming" class="structure-timing">VIX / 宽度 / SPX 观测日期待核对。盘中报价不计入本分。</p>
           <div class="gauge-wrap">
-            <svg class="gauge" id="scoreGauge" viewBox="0 0 260 260" role="img" aria-label="综合市场风险分">
+            <svg class="gauge" id="scoreGauge" viewBox="0 0 260 260" role="img" aria-label="综合结构风险分">
               <circle class="gauge-track" cx="130" cy="130" r="103"></circle>
               <circle class="gauge-progress" id="gaugeProgress" cx="130" cy="130" r="103"></circle>
             </svg>
@@ -78,6 +85,16 @@
           </div>
           <div class="band-labels"><span>低风险</span><span>警戒</span><span>升高</span><span>高风险</span><span>危机</span></div>
         </div>
+      </section>
+
+      <section class="market-pulse shell" id="marketPulse" aria-labelledby="marketPulseTitle">
+        <div class="pulse-heading"><div><p class="eyebrow">MARKET PULSE · NY TIME</p><h2 id="marketPulseTitle">当日报价与判读</h2></div><button class="ghost-button pulse-refresh" id="pulseRefresh" type="button" aria-disabled="false">重试读取报价</button></div>
+        <p class="pulse-intro">报价为盘中延时或收盘时段记录，观测日与时点均按纽约时间。日变化为相对前一常规收盘的变动。仅观察当日压力，不计入十二项结构风险权重。</p>
+        <p class="pulse-official"><a href="https://www.cboe.com/us/indices/dashboard/vix/" target="_blank" rel="noreferrer">查看 VIX 官方报价 ↗</a><a href="https://www.cboe.com/us/indices/dashboard/vxsmh/" target="_blank" rel="noreferrer">查看 VXSMH 官方报价 ↗</a></p>
+        <p class="pulse-status" id="pulseStatus">正在读取报价，压力待判断。</p>
+        <div class="pulse-judgments" id="pulseJudgments"></div>
+        <div class="pulse-quotes" id="pulseQuotes"></div>
+        <details class="pulse-errors" id="pulseErrors" hidden><summary>查看报价来源状态</summary><ul></ul></details>
       </section>
 
       <section class="category-strip shell" id="categoryStrip" aria-label="风险链条分数"></section>
@@ -154,7 +171,7 @@
     </main>
 
     <footer class="footer shell">
-      <span>US EQUITY RISK RADAR · v4.8.0</span>
+      <span>US EQUITY RISK RADAR · v4.8.1</span>
       <span>数据：公司 IR / SEC / BLS / BEA / Federal Reserve / FRED / Cboe / Nasdaq</span>
     </footer>
 

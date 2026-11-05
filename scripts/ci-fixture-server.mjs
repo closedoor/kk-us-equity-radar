@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDashboardSnapshot } from "../public/dashboard-state.js";
+import { marketPulseReference } from "../market-pulse-reference.mjs";
 
 // Browser QA uses recorded observations, never live upstream services or a
 // production cache write. Failure scenarios inject their own API responses.
@@ -47,6 +48,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const url = new URL(req.url, `http://${host}`);
+    if (url.pathname === "/api/market-pulse") {
+      res.writeHead(200, { ...headers, "content-type": "application/json; charset=utf-8" });
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify(marketPulseReference));
+      return;
+    }
     if (url.pathname === "/api/dashboard") {
       res.writeHead(200, { ...headers, "content-type": "application/json; charset=utf-8" });
       res.end(req.method === "HEAD" ? undefined : JSON.stringify(healthyFixture()));
