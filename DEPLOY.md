@@ -8,6 +8,7 @@
 
 - `public/`
 - `server.mjs`
+- `earnings-data.mjs`
 - `calendar.mjs`
 - `calendar.test.mjs`
 - `market-data.mjs`
@@ -16,7 +17,11 @@
 - `dashboard-state.test.mjs`
 - `dashboard-client.test.mjs`
 - `server.test.mjs`
+- `backend-reliability.test.mjs`
+- `fixtures/earnings-data.json`
 - `scripts/browser-smoke.cjs`
+- `scripts/product-audit.cjs`
+- `scripts/scoring-audit.mjs`
 - `package.json`
 - `dashboard-cache.json`
 - `README.md`

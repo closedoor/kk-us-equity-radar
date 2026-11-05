@@ -112,8 +112,20 @@ async function main() {
     await fs.mkdir(path.join(profile, "Default"));
     await fs.writeFile(path.join(profile, "Default", "Preferences"), JSON.stringify({ webkit: { webprefs: { minimum_font_size: 20, minimum_logical_font_size: 20 } } }));
     persistent = await chromium.launchPersistentContext(profile, { ...launchOptions, viewport: { width: 390, height: 740 }, reducedMotion: "reduce" });
-    for (const width of [320, 390, 720, 1024, 1440]) await scenario(`minfont20-navigation-${width}`, width, (p, m) => navigation(p, m, true), { context: persistent });
-    for (const width of [320, 390]) await scenario(`minfont20-driver-heading-${width}`, width, async (page, measurements) => {
+    // Chromium's separate headless shell does not implement profile font preferences.
+    // Keep these checks mandatory for full Chrome, but report unsupported shell checks
+    // as skipped instead of falsely counting normal-size layouts as minimum-font QA.
+    const fontPreferencesSupported = !/(?:headless_shell|chrome-headless-shell)(?:$|\/)/.test(launchOptions.executablePath || "");
+    if (!fontPreferencesSupported) {
+      for (const name of [...[320, 390, 720, 1024, 1440].map(width => `minfont20-navigation-${width}`), ...[320, 390].map(width => `minfont20-driver-heading-${width}`)]) {
+        if (process.env.RADAR_TEST && !name.includes(process.env.RADAR_TEST)) continue;
+        const reason = "headless_shell does not apply Chrome minimum-font profile preferences; requires full Chrome";
+        result.scenarios.push({ name, skipped: true, reason });
+        console.log(`SKIP ${name}: ${reason}`);
+      }
+    }
+    if (fontPreferencesSupported) for (const width of [320, 390, 720, 1024, 1440]) await scenario(`minfont20-navigation-${width}`, width, (p, m) => navigation(p, m, true), { context: persistent });
+    if (fontPreferencesSupported) for (const width of [320, 390]) await scenario(`minfont20-driver-heading-${width}`, width, async (page, measurements) => {
       await load(page);
       measurements.drivers = [];
       for (const id of await page.locator(".driver-item").evaluateAll(elements => elements.map(e => e.dataset.driverId))) {
@@ -300,9 +312,10 @@ async function main() {
     await browser.close();
     if (profile) await fs.rm(profile, { recursive: true, force: true });
     result.passed = result.scenarios.filter(s => s.passed).length;
-    result.failed = result.scenarios.filter(s => !s.passed).length;
+    result.failed = result.scenarios.filter(s => s.passed === false).length;
+    result.skipped = result.scenarios.filter(s => s.skipped).length;
     if (outputDir) await fs.writeFile(path.join(outputDir, "product-results.json"), JSON.stringify(result, null, 2));
-    console.log(`${result.passed} passed, ${result.failed} failed`);
+    console.log(`${result.passed} passed, ${result.failed} failed, ${result.skipped} skipped`);
     if (result.failed) process.exitCode = 1;
   }
 }

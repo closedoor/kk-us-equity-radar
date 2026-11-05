@@ -11,6 +11,8 @@ import { isDashboardSnapshot } from "./public/dashboard-state.js";
 
 const fixedTime = "2026-10-03T12:00:00.000Z";
 const fixture = { ...JSON.parse(await readFile(new URL("./dashboard-cache.json", import.meta.url), "utf8")), generatedAt: fixedTime };
+const earningsFixture = JSON.parse(await readFile(new URL("./fixtures/earnings-data.json", import.meta.url), "utf8"));
+const earningsFixtureModule = `export const aiEarnings = ${JSON.stringify(earningsFixture.aiEarnings)};\nexport const aiChainLayers = ${JSON.stringify(earningsFixture.aiChainLayers)};\n`;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function until(check, message, timeout = 8000) {
@@ -93,6 +95,8 @@ async function isolatedServer(cache, check) {
     for (const name of ["server.mjs", "calendar.mjs", "market-data.mjs", "package.json", "public"]) {
       await cp(new URL(name, import.meta.url), path.join(dir, name), { recursive: true });
     }
+    // Fixed-clock reliability scenarios use fixed financial snapshots as well.
+    await writeFile(path.join(dir, "earnings-data.mjs"), earningsFixtureModule);
     if (cache !== null) await writeFile(path.join(dir, "dashboard-cache.json"), JSON.stringify(cache));
     const start = async (preload) => {
       const preloadFile = path.join(dir, `preload-${instances.length}.mjs`);

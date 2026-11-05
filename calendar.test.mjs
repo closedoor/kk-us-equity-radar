@@ -720,6 +720,55 @@ test("all successful pending earnings responses clear old errors without inventi
   assert.equal(earningsRequests, 5);
 });
 
+test("successful pending responses withdraw provider dates while failed tickers retain their last date", async () => {
+  const payloads = {
+    WITHDRAWN: { data: null, status: { rCode: 200 } },
+    CHANGED: { data: { reportText: "Expected on 10/20/2026." }, status: { rCode: 200 } },
+    FAIL: { data: null, status: { rCode: 503 } },
+    CONFIRMED: { data: { reportText: "The next earnings date has not been announced." }, status: { rCode: 200 } },
+  };
+  const service = createCalendarService({
+    fetchText: earningsRefreshFixture(payloads),
+    logger: { warn() {} }, now: () => new Date("2026-10-03T12:00:00Z"),
+    aiEarnings: Object.keys(payloads).map((ticker) => ({
+      ticker, released: "2026-07-15",
+      ...(ticker === "CONFIRMED" ? { nextReportDate: "2026-10-16", nextReportStatus: "confirmed", nextReportSource: "https://example.com/ir" } : {}),
+    })),
+  });
+  service.hydrate({ earnings: Object.fromEntries(Object.keys(payloads).map((ticker) => [ticker, { date: "2026-10-16", status: "estimated" }])) });
+  await service.refresh();
+  const snapshot = service.snapshot();
+  assert.equal(snapshot.earnings.WITHDRAWN, undefined);
+  assert.equal(snapshot.earnings.CHANGED.date, "2026-10-20");
+  assert.equal(snapshot.earnings.FAIL.date, "2026-10-16");
+  assert.equal(snapshot.earnings.CONFIRMED, undefined);
+  assert.equal(service.syncStatus().sources.earnings.error, "财报日程暂不可用：FAIL");
+  const rows = Object.fromEntries(service.resolvedAiEarnings().map((row) => [row.ticker, row]));
+  assert.equal(rows.WITHDRAWN.nextReportBasis, "quarterly-fallback");
+  assert.equal(rows.WITHDRAWN.nextReportDate, null);
+  assert.equal(rows.CONFIRMED.nextReportBasis, "company");
+  assert.equal(rows.CONFIRMED.nextReportDate, "2026-10-16");
+  assert.equal(service.buildReminders()[4].companies.find((row) => row.ticker === "WITHDRAWN").basis, "quarterly-fallback");
+});
+
+test("clearing successful pending dates preserves passed-report history across restart", async () => {
+  const config = {
+    fetchText: earningsRefreshFixture({ TEST: { data: null, status: { rCode: 200 } } }),
+    logger: { warn() {} }, now: () => new Date("2026-10-03T12:00:00Z"),
+    aiEarnings: [{ ticker: "TEST", released: "2026-07-15" }],
+  };
+  const service = createCalendarService(config);
+  service.hydrate({ earnings: { TEST: { date: "2026-09-30", status: "estimated" } } });
+  await service.refresh();
+  assert.equal(service.snapshot().earnings.TEST, undefined);
+  assert.equal(service.snapshot().pastEarnings.TEST, "2026-09-30");
+  assert.equal(service.syncStatus().sources.earnings.error, null);
+  const restarted = createCalendarService(config);
+  restarted.hydrate(service.snapshot());
+  assert.equal(restarted.resolvedAiEarnings()[0].snapshotStale, true);
+  assert.equal(restarted.resolvedAiEarnings()[0].nextReportStatus, "pending");
+});
+
 test("all API failures retain the last earnings success timestamp and saved history", async () => {
   const service = createCalendarService({
     fetchText: earningsRefreshFixture({ FAIL: { data: null, status: { rCode: 503, bCodeMessage: null } } }),

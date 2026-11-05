@@ -592,6 +592,27 @@ async function main() {
         await expect(edit).toBeFocused();
       }
     });
+    await scenario("a delayed close event cannot steal the return target of a reopened manual dialog", async (page) => {
+      await mock(page, () => ({ body: fresh() }));
+      await page.goto(baseURL);
+      const edit = page.locator("#indicator-aiEarnings .manual-edit");
+      await edit.click();
+      await page.evaluate(() => {
+        window.manualCloseStates = [];
+        const dialog = document.querySelector("#manualDialog");
+        dialog.addEventListener("close", () => window.manualCloseStates.push(dialog.open));
+        document.querySelector('[data-id="aiEarnings"] .manual-risk').value = "42";
+        document.querySelector("#manualForm").requestSubmit();
+        // Reopen before the previous native close event is dispatched.
+        document.querySelector("#indicator-aiEarnings .manual-edit").click();
+      });
+      await expect.poll(() => page.evaluate(() => window.manualCloseStates.includes(true))).toBe(true);
+      const input = page.locator('[data-id="aiEarnings"] .manual-risk');
+      await input.fill("43");
+      await input.press("Escape");
+      await expect(edit).toBeFocused();
+      await expect(page.locator("#indicator-aiEarnings .metric-value")).toHaveText("42/100");
+    });
     await scenario("keyboard focus follows a risk driver to its matching signal", async (page) => {
       await mock(page, () => ({ body: fresh() }));
       await page.goto(baseURL);

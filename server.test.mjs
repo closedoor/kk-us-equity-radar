@@ -10,6 +10,8 @@ import { spawn } from "node:child_process";
 import { isDashboardSnapshot } from "./public/dashboard-state.js";
 
 const fixture = JSON.parse(await readFile(new URL("./dashboard-cache.json", import.meta.url), "utf8"));
+const earningsFixture = JSON.parse(await readFile(new URL("./fixtures/earnings-data.json", import.meta.url), "utf8"));
+const earningsFixtureModule = `export const aiEarnings = ${JSON.stringify(earningsFixture.aiEarnings)};\nexport const aiChainLayers = ${JSON.stringify(earningsFixture.aiChainLayers)};\n`;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function withOfflineServer(cache, check, { stalled = false, preload = null } = {}) {
@@ -24,9 +26,11 @@ async function withOfflineServer(cache, check, { stalled = false, preload = null
     for (const name of ["server.mjs", "calendar.mjs", "market-data.mjs", "package.json", "public"]) {
       await cp(new URL(name, import.meta.url), path.join(dir, name), { recursive: true });
     }
+    // Keep historical scenario dates independent of the current production quarter.
+    await writeFile(path.join(dir, "earnings-data.mjs"), earningsFixtureModule);
     await writeFile(path.join(dir, "dashboard-cache.json"), JSON.stringify(cache));
     await writeFile(path.join(dir, "offline.mjs"), preload ?? (stalled
-      ? 'globalThis.fetch = (_url, { signal }) => new Promise((_resolve, reject) => { process.stdout.write("TEST_FETCH\\n"); signal.addEventListener("abort", () => reject(new Error("test timeout")), { once: true }); });'
+      ? 'let readyQueued = false; globalThis.fetch = (_url, { signal }) => new Promise((_resolve, reject) => { process.stdout.write("TEST_FETCH\\n"); if (!readyQueued) { readyQueued = true; setImmediate(() => process.stdout.write("TEST_STALLED_READY")); } signal.addEventListener("abort", () => reject(new Error("test timeout")), { once: true }); });'
       : 'globalThis.fetch = async () => { throw new Error("test upstream outage"); };'));
     child = spawn(process.execPath, ["--import", path.join(dir, "offline.mjs"), path.join(dir, "server.mjs")], {
       cwd: dir, env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) }, stdio: ["ignore", "pipe", "pipe"],
@@ -37,6 +41,12 @@ async function withOfflineServer(cache, check, { stalled = false, preload = null
     const deadline = Date.now() + 15_000;
     while (!output.includes("已启动") && Date.now() < deadline && child.exitCode === null) await delay(50);
     assert.match(output, /已启动/, output);
+    if (stalled && preload === null) {
+      // Same-stream readiness follows all initial fetch logs; a listening log
+      // alone can arrive before the startup refresh has entered its pending wave.
+      while (!output.includes("TEST_STALLED_READY") && Date.now() < deadline && child.exitCode === null) await delay(10);
+      assert.match(output, /TEST_STALLED_READY/, output);
+    }
     const read = async (query = "") => {
       const response = await fetch(`http://127.0.0.1:${port}/api/dashboard${query}`, { signal: AbortSignal.timeout(3000) });
       return { status: response.status, body: await response.json() };
@@ -142,6 +152,7 @@ test("manual refresh returns promptly and shares the running fetch when upstream
   const cache = { ...fixture, generatedAt: new Date().toISOString() };
   await withOfflineServer(cache, async ({ read, requestCount }) => {
     const count = requestCount();
+    assert.ok(count > 0, "The initial refresh must already have started before checking shared requests");
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const result = await read("?refresh=1");
       assert.equal(result.status, 200);

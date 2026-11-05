@@ -408,6 +408,7 @@ export function createCalendarService({
     const failed = rows.filter((row) => row.error).map((row) => row.ticker);
     return {
       events: Object.fromEntries(rows.filter((row) => row.event).map((row) => [row.ticker, row.event])),
+      pending: rows.filter((row) => !row.error && !row.event).map((row) => row.ticker),
       failed,
       successfulCount: rows.length - failed.length,
     };
@@ -448,6 +449,10 @@ export function createCalendarService({
       // Keep passed dates before the provider rolls its feed to the next quarter.
       rememberPastEarnings();
       state.earnings = { ...state.earnings, ...earningsResult.value.events };
+      // A successful no-date response withdraws this provider's earlier estimate;
+      // a failed request still keeps its last good date. Company confirmations
+      // live separately in aiEarnings and remain authoritative.
+      for (const ticker of earningsResult.value.pending) delete state.earnings[ticker];
       rememberPastEarnings();
       const failed = earningsResult.value.failed;
       sources.earnings = { mode: "nasdaq-live", url: "https://www.nasdaq.com/market-activity/earnings", lastSuccessAt: attemptedAt, error: failed.length ? `财报日程暂不可用：${failed.join("、")}` : null };

@@ -329,10 +329,10 @@ function renderAiEarnings(rows = [], layers = []) {
       <div><span>${escapeHtml(row.marginLabel || "毛利率")}</span><strong>${escapeHtml(row.grossMargin)}</strong></div>
     </div>
     <div class="ai-readout">
-      <div><span>${row.snapshotStale ? "历史表现" : "本季表现"}</span><p class="assessment ${safeTone(row.resultTone)}">${escapeHtml(row.resultAssessment)}</p></div>
-      <div><span>${row.snapshotStale ? "历史指引" : "下一期判断"}</span><p class="assessment ${safeTone(row.guidanceTone)}">${escapeHtml(row.guidanceAssessment)}</p></div>
+      <div><span>${row.snapshotStale ? "历史表现" : "本季表现 · 研究解读"}</span><p class="assessment ${safeTone(row.resultTone)}">${escapeHtml(row.resultAssessment)}</p></div>
+      <div><span>${row.snapshotStale ? "历史指引" : "下一期 · 研究解读"}</span><p class="assessment ${safeTone(row.guidanceTone)}">${escapeHtml(row.guidanceAssessment)}</p></div>
     </div>
-    <div class="ai-guidance-copy"><span>${row.snapshotStale ? "历史公司指引" : "公司指引"}</span><p>${escapeHtml(row.guidance)}</p><small>${escapeHtml(row.note)}</small></div>
+    <div class="ai-guidance-copy"><span>${row.snapshotStale ? "历史公司指引" : "公司指引 / 展望"}</span><p>${escapeHtml(row.guidance)}</p>${row.guidanceSource ? `<a class="date-source" data-focus-key="guidance-${escapeHtml(row.ticker)}" href="${safeExternalUrl(row.guidanceSource)}" target="_blank" rel="noreferrer">查看官方指引原文</a>` : ""}<small>${escapeHtml(row.note)}</small></div>
     <div class="ai-card-foot"><a data-focus-key="financial-${escapeHtml(row.ticker)}" aria-label="查看官方财报：${escapeHtml(row.company)} ${escapeHtml(row.ticker)} ${escapeHtml(row.period)}" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">查看官方财报</a><div class="ai-next-report"><span>下次财报 <strong>${escapeHtml(nextReportLabel)}</strong></span><i class="schedule-status ${scheduleConfirmed ? "confirmed" : "estimated"}">${scheduleLabel(row.nextReportStatus, row.nextReportBasis)}</i>${scheduleSource}</div></div>
   </article>`;
   }).join("");
@@ -466,7 +466,7 @@ function renderErrors(errors = []) {
     details.querySelector("ul").replaceChildren();
   }
   if (detailsFocused && (els.error.hidden || details.hidden)) {
-    requestAnimationFrame(() => {
+    queueMicrotask(() => {
       if (document.activeElement === focused || document.activeElement === document.body) els.refresh.focus({ preventScroll: true });
     });
   }
@@ -608,6 +608,9 @@ els.manualButton.addEventListener("click", () => openManual());
 els.reviewManual.addEventListener("click", () => openManual(manualConfig.find(({ id }) => state.overrides[id] && manualReviewInfo(state.overrides[id]).needsReview)?.id));
 els.closeManual.addEventListener("click", () => els.manualDialog.close());
 els.manualDialog.addEventListener("close", () => {
+  // Native close events are queued: an earlier one can arrive after a rapid
+  // reopen. Leave the current dialog session and its return target intact.
+  if (els.manualDialog.open || !manualReturnFocus) return;
   const key = manualReturnFocus?.dataset.focusKey;
   const target = key ? document.querySelector(`[data-focus-key="${CSS.escape(key)}"]`) : manualReturnFocus;
   if (target?.isConnected && target.getClientRects().length) target.focus({ preventScroll: true });

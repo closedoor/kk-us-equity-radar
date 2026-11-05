@@ -20,7 +20,7 @@ export function isDashboardSnapshot(data) {
       && textFields(event, ["timing", "status", "reportText"])))
     && optionalObject(schedule.pastEarnings, (events) => Object.values(events).every(validDate));
   const company = (row) => object(row) && typeof row.ticker === "string" && row.ticker.length > 0
-    && textFields(row, ["company", "layer", "period", "role", "impact", "released", "revenue", "netIncome", "marginLabel", "grossMargin", "resultTone", "resultAssessment", "guidanceTone", "guidanceAssessment", "guidance", "note", "source", "nextReportDate", "nextReportEstimatedDate", "nextReportLabel", "nextReportStatus", "nextReportBasis", "nextReportSource", "snapshotLabel", "snapshotValidThrough"])
+    && textFields(row, ["company", "layer", "period", "role", "impact", "released", "revenue", "netIncome", "marginLabel", "grossMargin", "resultTone", "resultAssessment", "guidanceTone", "guidanceAssessment", "guidance", "guidanceSource", "note", "source", "nextReportDate", "nextReportEstimatedDate", "nextReportLabel", "nextReportStatus", "nextReportBasis", "nextReportSource", "snapshotLabel", "snapshotValidThrough"])
     && (row.snapshotStale === undefined || typeof row.snapshotStale === "boolean");
   return Boolean(object(data) && typeof data.generatedAt === "string" && Number.isFinite(Date.parse(data.generatedAt))
     && Number.isFinite(data.coverage) && data.coverage >= 0 && data.coverage <= 100

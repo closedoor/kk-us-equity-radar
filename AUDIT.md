@@ -172,3 +172,45 @@ Fault injection is local, not evidence of a current production outage. Browser s
 No new blockers remain in the verified core flows. Further work now needs reliable publication metadata, financial snapshot ingestion, historical data or devices/user research; broad UI rewrites or unsupported weight tuning would not be justified by this audit. Next priorities are listed above with benefits, costs, risks and validation methods.
 
 Changes were prepared in the attached managed worktree on `codex/radar-product-audit`. Original checkout modifications and the user-owned 4173 process were preserved. Test-generated cache churn is excluded from the release patch; its observed final values are retained in evidence. The audit's temporary 4187 test server was stopped after acceptance. The user then authorized publishing. Release preparation verified that remote main still matched the tested base 686d5f9; the audited changes are published by a non-forced fast-forward push, followed by live version/interface/browser checks. Deployment results are reported separately from the local test counts above.
+
+## Maintenance execution — v4.7.3 / 2026-11-05
+
+Base: main `fc91a13a17f0388ddfcbc7cb70b9402402017869`. This is maintenance of the existing GitHub + Render product, with no new repository, domain, runtime dependency, score weighting or scoring formula.
+
+### Reproduced problems and fixes
+
+- **Withdrawn provider dates:** a successful Nasdaq pending/no-date response used to preserve the provider's earlier future estimate while reporting sync success. Pending tickers now remove that provider event; failed requests retain last-known values, company-confirmed dates remain authoritative, and elapsed events are remembered before removal. Two new calendar regressions failed before the fix and pass afterward.
+- **Blocking font request:** with the old Google stylesheet request held indefinitely, the browser still showed zero indicator cards after three seconds. Removing the three external font links and selecting system font stacks eliminates the request. The updated CSP no longer permits those unused font domains. Directed 320/390/1440 checks show no page errors or horizontal overflow, and mobile score/verdict labels remain in the first viewport.
+- **Queued dialog close:** an old native close event can arrive after the user reopens the manual dialog, overwrite the new session's focus state and send Escape focus to the header. The handler now ignores stale/duplicate events. A deterministic rapid-reopen regression fails with the old code and passes with the fix; the original background-refresh/manual-save scenario also passed 15 consecutive repeats.
+- **Resolved-source focus:** focus restoration when an error disclosure disappears no longer waits for an animation frame; a guarded microtask restores the enabled refresh control without stealing user focus.
+- **Live financial content:** six old quarterly snapshots were replaced only after reading current company IR / SEC statements. Financial totals, margin definitions, forward guidance and research assessments are distinguished. NVIDIA's November 17 date is company-confirmed; Broadcom remains estimated where no readable official confirmation was established. Microsoft has an additional official guidance transcript link. The unemployment description now matches its existing month-versus-three-months-prior calculation, while separately explaining Sahm's average-based concept.
+- **Test data isolation:** company snapshots and chain metadata now live in `earnings-data.mjs`. `fixtures/earnings-data.json` retains the original public data for historical fixed-clock server tests, so quarterly maintenance does not silently change their scenarios or assertions.
+- **Startup test race:** the stalled-fetch regression could record request counts before the startup fetch logs reached the parent process (reproduced as 16 versus 10, or 16 versus 1). A same-stream ready marker after the initial microtask wave establishes the baseline. The strict no-extra-requests assertion is unchanged; the corrected case passed 20 consecutive repeats.
+
+### Source verification
+
+Official statements read on 2026-11-05 (date here is the review date, not the report release date):
+
+| Company | Report / release | Official source |
+| --- | --- | --- |
+| TSM | 2026 Q3 / 2026-10-15 | https://www.sec.gov/Archives/edgar/data/1046179/000104617926000726/a3q26e_withguidancexfinal.htm |
+| MSFT | FY2027 Q1 / 2026-10-28 | https://www.microsoft.com/en-us/Investor/earnings/FY-2027-Q1/press-release-webcast |
+| MSFT guidance | FY2027 Q2 outlook | https://www.microsoft.com/en-us/Investor/events/fy-2027/earnings-fy-2027-q1 |
+| GOOG | 2026 Q3 / 2026-10-28 | https://www.sec.gov/Archives/edgar/data/1652044/000165204426000080/googexhibit991q32026.htm |
+| AMZN | 2026 Q3 / 2026-10-29 | https://ir.aboutamazon.com/news-release/news-release-details/2026/Amazon-com-Announces-Third-Quarter-Results/ |
+| MU | FY2026 Q4 / 2026-09-30 | https://investors.micron.com/news/press-release/2026/Micron-Technology-Inc--Reports-Record-Fiscal-Fourth-Quarter-and-Full-Year-2026-Results/default.aspx |
+| SK hynix | 2026 Q3 / 2026-10-28 | https://news.skhynix.com/en/q3-2026-business-results/ |
+| NVDA next date | Official 2026-11-17 call | https://nvidianews.nvidia.com/news/nvidia-sets-conference-call-for-third-quarter-financial-results-6928873 |
+
+MSFT/GOOG/AMZN gross margins were recomputed from reported revenue and cost/gross-profit lines, rather than inferred from another company's convention. SK hynix's 80% is explicitly operating margin. GOOG's consolidated net income is distinct from income available to common stockholders; actual capital spending and FCF are not described as next-quarter guidance. No market consensus feed was used, so the updated cards do not claim a verified consensus beat.
+
+### Final local evidence
+
+- `npm run check`: **115 passed, zero failures, skips or cancellations**; Node 24.22.1. Includes all 4096 missing-data combinations, model monotonicity and boundaries, data parsing, calendar, client and isolated HTTP/reliability cases.
+- Browser smoke: **37 passed**, including the new close-event regression.
+- Product audit: **23 passed, zero failures, 7 explicitly skipped**. This environment could run Chromium headless shell, while full Chrome failed its singleton socket initialization. Headless shell does not honor Chrome profile minimum-font preferences, so the seven actual minimum-font cases are unverified and are not counted as successful. They remain mandatory when full Chrome is selected.
+- Real-network local production-server run, isolated runtime cache: **12 indicators, 8 current financial snapshots, score 45.4, coverage 90%, no market or calendar source errors**, generated at 2026-11-05T10:37:29.510Z. The score is a time-specific observed output, not an investment forecast.
+- Actual-data browser checks at **320/390/1440**: twelve signal cards, eight company cards, Microsoft guidance link and v4.7.3 footer rendered; zero page errors and no horizontal overflow. Screenshots were visually inspected.
+- Font-blocking directed checks: five passed. Synthetic model sensitivity scenarios: ten executed; these are not historical backtests. `git diff --check` passed.
+
+Remaining limitations: R01 publication-aware freshness is still based on observation age, not guaranteed official latest-period reconciliation for every source; EPS revision breadth remains unconnected and excluded. Financial commentary remains a reviewed snapshot, not automatic earnings interpretation. Physical iOS/Android, other browser engines, full assistive technology, real Chrome minimum-font preferences in this environment, Node 18 and a long production load/soak test were not verified. Live deployment acceptance is tracked separately from the local evidence above.
