@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createCalendarService } from "./calendar.mjs";
 import { parseFredCsv, parseNasdaqRows, requireFreshSeries, monthlyPercentChange, monthlyAnnualizedChange, monthlyDifference, nearestPrior, fredMaxAgeDays, relativePerformance } from "./market-data.mjs";
 import { computeScores, actionFor, INDICATOR_WEIGHTS, normalizeIndicator, SCORING_VERSION, SCORING_NOTE } from "./public/risk-model.js";
-import { projectDashboard, resolveAiIndicator, shouldReplaceDashboard, isDashboardSnapshot } from "./public/dashboard-state.js";
+import { projectDashboard, resolveAiIndicator, shouldReplaceDashboard, isDashboardSnapshot, checkPolicyBounds } from "./public/dashboard-state.js";
 import { aiEarnings, aiChainLayers } from "./earnings-data.mjs";
 import { createPublicationService } from "./publication.mjs";
 
@@ -321,13 +321,14 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
   const fedRateLower = getFred("DFEDTARL");
   const fedLast = latest(fedRate);
   const fedLowerLast = latest(fedRateLower);
+  const fedBounds = checkPolicyBounds(fedLowerLast, fedLast);
   const fedPrior = nearestPrior(fedRate, 100);
   const fedChange = fedLast && fedPrior ? fedLast.value - fedPrior.value : null;
   const twoYear = getFred("DGS2");
   const twoYearLast = latest(twoYear);
   const twoYearPrior = nearestPrior(twoYear, 90);
   const twoYearChange = twoYearLast && twoYearPrior ? twoYearLast.value - twoYearPrior.value : null;
-  const policyGap = twoYearLast && fedLast ? twoYearLast.value - fedLast.value : null;
+  const policyGap = fedBounds.valid && twoYearLast ? twoYearLast.value - fedLast.value : null;
 
   const unemployment = getFred("UNRATE");
   const unemploymentLast = latest(unemployment);
@@ -349,7 +350,7 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
     ? average([inflationRisk, laborHeat])
     : null;
   const actualHikeRisk = Number.isFinite(fedChange) ? scale(fedChange, 0, 0.5) : null;
-  const fedRisk = fedLowerLast && [actualHikeRisk, marketHawkishness, macroConstraint].every(Number.isFinite)
+  const fedRisk = fedBounds.valid && [actualHikeRisk, marketHawkishness, macroConstraint].every(Number.isFinite)
     ? Math.max(actualHikeRisk, clamp(marketHawkishness * 0.55 + macroConstraint * 0.45))
     : null;
 
@@ -500,9 +501,9 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
     }),
     indicator({
       id: "fed", title: "美联储政策周期", category: "通胀与政策", weight: weights.fed, risk: fedRisk,
-      value: fedLast && fedLowerLast ? `${round(fedLowerLast.value, 2)}%–${round(fedLast.value, 2)}%` : "暂无数据", detail: `当前联邦基金目标区间；下次会议 ${nextFomcDate}；2 年期 ${twoYearLast ? round(twoYearLast.value, 2) : "--"}%`,
+      value: fedBounds.valid ? `${round(fedLowerLast.value, 2)}%–${round(fedLast.value, 2)}%` : fedBounds.reason || "暂无数据", detail: `${fedBounds.reason || "当前联邦基金目标区间"}；下次会议 ${nextFomcDate}；2 年期 ${twoYearLast ? round(twoYearLast.value, 2) : "--"}%`,
       date: fedLast?.date, description: "用联邦基金目标区间、2 年期美债和宏观约束判断市场是否在重新定价政策路径。", why: "政策收紧会压制估值和融资；2 年期利率比未经自动核验的概率快照更适合持续监测。",
-      source: { label: "Federal Reserve / FRED · 政策利率", url: sourceUrl("DFEDTARU") }, cadence: "交易日 / 会议", confidence: Number.isFinite(fedRisk) ? "high" : "unavailable", unavailableReason: "子数据不足", sparkline: spark(twoYear, 90), methodology: "市场利率重定价、实际政策变化、通胀和就业约束共同评分；子数据不足时不计分。",
+      source: { label: "Federal Reserve / FRED · 政策利率", url: sourceUrl("DFEDTARU") }, cadence: "交易日 / 会议", confidence: Number.isFinite(fedRisk) ? "high" : "unavailable", unavailableReason: fedBounds.reason || "子数据不足", sparkline: spark(twoYear, 90), methodology: "市场利率重定价、实际政策变化、通胀和就业约束共同评分；子数据不足时不计分。",
       breakdown: [
         { label: "政策目标下限", value: fedLowerLast ? `${round(fedLowerLast.value, 2)}%` : "--", detail: fedLowerLast?.date || "" },
         { label: "政策目标上限", value: fedLast ? `${round(fedLast.value, 2)}%` : "--", detail: fedLast?.date || "" },
@@ -517,7 +518,7 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
     indicator({
       id: "rates", title: "10年期美债与实际利率", category: "通胀与政策", weight: weights.rates, risk: ratesRisk,
       value: nominalLast ? `${round(nominalLast.value, 2)}%` : "暂无数据", detail: `10 年期名义收益率；实际利率 ${realLast ? round(realLast.value, 2) : "--"}%；10Y-3M ${yieldCurveLast ? `${yieldCurveLast.value >= 0 ? "+" : ""}${round(yieldCurveLast.value, 2)}%` : "--"}`,
-      date: nominalLast?.date, description: "同时看 10 年期名义与实际利率、上涨速度，以及倒挂后重新变陡的周期信号。", why: "实际利率决定股票折现压力，期限结构则反映融资与衰退风险。",
+      date: nominalLast?.date, description: "观察 10 年期名义与实际利率水平，以及期限曲线倒挂和重新转正的周期信号；当前评分未纳入利率上涨速度。", why: "实际利率决定股票折现压力，期限结构则反映融资与衰退风险。",
       source: { label: "U.S. Treasury / FRED · 10Y", url: "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve" }, cadence: "交易日", confidence: Number.isFinite(ratesRisk) ? "high" : "unavailable", unavailableReason: "子数据不足", sparkline: spark(nominal10y, 90), methodology: "实际与名义收益率压力占 72%，期限曲线周期风险占 28%；两组输入齐全才计分。",
       breakdown: [
         { label: "10年期名义", value: nominalLast ? `${round(nominalLast.value, 2)}%` : "--", detail: nominalLast?.date || "" },
@@ -540,7 +541,7 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
     indicator({
       id: "payrolls", title: "非农就业数据", category: "就业与经济", weight: weights.payrolls, risk: payrollRisk,
       value: Number.isFinite(payrollLatestChange) ? `${round(payrollLatestChange, 0)}k` : "暂无数据", detail: `三个月平均 ${Number.isFinite(payroll3mAvg) ? round(payroll3mAvg, 0) : "--"}k；六个月平均 ${Number.isFinite(payroll6mAvg) ? round(payroll6mAvg, 0) : "--"}k`,
-      date: payrollLast?.date, description: "观察三个月平均、历史修正、平均工时和就业是否只集中于少数行业。", why: "单月数据噪声很大，持续转弱才意味着需求与企业盈利下行。",
+      date: payrollLast?.date, description: "使用当前可得的非农就业总量计算单月增量、三个月和六个月平均；当前评分未纳入历史版本修正、平均工时或行业分布。", why: "单月数据噪声很大，持续转弱才意味着需求与企业盈利下行。",
       source: { label: "BLS / FRED · Nonfarm Payrolls", url: sourceUrl("PAYEMS") }, cadence: "月度", confidence: Number.isFinite(payrollRisk) ? "high" : "unavailable", unavailableReason: "子数据不足", sparkline: spark(payrolls, 24), methodology: "取三个月就业恶化与高通胀下的政策约束风险中较高值；两组输入齐全才计分。",
     }),
     resolveAiIndicator(indicator({
@@ -615,6 +616,7 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
     },
     errors: [
       ...cpiAlignmentErrors,
+      ...(fedBounds.error ? [fedBounds.error] : []),
       ...fredResults.filter(([, result]) => !result.ok).map(([id, result]) => `${fredMeta[id]?.[0] || id}: ${result.error}`),
       ...marketResults.filter(([, result]) => !result.ok).map(([id, result]) => `${id}: ${result.error}`),
     ],
@@ -656,7 +658,8 @@ function resolveDashboardCalendar(snapshot) {
     const twoYear = item.breakdown?.find((row) => row.label === "2 年期美债")?.value;
     const historicalYield = item.sparkline?.at(-1)?.value;
     const twoYearLabel = typeof twoYear === "string" ? twoYear : Number.isFinite(historicalYield) ? `${round(historicalYield, 2)}%` : "--";
-    return { ...item, detail: `当前联邦基金目标区间；下次会议 ${nextFomcDate}；2 年期 ${twoYearLabel}` };
+    const policyLabel = item.detail?.split("；")[0] || "当前联邦基金目标区间";
+    return { ...item, detail: `${policyLabel}；下次会议 ${nextFomcDate}；2 年期 ${twoYearLabel}` };
   });
   return projectDashboard({
     ...snapshot,

@@ -471,6 +471,84 @@ test("versioned partial cache bootstraps with unavailable credit excluded", asyn
   });
 });
 
+test("policy target bounds score only with matching dates and a valid range", async (t) => {
+  const readPolicyScenario = async (scenario) => {
+    let result;
+    await isolatedServer(null, async ({ start }) => {
+      const server = await start(listeningPreload + healthySources + `
+        const sourceFetch = globalThis.fetch;
+        const scenario = ${JSON.stringify(scenario)};
+        globalThis.fetch = async (value, options) => {
+          const response = await sourceFetch(value, options);
+          const url = new URL(value);
+          const id = url.searchParams.get("id");
+          if (!url.pathname.includes("/graph/fredgraph.csv") || !["DFEDTARL", "DFEDTARU"].includes(id)) return response;
+          const rows = (await response.text()).trim().split("\\n");
+          const lower = id === "DFEDTARL";
+          if ((scenario === "upper-first" && lower) || (scenario === "lower-first" && !lower)) rows.pop();
+          const lastDate = rows.at(-1).split(",")[0];
+          const target = scenario === "upper-first" ? (lower ? 3.5 : 3.25)
+            : scenario === "lower-first" ? (lower ? 3 : 3.75)
+              : scenario === "reversed" ? (lower ? 4 : 3.75)
+                : scenario === "zero-lower" ? (lower ? 0 : 0.25)
+                  : (lower ? 3.5 : 3.75);
+          rows[rows.length - 1] = lastDate + "," + target;
+          return new Response(rows.join("\\n"));
+        };
+      `);
+      result = await server.finished();
+    });
+    return result;
+  };
+  const control = await readPolicyScenario("control");
+  const controlFed = control.indicators.find((row) => row.id === "fed");
+  await t.test("same-day valid target preserves the existing formula", () => {
+    assert.equal(controlFed.available, true);
+    assert.equal(controlFed.value, "3.5%–3.75%");
+    assert.equal(controlFed.risk, 23.8);
+    assert.deepEqual(control.errors, []);
+  });
+  for (const scenario of ["upper-first", "lower-first", "reversed"]) {
+    await t.test(scenario, async () => {
+      const result = await readPolicyScenario(scenario);
+      const fed = result.indicators.find((row) => row.id === "fed");
+      const lower = fed.breakdown.find((row) => row.label === "政策目标下限");
+      const upper = fed.breakdown.find((row) => row.label === "政策目标上限");
+      assert.equal(fed.available, false);
+      assert.equal(fed.risk, null);
+      assert.equal(fed.points, null);
+      assert.equal(fed.status, "unavailable");
+      assert.equal(fed.judgment, null);
+      assert.doesNotMatch(fed.detail, /当前联邦基金目标区间/);
+      assert.equal(result.coverage, control.coverage - controlFed.weight);
+      assert.deepEqual(result.indicators.filter((row) => row.id !== "fed"), control.indicators.filter((row) => row.id !== "fed"));
+      assert.ok(!fed.value.includes("%–"), "The primary value still presents incompatible bounds as a valid range");
+      if (scenario === "reversed") {
+        assert.equal(lower.detail, "2026-10-02");
+        assert.equal(upper.detail, "2026-10-02");
+        assert.equal(lower.value, "4%");
+        assert.equal(upper.value, "3.75%");
+        assert.match(result.errors.join(" "), /目标区间.*无效/);
+      } else {
+        assert.equal(lower.detail, scenario === "upper-first" ? "2026-10-01" : "2026-10-02");
+        assert.equal(upper.detail, scenario === "upper-first" ? "2026-10-02" : "2026-10-01");
+        assert.equal(lower.value, scenario === "upper-first" ? "3.5%" : "3%");
+        assert.equal(upper.value, scenario === "upper-first" ? "3.25%" : "3.75%");
+        assert.match(result.errors.join(" "), /目标区间.*同步/);
+      }
+    });
+  }
+  await t.test("zero is a valid lower bound", async () => {
+    const result = await readPolicyScenario("zero-lower");
+    const fed = result.indicators.find((row) => row.id === "fed");
+    assert.equal(fed.available, true);
+    assert.equal(fed.value, "0%–0.25%");
+    assert.equal(fed.risk, 44.4);
+    assert.equal(result.coverage, control.coverage);
+    assert.deepEqual(result.errors, []);
+  });
+});
+
 async function withMarketBudgetPeer(cache, check) {
   const heldResponses = new Set();
   const sockets = new Set();

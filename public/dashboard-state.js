@@ -65,6 +65,33 @@ function validDate(value) {
     && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 }
 
+export function checkPolicyBounds(lower, upper) {
+  const complete = lower && upper && validDate(lower.date) && validDate(upper.date)
+    && Number.isFinite(lower.value) && Number.isFinite(upper.value);
+  if (!complete) return { valid: false, reason: null, error: null };
+  if (lower.date !== upper.date) return {
+    valid: false,
+    reason: "政策区间待同步",
+    error: `联邦基金目标区间日期不同（下限 ${lower.date}，上限 ${upper.date}），等待同日同步，暂停政策评分`,
+  };
+  if (lower.value > upper.value) return {
+    valid: false,
+    reason: "政策区间无效",
+    error: "联邦基金目标区间无效：下限高于上限，暂停政策评分",
+  };
+  return { valid: true, reason: null, error: null };
+}
+
+function savedPolicyBounds(item) {
+  const bound = (label) => {
+    const rows = item.breakdown?.filter((row) => row.label === label) || [];
+    if (rows.length !== 1 || !validDate(rows[0].detail) || typeof rows[0].value !== "string"
+      || !/^[+-]?\d+(?:\.\d+)?%$/.test(rows[0].value)) return null;
+    return { date: rows[0].detail, value: Number(rows[0].value.slice(0, -1)) };
+  };
+  return checkPolicyBounds(bound("政策目标下限"), bound("政策目标上限"));
+}
+
 export function cacheExpired(data, nowMs = Date.now()) {
   const generatedAt = Date.parse(data?.generatedAt);
   return !Number.isFinite(generatedAt) || generatedAt > nowMs + 60_000 || nowMs - generatedAt >= MAX_MARKET_CACHE_AGE_MS;
@@ -129,7 +156,17 @@ export function projectDashboard(data, nowMs = Date.now()) {
   const cacheAgeMs = Math.max(0, nowMs - Date.parse(data.generatedAt)) || 0;
   const aiEarnings = resolveAiSnapshots(data.aiEarnings, nowMs);
   const reminders = resolveReminders(data.reminders, aiEarnings, nowMs);
-  const publication = applyPublicationChecks(data.indicators, data.publicationSchedule, nowMs);
+  const policyErrors = [];
+  const policyIndicators = data.indicators.map((item) => {
+    if (item.id !== "fed") return item;
+    const bounds = savedPolicyBounds(item);
+    if (!bounds.error) return item;
+    policyErrors.push(bounds.error);
+    return { ...item, available: false, risk: null, points: null, status: "unavailable", confidence: "unavailable",
+      unavailableReason: bounds.reason, value: bounds.reason, judgment: null,
+      detail: [bounds.reason, ...(item.detail || "").split("；").slice(1)].join("；") };
+  });
+  const publication = applyPublicationChecks(policyIndicators, data.publicationSchedule, nowMs);
   const indicators = publication.indicators.map((previous) => {
     const item = { ...previous, weight: INDICATOR_WEIGHTS[previous.id] ?? previous.weight };
     if (item.id === "aiEarnings") return resolveAiIndicator(item, aiEarnings);
@@ -142,6 +179,6 @@ export function projectDashboard(data, nowMs = Date.now()) {
     const weight = items.reduce((sum, item) => sum + item.weight, 0);
     return { ...category, weight, score: weight ? Math.round(items.reduce((sum, item) => sum + item.points, 0) / weight * 1000) / 10 : null };
   });
-  return { ...data, ...model, aiEarnings, reminders, indicators, categories, publicationChecks: publication.checks, publicationErrors: publication.errors, cacheAgeMs, stale: expired || cacheAgeMs >= 15 * 60_000, cacheExpired: expired,
+  return { ...data, ...model, aiEarnings, reminders, indicators, categories, errors: [...new Set([...(data.errors || []), ...policyErrors])], publicationChecks: publication.checks, publicationErrors: publication.errors, cacheAgeMs, stale: expired || cacheAgeMs >= 15 * 60_000, cacheExpired: expired,
     methodology: { ...data.methodology, version: SCORING_VERSION, note: SCORING_NOTE }, action: actionFor(model.score, model.coverage) };
 }

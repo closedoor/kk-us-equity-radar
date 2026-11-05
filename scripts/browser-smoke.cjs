@@ -483,6 +483,80 @@ async function main() {
       await expect(page.locator("#indicator-earningsBreadth .risk-chip")).not.toHaveText("人工覆盖");
       assert.deepEqual(otherErrors, []);
     });
+    await scenario("manual saves merge another tab's edit before its storage event arrives", async (page, context) => {
+      const updatedAt = new Date().toISOString();
+      await page.addInitScript((value) => localStorage.setItem("bearRadarOverrides", JSON.stringify({
+        aiEarnings: { risk: 20, note: "AI", updatedAt: value },
+        earningsBreadth: { risk: 40, note: "EPS", updatedAt: value },
+      })), updatedAt);
+      const other = await context.newPage();
+      const otherErrors = [];
+      other.on("pageerror", (error) => otherErrors.push(error.message));
+      await other.addInitScript(() => {
+        // Simulate a busy tab whose asynchronous storage notification is delayed.
+        window.addEventListener("storage", (event) => {
+          if (event.key === "bearRadarOverrides") event.stopImmediatePropagation();
+        }, true);
+      });
+      await mock(page, () => ({ body: fresh() }));
+      await mock(other, () => ({ body: fresh() }));
+      await page.goto(baseURL);
+      await other.goto(baseURL);
+      await page.locator("#manualButton").click();
+      await other.locator("#manualButton").click();
+      await page.locator('[data-id="aiEarnings"] .manual-risk').fill("80");
+      await other.locator('[data-id="earningsBreadth"] .manual-risk').fill("90");
+      await page.locator('#manualForm button[value="default"]').click();
+      await expect(other.locator("#indicator-aiEarnings .metric-value")).toHaveText("20/100");
+      await other.locator('#manualForm button[value="default"]').click();
+      await expect(other.locator("#indicator-aiEarnings .metric-value")).toHaveText("80/100");
+      await expect(other.locator("#indicator-earningsBreadth .metric-value")).toHaveText("90/100");
+      assert.deepEqual(await other.evaluate(() => {
+        const saved = JSON.parse(localStorage.getItem("bearRadarOverrides"));
+        return { ai: saved.aiEarnings.risk, earnings: saved.earningsBreadth.risk };
+      }), { ai: 80, earnings: 90 });
+      await expect(other.locator("#indicator-aiEarnings .source-link")).toContainText("非人工判断来源");
+      assert.deepEqual(otherErrors, []);
+    });
+    await scenario("a later successful manual save retains earlier changes that storage could not save", async (page) => {
+      await page.addInitScript(() => {
+        const originalSet = Storage.prototype.setItem;
+        const originalGet = Storage.prototype.getItem;
+        Storage.prototype.setItem = function (...args) {
+          if (window.failManualWrite && args[0] === "bearRadarOverrides") throw new DOMException("Storage unavailable", "QuotaExceededError");
+          return originalSet.apply(this, args);
+        };
+        Storage.prototype.getItem = function (...args) {
+          if (window.failManualRead && args[0] === "bearRadarOverrides") throw new DOMException("Storage unavailable", "SecurityError");
+          return originalGet.apply(this, args);
+        };
+      });
+      await mock(page, () => ({ body: fresh() }));
+      await page.goto(baseURL);
+      await page.locator("#manualButton").click();
+      await page.locator('[data-id="earningsBreadth"] .manual-risk').fill("0");
+      await page.locator('#manualForm button[value="default"]').click();
+      await page.evaluate(() => { window.failManualWrite = true; });
+      await page.locator("#manualButton").click();
+      await page.locator('[data-id="aiEarnings"] .manual-risk').fill("42");
+      await page.locator('#manualForm button[value="default"]').click();
+      await expect(page.locator("#storageNotice")).toBeVisible();
+      await page.evaluate(() => { window.failManualWrite = false; });
+      await page.locator("#manualButton").click();
+      await page.locator('[data-id="earningsBreadth"] .manual-risk').fill("70");
+      await page.locator('#manualForm button[value="default"]').click();
+      await expect(page.locator("#indicator-aiEarnings .metric-value")).toHaveText("42/100");
+      await expect(page.locator("#storageNotice")).toBeHidden();
+      await page.evaluate(() => { window.failManualRead = true; });
+      await page.locator("#manualButton").click();
+      await page.locator('[data-id="aiEarnings"] .manual-risk').fill("43");
+      await page.locator('#manualForm button[value="default"]').click();
+      await expect(page.locator("#indicator-earningsBreadth .metric-value")).toHaveText("70/100");
+      await page.evaluate(() => { window.failManualRead = false; });
+      await page.reload();
+      await expect(page.locator("#indicator-aiEarnings .metric-value")).toHaveText("43/100");
+      await expect(page.locator("#indicator-earningsBreadth .metric-value")).toHaveText("70/100");
+    });
     await scenario("storage failures stay visible after save and clear, then disappear on successful retry", async (page) => {
       await mock(page, () => ({ body: fresh() }));
       await page.addInitScript(() => {
@@ -591,6 +665,28 @@ async function main() {
         await input.press(key);
         await expect(edit).toBeFocused();
       }
+    });
+    await scenario("a risk driver leaving the top three retains a predictable keyboard focus", async (page) => {
+      await freeze(page);
+      const calls = await mock(page, (count) => {
+        const data = fresh();
+        delete data.publicationSchedule;
+        data.refreshing = count === 1;
+        for (const item of data.indicators) {
+          item.available = true;
+          item.risk = item.id === "oil" ? (count === 1 ? 100 : 0) : (count === 1 ? 1 : 100);
+          item.points = item.risk * item.weight / 100;
+        }
+        return { body: data };
+      });
+      await page.goto(baseURL);
+      await page.locator('[data-driver-id="oil"]').focus();
+      await page.clock.runFor(2500);
+      await expect.poll(() => calls.length).toBe(2);
+      await expect(page.locator('[data-driver-id="oil"]')).toHaveCount(0);
+      await expect(page.locator(".driver-item").first()).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(page.locator("#indicator-credit")).toBeFocused();
     });
     await scenario("a delayed close event cannot steal the return target of a reopened manual dialog", async (page) => {
       await mock(page, () => ({ body: fresh() }));

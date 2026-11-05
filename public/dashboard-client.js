@@ -17,5 +17,7 @@ export async function requestDashboard(url, { fetchImpl = globalThis.fetch, time
   } finally {
     // Keep the deadline active until the entire JSON body has arrived and been checked.
     clearTimeout(timer);
+    // An HTTP error can arrive before its body ends; release that unread stream too.
+    controller.abort();
   }
 }

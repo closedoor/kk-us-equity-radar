@@ -19,6 +19,7 @@
 - `risk-model.test.mjs`
 - `dashboard-state.test.mjs`
 - `dashboard-client.test.mjs`
+- `manual-state.test.mjs`
 - `server.test.mjs`
 - `backend-reliability.test.mjs`
 - `fixtures/earnings-data.json`

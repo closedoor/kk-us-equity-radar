@@ -54,6 +54,77 @@ test("a poor refresh cannot displace a recent good cache but can replace an expi
   assert.equal(shouldReplaceDashboard(good, { ...poor, errors: [] }, now), true);
 });
 
+test("policy contradictions in saved observations stop only policy scoring and remain idempotent", () => {
+  const original = sample();
+  original.errors = ["test market source warning"];
+  const control = projectDashboard(original, now);
+  for (const [lowerDate, upperDate, lowerValue, upperValue] of [
+    ["2026-09-03", "2026-09-04", "3.5%", "3.25%"],
+    ["2026-09-04", "2026-09-03", "3%", "3.75%"],
+    ["2026-09-04", "2026-09-04", "4%", "3.75%"],
+  ]) {
+    for (const initiallyAvailable of [true, false]) {
+      const data = structuredClone(original);
+      const fed = data.indicators.find((row) => row.id === "fed");
+      fed.available = initiallyAvailable;
+      if (!initiallyAvailable) { fed.risk = null; fed.points = null; }
+      fed.value = `${lowerValue}–${upperValue}`;
+      fed.detail = "当前联邦基金目标区间；下次会议 待官方公布；2 年期 3.75%";
+      fed.breakdown = [
+        { label: "政策目标下限", value: lowerValue, detail: lowerDate },
+        { label: "政策目标上限", value: upperValue, detail: upperDate },
+      ];
+      const projected = projectDashboard(data, now);
+      const policy = projected.indicators.find((row) => row.id === "fed");
+      assert.equal(policy.available, false);
+      assert.equal(policy.risk, null);
+      assert.equal(policy.points, null);
+      assert.equal(policy.judgment, null);
+      assert.equal(projected.coverage, control.coverage - INDICATOR_WEIGHTS.fed);
+      assert.ok(!policy.value.includes("%–"));
+      assert.doesNotMatch(policy.detail, /当前联邦基金目标区间/);
+      assert.deepEqual(policy.breakdown, fed.breakdown);
+      assert.deepEqual(projected.indicators.filter((row) => row.id !== "fed"), control.indicators.filter((row) => row.id !== "fed"));
+      assert.equal(projected.errors.length, 2);
+      assert.equal(projected.errors[0], "test market source warning");
+      assert.match(projected.errors[1], /目标区间.*(?:同步|无效)/);
+      assert.deepEqual(projectDashboard(projected, now), projected);
+      assert.equal(fed.value, `${lowerValue}–${upperValue}`, "Projection mutated its source snapshot");
+    }
+  }
+});
+
+test("valid zero policy bounds and legacy snapshots without complete bound evidence remain compatible", () => {
+  const baseline = sample();
+  for (const breakdown of [
+    undefined,
+    [{ label: "政策目标下限", value: "0%", detail: "2026-09-04" }],
+    [{ label: "政策目标下限", value: "0%", detail: "2026-09-04" }, { label: "政策目标上限", value: "0.25%", detail: "2026-09-04" }],
+  ]) {
+    const data = structuredClone(baseline);
+    data.indicators.find((row) => row.id === "fed").breakdown = breakdown;
+    const projected = projectDashboard(data, now);
+    assert.equal(projected.indicators.find((row) => row.id === "fed").available, true);
+    assert.equal(projected.coverage, 90);
+    assert.deepEqual(projected.errors, baseline.errors);
+  }
+});
+
+test("cache replacement cannot retain coverage earned by contradictory policy bounds", () => {
+  const current = sample();
+  current.indicators.find((row) => row.id === "fed").breakdown = [
+    { label: "政策目标下限", value: "4%", detail: "2026-09-04" },
+    { label: "政策目标上限", value: "3.75%", detail: "2026-09-04" },
+  ];
+  const next = sample();
+  Object.assign(next.indicators.find((row) => row.id === "vix"), { available: false, risk: null, points: null });
+  next.errors = ["test missing VIX"];
+  const projectedNext = projectDashboard(next, now);
+  assert.equal(shouldReplaceDashboard(current, projectedNext, now), false, "The unverified old cache reproduces the original retention path");
+  assert.equal(projectedNext.coverage, 85);
+  assert.equal(shouldReplaceDashboard(projectDashboard(current, now), projectedNext, now), true);
+});
+
 test("old cached weights and inconsistent points migrate without changing source freshness", () => {
   const data = sample();
   data.indicators.forEach((row) => { row.points = 999; });

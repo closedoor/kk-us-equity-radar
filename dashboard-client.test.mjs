@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import http from "node:http";
+import { once } from "node:events";
 import { requestDashboard } from "./public/dashboard-client.js";
 
 const fixture = JSON.parse(readFileSync(new URL("./dashboard-cache.json", import.meta.url)));
@@ -27,6 +29,48 @@ test("client rejects malformed success payloads before they can replace a workin
 
 test("an HTTP error does not try to parse an HTML error page as a dashboard", async () => {
   await assert.rejects(requestDashboard("/api/dashboard", { fetchImpl: async () => new Response("<h1>Unavailable</h1>", { status: 503 }) }), /503/);
+});
+
+test("non-OK streaming bodies release their response and socket after the HTTP error", async () => {
+  const sockets = new Set();
+  const errorResponses = new Set();
+  const errorSockets = new Set();
+  const upstream = http.createServer((req, res) => {
+    if (req.url === "/ok") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(fixture));
+      return;
+    }
+    errorResponses.add(res);
+    errorSockets.add(req.socket);
+    res.on("close", () => errorResponses.delete(res));
+    req.socket.once("close", () => errorSockets.delete(req.socket));
+    res.writeHead(503, { "content-type": "text/html" });
+    res.write("<h1>Unavailable</h1>");
+    // Deliberately keep the body open after its error status has been received.
+  });
+  upstream.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  });
+  upstream.listen(0, "127.0.0.1");
+  await once(upstream, "listening");
+  const base = `http://127.0.0.1:${upstream.address().port}`;
+  try {
+    for (let index = 0; index < 3; index += 1) {
+      await assert.rejects(requestDashboard(`${base}/error`, { timeoutMs: 250 }), /（503）/);
+    }
+    const deadline = Date.now() + 750;
+    while ((errorResponses.size || errorSockets.size) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(errorResponses.size, 0, "Unread HTTP error bodies remained open");
+    assert.equal(errorSockets.size, 0, "Streaming HTTP error sockets remained open");
+    assert.deepEqual((await requestDashboard(`${base}/ok`, { timeoutMs: 1000 })).payload, fixture);
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await new Promise((resolve) => upstream.close(resolve));
+  }
 });
 
 test("the timeout covers a stalled body after response headers have arrived", async () => {

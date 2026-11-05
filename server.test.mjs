@@ -190,6 +190,39 @@ test("verified publication evidence survives an offline restart and cannot be di
   }, { preload: publicationClockPreload + `globalThis.fetch = async () => { throw new Error("test publication outage"); };` });
 });
 
+test("contradictory policy bounds cannot keep scoring from a high-coverage cache during an offline restart", async (t) => {
+  for (const scenario of ["mixed-date", "reversed"]) {
+    await t.test(scenario, async () => {
+      const cache = { ...structuredClone(fixture), generatedAt: publicationClock, dataQualityVersion: 1, errors: [] };
+      const fed = cache.indicators.find((row) => row.id === "fed");
+      const lowerDate = scenario === "mixed-date" ? "2026-10-13" : "2026-10-14";
+      fed.value = "4%–3.75%";
+      fed.breakdown = [
+        { label: "政策目标下限", value: "4%", detail: lowerDate },
+        { label: "政策目标上限", value: "3.75%", detail: "2026-10-14" },
+      ];
+      await withOfflineServer(cache, async ({ read, finished }) => {
+        const first = (await read()).body;
+        const after = await finished();
+        for (const body of [first, after]) {
+          const policy = body.indicators.find((row) => row.id === "fed");
+          assert.equal(body.generatedAt, cache.generatedAt, "The incomplete refresh must still preserve the source snapshot");
+          assert.equal(body.coverage, 80);
+          assert.equal(policy.available, false);
+          assert.equal(policy.risk, null);
+          assert.equal(policy.points, null);
+          assert.equal(policy.judgment, null);
+          assert.ok(!policy.value.includes("%–"));
+          assert.doesNotMatch(policy.detail, /当前联邦基金目标区间/);
+          assert.deepEqual(policy.breakdown, fed.breakdown);
+          assert.match(body.errors.join(" "), /目标区间.*(?:同步|无效)/);
+        }
+        assert.match(after.errors.join(" "), /test policy outage/);
+      }, { preload: publicationClockPreload + `globalThis.fetch = async () => { throw new Error("test policy outage"); };` });
+    });
+  }
+});
+
 test("an expired cache cannot supply a total score, even before or after an upstream failure", async () => {
   const cache = { ...fixture, generatedAt: new Date(Date.now() - 2 * 86_400_000).toISOString() };
   await withOfflineServer(cache, async ({ read, finished }) => {

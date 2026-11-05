@@ -1,16 +1,19 @@
 import { computeScores, actionFor, MIN_SCORE_COVERAGE, normalizeIndicator } from "./risk-model.js";
 import { projectDashboard, cacheExpired } from "./dashboard-state.js";
 import { requestDashboard } from "./dashboard-client.js";
+import { mergeManualOverrides } from "./manual-state.js";
 
 const manualConfig = [
   { id: "aiEarnings", label: "AI 产业链财报风险", help: "当云资本开支、芯片指引或库存出现新变化时，可调整风险值。" },
   { id: "earningsBreadth", label: "标普盈利下调广度", help: "用未来 12 个月 EPS 修正广度补充盈利风险判断。" },
 ];
 
+const initialOverrides = loadOverrides() ?? {};
+let lastPersistedOverrides = initialOverrides;
 const state = {
   data: null,
   filter: "全部",
-  overrides: loadOverrides(),
+  overrides: initialOverrides,
   lastLoadedAt: 0,
   loadError: null,
   syncPending: false,
@@ -94,12 +97,13 @@ function loadOverrides() {
       }]];
     }));
   }
-  catch { return {}; }
+  catch { return undefined; }
 }
 
 function saveOverrides() {
   try {
     localStorage.setItem("bearRadarOverrides", JSON.stringify(state.overrides));
+    lastPersistedOverrides = state.overrides;
     return true;
   } catch {
     return false;
@@ -420,7 +424,7 @@ function renderIndicators(data) {
       <div class="score-row"><span>风险强度 ${risk === null ? "--" : Math.round(risk)}</span><div class="risk-bar"><i style="width:${risk ?? 0}%;background:${color}"></i></div><strong class="score-points">${item.points === null ? "--" : item.points.toFixed(1)} / ${item.weight}</strong></div>
       <p class="card-copy">${escapeHtml(item.description)}<br /><strong>为什么重要：</strong>${escapeHtml(item.why)}</p>
       ${manualCapable ? `<button class="manual-edit" data-focus-key="manual-${escapeHtml(item.id)}" data-manual-id="${escapeHtml(item.id)}" type="button">${item.overridden ? "修改人工数据" : "录入更准确的数据"}</button>` : ""}
-      <div class="card-foot"><a class="source-link" data-focus-key="source-${escapeHtml(item.id)}" href="${safeExternalUrl(item.source?.url)}" target="_blank" rel="noreferrer">查看官方数据 · ${escapeHtml(item.source?.label)}</a><span class="cadence">${escapeHtml(item.cadence)}<span class="confidence">${escapeHtml(confidenceLabel(item.confidence))}</span></span></div>
+      <div class="card-foot"><a class="source-link" data-focus-key="source-${escapeHtml(item.id)}" href="${safeExternalUrl(item.source?.url)}" target="_blank" rel="noreferrer">${item.overridden ? "公开参考资料（非人工判断来源）" : "查看官方数据"} · ${escapeHtml(item.source?.label)}</a><span class="cadence">${escapeHtml(item.cadence)}<span class="confidence">${escapeHtml(confidenceLabel(item.confidence))}</span></span></div>
     </article>`;
   }).join("");
 }
@@ -477,7 +481,8 @@ function renderErrors(errors = []) {
 
 function render() {
   if (!state.data) return;
-  const focusKey = document.activeElement?.dataset.focusKey;
+  const focused = document.activeElement;
+  const focusKey = focused?.dataset.focusKey;
   const data = applyOverrides(projectDashboard(state.data));
   state.displayValidity = `${dateInTimeZone()}:${data.cacheExpired}`;
   renderSummary(data);
@@ -492,7 +497,12 @@ function render() {
   const calendarErrors = Object.entries(data.calendarSync?.sources || {}).filter(([, source]) => source?.error)
     .map(([key]) => `${({ bls: "CPI / 就业", fomc: "美联储", earnings: "财报" })[key] || key}日程来源暂不可用`);
   renderErrors([...(data.errors || []), ...calendarErrors, ...(data.publicationErrors || [])]);
-  if (focusKey) document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`)?.focus({ preventScroll: true });
+  if (focusKey && !focused.isConnected && (document.activeElement === document.body || document.activeElement === focused)) {
+    const matching = document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`);
+    const fallback = focusKey.startsWith("driver-") ? els.drivers.querySelector(".driver-item") : els.manualButton;
+    const target = matching?.getClientRects().length ? matching : fallback || els.manualButton;
+    target.focus({ preventScroll: true });
+  }
 }
 
 function renderPublicationChecks(checks = []) {
@@ -662,24 +672,17 @@ els.drivers.addEventListener("click", (event) => {
 els.manualForm.addEventListener("submit", (event) => {
   event.preventDefault();
   if (!els.manualForm.reportValidity()) return;
-  const next = { ...state.overrides };
-  els.manualFields.querySelectorAll(".manual-field").forEach((field) => {
-    const riskText = field.querySelector(".manual-risk").value.trim();
-    const note = field.querySelector(".manual-note").value.trim();
-    const reconfirmed = field.querySelector(".manual-reconfirm-input").checked;
-    const original = manualDraft[field.dataset.id];
-    // An untouched field must not overwrite a newer edit from another tab.
-    if (!reconfirmed && riskText === String(original?.risk ?? "") && note === (original?.note || "").trim()) return;
-    if (riskText === "") delete next[field.dataset.id];
-    else if (Number.isFinite(Number(riskText))) {
-      const risk = clamp(Number(riskText));
-      const previous = state.overrides[field.dataset.id];
-      next[field.dataset.id] = !reconfirmed && previous?.risk === risk && previous?.note === note
-        ? previous
-        : { risk, note, updatedAt: new Date().toISOString() };
-    }
-  });
-  state.overrides = next;
+  const fields = Array.from(els.manualFields.querySelectorAll(".manual-field"), (field) => ({
+    id: field.dataset.id,
+    riskText: field.querySelector(".manual-risk").value.trim(),
+    note: field.querySelector(".manual-note").value.trim(),
+    reconfirmed: field.querySelector(".manual-reconfirm-input").checked,
+  }));
+  // Read again at submit time: another tab's storage event may still be queued.
+  // The helper also preserves this page's changes from failed storage writes.
+  const persisted = loadOverrides();
+  state.overrides = mergeManualOverrides({ current: state.overrides, draft: manualDraft, fields, persisted, lastPersisted: lastPersistedOverrides });
+  if (persisted !== undefined) lastPersistedOverrides = persisted;
   const saved = saveOverrides();
   els.manualDialog.close();
   render();
@@ -722,8 +725,16 @@ window.addEventListener("offline", () => {
 });
 window.addEventListener("storage", (event) => {
   if ((event.key !== null && event.key !== "bearRadarOverrides") || event.storageArea !== localStorage) return;
-  state.overrides = loadOverrides();
-  showStorageResult(true);
+  const persisted = loadOverrides();
+  if (persisted === undefined) return;
+  state.overrides = mergeManualOverrides({ current: state.overrides, draft: state.overrides, fields: [], persisted, lastPersisted: lastPersistedOverrides });
+  lastPersistedOverrides = persisted;
+  const synchronized = manualConfig.every(({ id }) => {
+    const current = state.overrides[id];
+    const saved = persisted[id];
+    return current === saved || (current && saved && current.risk === saved.risk && current.note === saved.note && current.updatedAt === saved.updatedAt);
+  });
+  if (synchronized) showStorageResult(true);
   render();
 });
 
