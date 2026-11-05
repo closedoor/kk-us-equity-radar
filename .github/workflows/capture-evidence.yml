@@ -1,0 +1,41 @@
+name: Record forward model evidence
+
+on:
+  schedule:
+    - cron: '30 22 * * 1-5'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/capture-evidence.yml'
+      - 'scripts/capture-evidence.mjs'
+      - 'validation-evidence.mjs'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: forward-model-evidence
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Record one actual observation per New York date and model version
+        run: node scripts/capture-evidence.mjs
+      - name: Preserve evidence and its maturity summary in repository history
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add evidence/forward/ public/forward-validation.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'data: preserve daily forward model observation'
+          git pull --rebase origin main
+          git push origin HEAD:main

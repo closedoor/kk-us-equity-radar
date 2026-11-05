@@ -1,15 +1,20 @@
 export const PUBLICATION_SOURCES = Object.freeze({
   cpi: "https://www.bls.gov/news.release/cpi.nr0.htm",
   employment: "https://www.bls.gov/news.release/empsit.nr0.htm",
+  pce: "https://www.bea.gov/data/personal-consumption-expenditures-price-index",
 });
 
-const KINDS = ["cpi", "employment"];
-const LABELS = { cpi: "CPI", employment: "美国就业" };
+const KINDS = ["cpi", "employment", "pce"];
+const REQUIRED_KINDS = ["cpi", "employment"];
+const LABELS = { cpi: "CPI", employment: "美国就业", pce: "PCE" };
 const DEPENDENCIES = {
   inflation: ["inflation", "fed", "unemployment", "payrolls"],
+  corePce: ["inflation", "fed", "unemployment", "payrolls"],
   unemployment: ["unemployment", "fed"],
   payrolls: ["payrolls", "fed"],
 };
+const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+const PCE_RELEASE_URL = new RegExp(`^https://www\\.bea\\.gov/news/(\\d{4})/personal-income-and-outlays-(${MONTHS.join("|")})-(\\d{4})$`);
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const has = (value, key) => Object.hasOwn(value, key);
 const validPeriod = (value) => typeof value === "string" && /^\d{4}-(?:0[1-9]|1[0-2])$/.test(value) && Number(value.slice(0, 4)) >= 1900;
@@ -26,6 +31,16 @@ function validTimestamp(value) {
   return Boolean(match && validDate(match[1]) && Number.isFinite(Date.parse(value)));
 }
 
+function validPceRelease(record) {
+  if (!has(record, "releaseUrl")) return record.period === null && record.publishedAt === null;
+  if (typeof record.releaseUrl !== "string") return false;
+  const match = PCE_RELEASE_URL.exec(record.releaseUrl);
+  if (!match || match[0] !== record.releaseUrl || Number(match[1]) < 1900 || Number(match[3]) < 1900) return false;
+  if (record.period === null && record.publishedAt === null) return true;
+  const period = `${match[3]}-${String(MONTHS.indexOf(match[2]) + 1).padStart(2, "0")}`;
+  return record.period === period && match[1] === marketMonth(Date.parse(record.publishedAt)).slice(0, 4);
+}
+
 function validRecord(record, kind) {
   if (!isObject(record) || !["period", "publishedAt", "checkedAt", "source", "error"].every((key) => has(record, key))) return false;
   if (record.source !== PUBLICATION_SOURCES[kind] || !validTimestamp(record.checkedAt)
@@ -33,18 +48,21 @@ function validRecord(record, kind) {
     || (has(record, "attemptedAt") && (!validTimestamp(record.attemptedAt)
       || Date.parse(record.attemptedAt) < Date.parse(record.checkedAt)))) return false;
   if (record.period === null || record.publishedAt === null) {
-    return record.period === null && record.publishedAt === null && typeof record.error === "string" && record.error.trim().length > 0;
+    return record.period === null && record.publishedAt === null && typeof record.error === "string" && record.error.trim().length > 0
+      && (kind !== "pce" || validPceRelease(record));
   }
   return validPeriod(record.period) && validTimestamp(record.publishedAt)
     && Date.parse(record.publishedAt) <= Date.parse(record.checkedAt)
-    && record.period <= marketMonth(Date.parse(record.publishedAt));
+    && record.period <= marketMonth(Date.parse(record.publishedAt))
+    && (kind !== "pce" || validPceRelease(record));
 }
 
 export function isPublicationSchedule(value) {
   return Boolean(isObject(value) && has(value, "version") && value.version === 1
     && has(value, "sources") && isObject(value.sources)
-    && Object.keys(value.sources).length === KINDS.length
-    && KINDS.every((kind) => has(value.sources, kind) && (value.sources[kind] === null || validRecord(value.sources[kind], kind)))
+    && REQUIRED_KINDS.every((kind) => has(value.sources, kind))
+    && Object.keys(value.sources).every((kind) => KINDS.includes(kind)
+      && (value.sources[kind] === null || validRecord(value.sources[kind], kind)))
     && (!has(value, "attemptedAt") || validTimestamp(value.attemptedAt)));
 }
 
@@ -57,6 +75,25 @@ function marketMonth(nowMs) {
 function emptyCheck(kind, message) {
   return { kind, label: LABELS[kind], period: null, publishedAt: null, checkedAt: null,
     source: PUBLICATION_SOURCES[kind], status: "unavailable", message };
+}
+
+function corePcePeriod(indicators) {
+  const inflation = indicators.find((item) => item?.id === "inflation");
+  if (!inflation) return null;
+  if (has(inflation, "inputDates")) {
+    if (!isObject(inflation.inputDates)) return null;
+    if (has(inflation.inputDates, "corePce")) {
+      const date = inflation.inputDates.corePce;
+      return validDate(date) ? date.slice(0, 7) : null;
+    }
+  }
+  // Legacy caches expose the PCE month only in this explicitly labeled detail.
+  const rows = Array.isArray(inflation.breakdown) ? inflation.breakdown.filter((row) => row?.label === "核心 PCE") : [];
+  if (rows.length !== 1 || typeof rows[0].detail !== "string") return null;
+  const match = /^(\d{4}) 年 (0?[1-9]|1[0-2]) 月(?: ·[^\r\n]*)?$/.exec(rows[0].detail);
+  if (!match || match[0] !== rows[0].detail) return null;
+  const period = `${match[1]}-${match[2].padStart(2, "0")}`;
+  return validPeriod(period) ? period : null;
 }
 
 export function applyPublicationChecks(indicators, schedule, nowMs = Date.now()) {
@@ -73,7 +110,7 @@ export function applyPublicationChecks(indicators, schedule, nowMs = Date.now())
   const thisMonth = marketMonth(nowMs);
   for (const kind of KINDS) {
     const label = LABELS[kind];
-    const proof = schedule.sources[kind];
+    const proof = has(schedule.sources, kind) ? schedule.sources[kind] : null;
     if (!proof || proof.period === null) {
       const message = `${label} 官方公布期尚未核实${proof?.error ? `：${proof.error}` : ""}，未据此剔除现有指标。`;
       checks.push({ ...emptyCheck(kind, message), checkedAt: proof?.checkedAt || null });
@@ -81,7 +118,8 @@ export function applyPublicationChecks(indicators, schedule, nowMs = Date.now())
       continue;
     }
     const base = { kind, label, period: proof.period, publishedAt: proof.publishedAt,
-      checkedAt: proof.checkedAt, source: PUBLICATION_SOURCES[kind] };
+      checkedAt: proof.checkedAt, source: PUBLICATION_SOURCES[kind],
+      ...(kind === "pce" ? { releaseUrl: proof.releaseUrl } : {}) };
     if (Date.parse(proof.publishedAt) > nowMs || Date.parse(proof.checkedAt) > nowMs + 60_000 || proof.period > thisMonth) {
       const message = `${label} 官方发布核验含未来月份或时间，暂不将其作为数据下限。`;
       checks.push({ ...base, status: "unavailable", message });
@@ -91,8 +129,10 @@ export function applyPublicationChecks(indicators, schedule, nowMs = Date.now())
 
     const targets = kind === "cpi"
       ? [{ id: "inflation", label: "通胀共同观测期" }]
-      : [{ id: "unemployment", label: "失业率" }, { id: "payrolls", label: "非农就业" }];
+      : kind === "employment" ? [{ id: "unemployment", label: "失业率" }, { id: "payrolls", label: "非农就业" }]
+        : [{ id: "corePce", label: "核心 PCE" }];
     const observations = targets.map((target) => {
+      if (target.id === "corePce") return { ...target, period: corePcePeriod(indicators) };
       const value = indicators.find((item) => item?.id === target.id)?.date;
       return { ...target, period: validDate(value) ? value.slice(0, 7) : null };
     });

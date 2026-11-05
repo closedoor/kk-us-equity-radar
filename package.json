@@ -1,13 +1,16 @@
 {
   "name": "us-equity-risk-radar",
-  "version": "4.7.5",
+  "version": "4.8.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
     "dev": "node --watch server.mjs",
     "check:browser": "node scripts/browser-smoke.cjs && node scripts/product-audit.cjs",
-    "check": "node --check server.mjs && node --check earnings-data.mjs && node --check publication.mjs && node --check public/app.js && node --check public/manual-state.js && node --test calendar.test.mjs market-data.test.mjs risk-model.test.mjs dashboard-state.test.mjs dashboard-client.test.mjs publication.test.mjs publication-state.test.mjs manual-state.test.mjs server.test.mjs backend-reliability.test.mjs"
+    "capture:evidence": "node scripts/capture-evidence.mjs",
+    "check:earnings": "node scripts/check-earnings.mjs",
+    "validate:history": "node scripts/history-validate.mjs",
+    "check": "node --check server.mjs && node --check earnings-data.mjs && node --check publication.mjs && node --check earnings-monitor.mjs && node --check source-revisions.mjs && node --check public/app.js && node --check public/manual-state.js && node --check scripts/capture-evidence.mjs && node --test calendar.test.mjs market-data.test.mjs risk-model.test.mjs dashboard-state.test.mjs dashboard-client.test.mjs publication.test.mjs publication-state.test.mjs manual-state.test.mjs earnings-monitor.test.mjs earnings-state.test.mjs earnings-integration.test.mjs history-validation.test.mjs validation-evidence.test.mjs source-revisions.test.mjs server.test.mjs backend-reliability.test.mjs"
   },
   "engines": {
     "node": ">=18"

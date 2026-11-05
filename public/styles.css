@@ -304,3 +304,62 @@ button:focus-visible, a:focus-visible, input:focus-visible, .indicator-card:focu
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }
+
+#earningsStatus { margin: 24px 0; padding: 18px; border: 1px solid var(--line); background: rgba(255,255,255,.25); color: var(--ink); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.earnings-check-summary { margin: 0 0 10px; }
+#earningsStatus summary { width: fit-content; max-width: 100%; min-height: 32px; padding-block: 5px; cursor: pointer; font-weight: 700; }
+.earnings-check-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; margin: 14px 0 0; padding: 0; list-style: none; }
+.earnings-check-list li { min-width: 0; padding-top: 12px; border-top: 1px solid var(--line); }
+.earnings-check-heading { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.earnings-check-heading span, .earnings-check-list small { color: #4f514c; }
+.earnings-check-list p { margin: 6px 0; }
+.earnings-check-list small { display: block; }
+.earnings-report-link { display: inline-block; max-width: 100%; min-height: 24px; padding-block: 3px; color: var(--link); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.ai-review-notice { margin-top: 16px; padding: 12px; border-left: 3px solid var(--amber); background: rgba(216,162,50,.08); color: #67531d; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.ai-review-notice p { margin: 5px 0 0; }
+.ai-review-notice.review-required { border-left-color: var(--orange); }
+.ai-review-notice .earnings-report-link { margin-top: 5px; }
+@media (max-width: 640px) {
+  #earningsStatus { padding: 14px; }
+  .earnings-check-list { grid-template-columns: 1fr; }
+}
+
+.model-validation { padding-block: 20px; border-bottom: 1px solid var(--line); }
+.model-validation > summary { cursor: pointer; font-size: 14px; line-height: 1.6; }
+.model-validation > summary > span { display: inline-block; margin-left: 18px; color: var(--muted); font-size: 12px; }
+.model-validation summary:focus-visible, #earningsStatus summary:focus-visible, .validation-table-wrap:focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
+.validation-section { min-width: 0; padding-block: 20px; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.validation-section + .validation-section { border-top: 1px solid var(--line); }
+.validation-section h3 { margin: 0 0 12px; font-size: 18px; }
+.validation-section p { margin-block: 12px; }
+.validation-note, .validation-limitations { color: var(--muted); font-size: 12px; line-height: 1.8; }
+.validation-coverage { display: flex; flex-wrap: wrap; gap: 8px 24px; padding: 14px 16px; background: rgba(216,162,50,.1); border-left: 3px solid var(--amber); }
+.validation-caution { padding: 12px 14px; border: 1px solid var(--line); color: #4f514c; background: rgba(255,255,255,.25); }
+.validation-table-wrap { max-width: 100%; overflow-x: auto; margin-block: 16px; }
+.validation-table { width: 100%; min-width: 540px; border-collapse: collapse; font-size: 12px; }
+.validation-table caption { padding: 8px 0; text-align: left; color: var(--muted); }
+.validation-table th, .validation-table td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--line); text-align: left; }
+.validation-table th { font-weight: 600; }
+.validation-table td { font-family: var(--mono); white-space: nowrap; }
+.validation-bands { margin-top: 20px; }
+.validation-bands > summary { min-height: 32px; padding-block: 5px; cursor: pointer; }
+.validation-outcomes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 16px 0; padding: 0; list-style: none; }
+.validation-outcomes li { padding: 14px; border: 1px solid var(--line); }
+.validation-outcomes strong, .validation-outcomes span { display: block; }
+.validation-outcomes span { margin-top: 6px; }
+.validation-section a { color: var(--link); text-underline-offset: 3px; }
+.validation-section[data-state="unavailable"] { color: #67531d; }
+@media (max-width: 640px) {
+  .model-validation > summary > span { display: block; margin: 4px 0 0; }
+  .validation-coverage { display: grid; gap: 8px; padding: 12px; }
+  .validation-outcomes { grid-template-columns: 1fr; }
+}
+
+.source-revisions { padding-block: 18px; border-bottom: 1px solid var(--line); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.source-revisions > summary { min-height: 32px; padding-block: 5px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.source-revisions > summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
+.source-revisions > p { color: var(--muted); }
+.source-revisions ul { padding-left: 20px; }
+.source-revisions li { margin-block: 12px; }
+.source-revisions li strong, .source-revisions li span, .source-revisions li small { display: block; }
+.source-revisions li small { color: var(--muted); }

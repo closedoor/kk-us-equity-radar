@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "scoringVersion": "4.7.0",
+  "updatedAt": "2026-11-05T12:43:37.367Z",
+  "history": {
+    "status": "partial-diagnostic",
+    "from": "2019-03-31",
+    "to": "2025-12-31",
+    "scheduledSamples": 28,
+    "scoredSamples": 27,
+    "coverage": {
+      "min": 37,
+      "max": 70
+    },
+    "excludedWeight": 30,
+    "conclusion": "部分自动指标的历史分层未呈现稳定的单调关系；完整模型、下跌概率和仓位阈值仍未验证。高风险档样本很少，不能据此调参。",
+    "horizons": [
+      {
+        "tradingDays": 21,
+        "samples": 27,
+        "baseline": {
+          "n": 27,
+          "meanReturnPct": 1.954148,
+          "medianReturnPct": 1.83788,
+          "lossRatePct": 29.62963,
+          "meanMaxDrawdownPct": -3.793756,
+          "worstMaxDrawdownPct": -12.13549,
+          "drawdownAtLeast10PctRate": 3.703704
+        },
+        "bands": [
+          {
+            "label": "0–20",
+            "n": 8,
+            "meanReturnPct": 2.367835,
+            "meanMaxDrawdownPct": -1.882585,
+            "worstMaxDrawdownPct": -3.660359
+          },
+          {
+            "label": ">20–40",
+            "n": 11,
+            "meanReturnPct": 0.922522,
+            "meanMaxDrawdownPct": -4.353042,
+            "worstMaxDrawdownPct": -12.13549
+          },
+          {
+            "label": ">40–60",
+            "n": 5,
+            "meanReturnPct": 4.007835,
+            "meanMaxDrawdownPct": -4.226734,
+            "worstMaxDrawdownPct": -9.799731
+          },
+          {
+            "label": ">60–75",
+            "n": 2,
+            "meanReturnPct": -1.658792,
+            "meanMaxDrawdownPct": -7.738788,
+            "worstMaxDrawdownPct": -9.835161
+          },
+          {
+            "label": ">75–100",
+            "n": 1,
+            "meanReturnPct": 6.949989,
+            "meanMaxDrawdownPct": -2.876017,
+            "worstMaxDrawdownPct": -2.876017
+          }
+        ]
+      },
+      {
+        "tradingDays": 63,
+        "samples": 27,
+        "baseline": {
+          "n": 27,
+          "meanReturnPct": 3.406094,
+          "medianReturnPct": 5.249046,
+          "lossRatePct": 25.925926,
+          "meanMaxDrawdownPct": -8.39831,
+          "worstMaxDrawdownPct": -33.924959,
+          "drawdownAtLeast10PctRate": 22.222222
+        },
+        "bands": [
+          {
+            "label": "0–20",
+            "n": 8,
+            "meanReturnPct": 2.714097,
+            "meanMaxDrawdownPct": -7.806107,
+            "worstMaxDrawdownPct": -33.924959
+          },
+          {
+            "label": ">20–40",
+            "n": 11,
+            "meanReturnPct": 5.029076,
+            "meanMaxDrawdownPct": -7.539526,
+            "worstMaxDrawdownPct": -17.416079
+          },
+          {
+            "label": ">40–60",
+            "n": 5,
+            "meanReturnPct": 6.590807,
+            "meanMaxDrawdownPct": -7.47887,
+            "worstMaxDrawdownPct": -13.048101
+          },
+          {
+            "label": ">60–75",
+            "n": 2,
+            "meanReturnPct": -5.877868,
+            "meanMaxDrawdownPct": -13.63108,
+            "worstMaxDrawdownPct": -19.985641
+          },
+          {
+            "label": ">75–100",
+            "n": 1,
+            "meanReturnPct": -6.266387,
+            "meanMaxDrawdownPct": -16.714206,
+            "worstMaxDrawdownPct": -16.714206
+          }
+        ]
+      }
+    ],
+    "limitations": [
+      "固定检验2019—2025年28个季度末；宏观输入用当时可得版本，市场价格是现在获取的历史收盘记录。",
+      "信用利差缺少可验证的历史版本，整项15%排除；AI解读5%与EPS修正10%也排除。最高只覆盖现行计划权重70%。",
+      "早期Sahm缺少档案，一期PCE超龄，继续按现行完整性与60%门槛排除，不补造指标。",
+      "63日窗口存在重叠；历史价格可能调整，价格指数不含分红、交易成本与仓位收益。",
+      "这批资料已经用于诊断，不能再称为独立样本外检验；低分也不能保证未来低回撤。"
+    ]
+  }
+}

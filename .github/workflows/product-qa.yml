@@ -37,7 +37,7 @@ jobs:
       - name: Install pinned browser tooling
         run: |
           npm install --no-save --package-lock=false @playwright/test@1.57.0
-          npx --no-install playwright install --with-deps --no-shell chromium
+          npx --no-install playwright install --with-deps --no-shell chromium webkit
           sudo apt-get install -y fonts-noto-cjk
           node <<'NODE'
           const fs = require('node:fs');
@@ -46,6 +46,10 @@ jobs:
           fs.accessSync(executable, fs.constants.X_OK);
           fs.appendFileSync(process.env.GITHUB_ENV, `CHROME_PATH=${executable}\n`);
           NODE
+      - name: Run automated data, model and HTTP checks
+        run: |
+          mkdir -p "$RADAR_SCREENSHOTS"
+          npm run check 2>&1 | tee "$RADAR_SCREENSHOTS/node-check.log"
       - name: Start isolated recorded-data fixture service
         id: fixture
         run: |
@@ -72,9 +76,17 @@ jobs:
       - name: Run complete product and genuine minimum-font suite
         if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
         run: node scripts/product-audit.cjs 2>&1 | tee "$RADAR_SCREENSHOTS/product-audit.log"
-      - name: Capture desktop and mobile viewport journeys
+      - name: Capture Chromium desktop and mobile viewport journeys
         if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
         run: node scripts/ci-screenshots.cjs 2>&1 | tee "$RADAR_SCREENSHOTS/viewport-journeys.log"
+      - name: Run Linux WebKit desktop and mobile viewport journeys
+        if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
+        env:
+          RADAR_ENGINE: webkit
+          RADAR_SCREENSHOTS: ${{ github.workspace }}/qa-artifacts/webkit
+        run: |
+          mkdir -p "$RADAR_SCREENSHOTS"
+          node scripts/ci-screenshots.cjs 2>&1 | tee "$RADAR_SCREENSHOTS/viewport-journeys.log"
       - name: Verify all seven genuine minimum-font cases ran
         if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
         run: |

@@ -63,9 +63,14 @@ const els = {
   actionCallout: document.querySelector("#actionCallout"),
   aiChainMap: document.querySelector("#aiChainMap"),
   aiCompanyGrid: document.querySelector("#aiCompanyGrid"),
+  earningsStatus: document.querySelector("#earningsStatus"),
   reminderGrid: document.querySelector("#reminderGrid"),
   calendarSyncStatus: document.querySelector("#calendarSyncStatus"),
   publicationStatus: document.querySelector("#publicationStatus"),
+  modelHistory: document.querySelector("#modelHistory"),
+  forwardValidation: document.querySelector("#forwardValidation"),
+  sourceRevisions: document.querySelector("#sourceRevisions"),
+  revisionList: document.querySelector("#revisionList"),
 };
 
 function setLiveStatus(text, status = "updating") {
@@ -131,11 +136,11 @@ function dateInTimeZone(date = new Date(), timeZone = "America/New_York") {
 }
 
 function riskMeta(score) {
-  if (score > 75) return { label: "红色警报", color: "#cc3a2d", description: "系统性回撤风险已经很高，优先检查流动性、信用事件和盈利下修。" };
-  if (score > 60) return { label: "橙色警报", color: "#e46e31", description: "综合市场风险明显上升，信用、盈利与价格趋势需要逐项核查。" };
-  if (score > 40) return { label: "黄色警戒", color: "#d8a232", description: "市场开始脆弱，宏观、信用或盈利压力正在形成共振。" };
-  if (score > 20) return { label: "正常波动", color: "#a9a348", description: "存在局部压力，但尚未形成跨通胀、信用、盈利和价格的全面恶化。" };
-  return { label: "健康、风险较低", color: "#4b9b67", description: "目前没有看到多条风险链同步恶化，但低分不代表短期不会回调。" };
+  if (score > 75) return { label: "红色警报", color: "#cc3a2d", description: "多项规则指标处于高压力区，应核对流动性、信用事件与盈利下修。分数不代表下跌概率或后续回撤幅度。" };
+  if (score > 60) return { label: "橙色警报", color: "#e46e31", description: "规则指标显示当前压力升高，信用、盈利与价格趋势需要逐项核查。" };
+  if (score > 40) return { label: "黄色警戒", color: "#d8a232", description: "当前宏观、信用或盈利指标出现压力叠加，需要核查共同驱动。" };
+  if (score > 20) return { label: "正常波动", color: "#a9a348", description: "当前规则指标显示局部压力，跨风险链的压力叠加仍有限。" };
+  return { label: "健康、风险较低", color: "#4b9b67", description: "当前规则指标所示压力较低；低分不保证后续回撤更小，也不代表短期不会回调。" };
 }
 
 function applyOverrides(data) {
@@ -206,7 +211,7 @@ function renderSummary(data) {
     && Number.isFinite(data.dominantRegimeScore)
     && Math.abs(data.stagflationScore - data.dominantRegimeScore) < 0.05;
   els.verdictDescription.textContent = score !== null && stagflationDominant
-    ? "滞胀与政策约束正在形成共振，但信用和就业尚未确认系统性危机。"
+    ? "滞胀与政策规则指标当前压力较高，信用与就业指标尚未显示同等程度的压力。"
     : meta.description;
   els.verdictDot.style.background = meta.color;
   els.coverage.textContent = Number.isFinite(data.coverage) ? `${data.coverage}%` : "--";
@@ -232,12 +237,15 @@ function renderSummary(data) {
   const marketFailed = Boolean(data.errors?.length);
   const calendarFailed = Object.values(data.calendarSync?.sources || {}).some((source) => source?.error);
   const publicationFailed = Boolean(data.publicationErrors?.length);
-  const status = offline || state.loadError ? "error" : data.cacheExpired || data.refreshing || state.syncPending || data.stale || marketFailed || calendarFailed || publicationFailed ? "updating" : "connected";
+  const earningsReviewCount = data.aiEarnings?.filter((row) => row.reviewRequired).length || 0;
+  const earningsPending = earningsReviewCount > 0 || Boolean(data.earningsErrors?.length) || data.earningsChecks?.some((row) => row.status === "unknown");
+  const status = offline || state.loadError ? "error" : data.cacheExpired || data.refreshing || state.syncPending || data.stale || marketFailed || calendarFailed || publicationFailed || earningsPending ? "updating" : "connected";
   setLiveStatus(offline ? "离线 · 暂用已有数据" : state.loadError ? "连接失败" : data.cacheExpired ? "缓存已过期 · 等待新数据" : data.refreshing || state.syncPending
     ? `后台更新中 · 暂用${cacheAge}缓存`
     : marketFailed ? "部分来源失败 · 暂用已有数据"
     : calendarFailed ? "日程部分同步失败"
     : publicationFailed ? "官方发布进度待核对 · 见详情"
+    : earningsPending ? earningsReviewCount ? `${earningsReviewCount} 家财报待复核 · 见 AI 财报` : "AI 财报最新性待核对 · 见详情"
     : data.stale
       ? `更新暂缓 · 暂用${cacheAge}缓存`
       : "已连接 · 数据已更新", status);
@@ -277,7 +285,7 @@ function renderDrivers(data) {
   const share = data.rawPoints > 0 ? Math.round((driverPoints / data.rawPoints) * 100) : 0;
 
   els.driversSummary.textContent = drivers.length
-    ? `前三项共贡献 ${driverPoints.toFixed(1)} 分，占当前风险总点数的 ${share}%。点击可直接定位到信号详情。`
+    ? `前三项原始加权点数合计 ${driverPoints.toFixed(1)}，占有效指标原始点数的 ${share}%。这里尚未按有效权重归一化，也未加入规则修正。点击可定位到信号详情。`
     : "暂无可用信号，请稍后刷新数据。";
   els.drivers.innerHTML = drivers.map((item, index) => {
     const risk = Number.isFinite(item.risk) ? Math.round(item.risk) : 0;
@@ -313,35 +321,93 @@ function scheduleLabel(status, basis) {
   return basis === "nasdaq" ? "Nasdaq 预估" : "日期预估";
 }
 
-function renderAiEarnings(rows = [], layers = []) {
+function renderAiEarnings(rows = [], layers = [], checks = []) {
+  renderEarningsChecks(rows, checks);
+  const checksByTicker = new Map(checks.map((check) => [check.ticker, check]));
   els.aiChainMap.innerHTML = layers.map((layer, index) => `<article class="ai-layer-card">
     <span class="ai-layer-index">0${index + 1}</span><h3>${escapeHtml(layer.name)}</h3><p>${escapeHtml(layer.description)}</p>
     <div>${layer.tickers.map((ticker) => `<b>${escapeHtml(ticker)}</b>`).join("")}</div>
   </article>`).join("");
 
   els.aiCompanyGrid.innerHTML = rows.map((row) => {
+    const check = checksByTicker.get(row.ticker);
+    const reviewRequired = Boolean(row.reviewRequired) || check?.status === "review-required";
+    const historical = Boolean(row.snapshotStale) || reviewRequired;
+    const reviewStatus = reviewRequired ? "review-required" : check?.status || row.earningsReviewStatus || "unknown";
+    const latestReport = row.latestReport || check?.latestReport;
+    const reportPeriod = latestReport ? [latestReport.period, latestReport.periodEnd ? `期末 ${latestReport.periodEnd}` : ""].filter(Boolean).join(" · ") : "";
+    const reportSource = latestReport?.source || latestReport?.url;
+    const newReportLink = reviewRequired && reportSource ? `<a class="earnings-report-link" data-focus-key="new-report-${escapeHtml(row.ticker)}" aria-label="查看新发布官方报告：${escapeHtml(row.company)} ${escapeHtml(row.ticker)} ${escapeHtml(reportPeriod)}" href="${safeExternalUrl(reportSource)}" target="_blank" rel="noreferrer">查看已发布报告：${escapeHtml(reportPeriod || latestReport.title)}</a>` : "";
+    const reviewNotice = reviewRequired
+      ? `<div class="ai-review-notice review-required"><strong>官方新报告已发布，旧解读待复核</strong><p>本卡保留已审核的 ${escapeHtml(row.period)} 资料，暂不参与自动评分。</p>${newReportLink}</div>`
+      : reviewStatus !== "no-newer-report"
+        ? `<div class="ai-review-notice"><strong>最新性待核对</strong><p>当前展示已审核的 ${escapeHtml(row.period)} 资料，尚无法确认是否有更新季度报告。</p></div>` : "";
     const nextReportLabel = row.nextReportLabel || row.nextReportDate || "待官方公布";
     const scheduleConfirmed = row.nextReportStatus === "confirmed";
     const scheduleSource = row.nextReportSource ? `<a class="date-source" data-focus-key="report-date-${escapeHtml(row.ticker)}" aria-label="核对日期：${escapeHtml(row.company)} ${escapeHtml(row.ticker)} 下次财报" href="${safeExternalUrl(row.nextReportSource)}" target="_blank" rel="noreferrer">核对日期</a>` : "";
-    return `<article class="ai-company-card${row.snapshotStale ? " snapshot-stale" : ""}">
+    return `<article class="ai-company-card${historical ? " snapshot-stale" : ""}" data-earnings-status="${escapeHtml(reviewStatus)}">
     <div class="ai-card-head">
       <span class="ai-layer-pill">${escapeHtml(row.layer)}</span>
-      <div class="ai-snapshot-meta"><time>${escapeHtml(row.snapshotLabel || `资料截至 ${row.released}`)}</time>${row.snapshotStale ? '<span class="ai-stale-badge">待更新</span>' : ""}</div>
+      <div class="ai-snapshot-meta"><time>${escapeHtml(row.snapshotLabel || `资料截至 ${row.released}`)}</time>${reviewRequired ? '<span class="ai-stale-badge">待复核</span>' : row.snapshotStale ? '<span class="ai-stale-badge">待更新</span>' : ""}</div>
     </div>
     <div class="ai-company-title"><div><h3>${escapeHtml(row.company)}</h3><span>${escapeHtml(row.ticker)} · ${escapeHtml(row.period)}</span></div><strong>${escapeHtml(row.role)}</strong></div>
+    ${reviewNotice}
     <p class="ai-impact">${escapeHtml(row.impact)}</p>
     <div class="ai-financials">
-      <div><span>营收</span><strong>${escapeHtml(row.revenue)}</strong></div>
-      <div><span>净利润</span><strong>${escapeHtml(row.netIncome)}</strong></div>
-      <div><span>${escapeHtml(row.marginLabel || "毛利率")}</span><strong>${escapeHtml(row.grossMargin)}</strong></div>
+      <div><span>${historical ? "历史营收" : "营收"}</span><strong>${escapeHtml(row.revenue)}</strong></div>
+      <div><span>${historical ? "历史净利润" : "净利润"}</span><strong>${escapeHtml(row.netIncome)}</strong></div>
+      <div><span>${historical ? "历史" : ""}${escapeHtml(row.marginLabel || "毛利率")}</span><strong>${escapeHtml(row.grossMargin)}</strong></div>
     </div>
     <div class="ai-readout">
-      <div><span>${row.snapshotStale ? "历史表现" : "本季表现 · 研究解读"}</span><p class="assessment ${safeTone(row.resultTone)}">${escapeHtml(row.resultAssessment)}</p></div>
-      <div><span>${row.snapshotStale ? "历史指引" : "下一期 · 研究解读"}</span><p class="assessment ${safeTone(row.guidanceTone)}">${escapeHtml(row.guidanceAssessment)}</p></div>
+      <div><span>${historical ? "历史表现" : "已审核季度表现 · 研究解读"}</span><p class="assessment ${safeTone(row.resultTone)}">${escapeHtml(row.resultAssessment)}</p></div>
+      <div><span>${historical ? "历史指引" : "已审核指引 · 研究解读"}</span><p class="assessment ${safeTone(row.guidanceTone)}">${escapeHtml(row.guidanceAssessment)}</p></div>
     </div>
-    <div class="ai-guidance-copy"><span>${row.snapshotStale ? "历史公司指引" : "公司指引 / 展望"}</span><p>${escapeHtml(row.guidance)}</p>${row.guidanceSource ? `<a class="date-source" data-focus-key="guidance-${escapeHtml(row.ticker)}" href="${safeExternalUrl(row.guidanceSource)}" target="_blank" rel="noreferrer">查看官方指引原文</a>` : ""}<small>${escapeHtml(row.note)}</small></div>
+    <div class="ai-guidance-copy"><span>${historical ? "历史公司指引" : "已审核公司指引 / 展望"}</span><p>${escapeHtml(row.guidance)}</p>${row.guidanceSource ? `<a class="date-source" data-focus-key="guidance-${escapeHtml(row.ticker)}" href="${safeExternalUrl(row.guidanceSource)}" target="_blank" rel="noreferrer">查看官方指引原文</a>` : ""}<small>${escapeHtml(row.note)}</small></div>
     <div class="ai-card-foot"><a data-focus-key="financial-${escapeHtml(row.ticker)}" aria-label="查看官方财报：${escapeHtml(row.company)} ${escapeHtml(row.ticker)} ${escapeHtml(row.period)}" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">查看官方财报</a><div class="ai-next-report"><span>下次财报 <strong>${escapeHtml(nextReportLabel)}</strong></span><i class="schedule-status ${scheduleConfirmed ? "confirmed" : "estimated"}">${scheduleLabel(row.nextReportStatus, row.nextReportBasis)}</i>${scheduleSource}</div></div>
   </article>`;
+  }).join("");
+}
+
+function renderEarningsChecks(rows = [], checks = []) {
+  if (!els.earningsStatus) return;
+  const checksByTicker = new Map(checks.map((check) => [check.ticker, check]));
+  const states = rows.map((row) => {
+    const check = checksByTicker.get(row.ticker);
+    const status = row.reviewRequired || check?.status === "review-required" ? "review-required"
+      : check?.status === "no-newer-report" || (!check && row.earningsReviewStatus === "no-newer-report") ? "no-newer-report" : "unknown";
+    return { row, check, status };
+  });
+  const reviewCount = states.filter((item) => item.status === "review-required").length;
+  const unknownCount = states.filter((item) => item.status === "unknown").length;
+  let summary = els.earningsStatus.querySelector(".earnings-check-summary") || els.earningsStatus.querySelector("p");
+  if (!summary) {
+    summary = document.createElement("p");
+    els.earningsStatus.append(summary);
+  }
+  summary.className = "earnings-check-summary";
+  const summaryText = `官方财报发布监测：${rows.length} 家公司 · ${reviewCount} 家新报告解读待复核 · ${unknownCount} 家最新性待核对。发布监测不会自动改写财报正文。`;
+  if (summary.textContent !== summaryText) summary.textContent = summaryText;
+  let details = els.earningsStatus.querySelector("details");
+  if (!details) {
+    details = document.createElement("details");
+    const label = document.createElement("summary");
+    label.dataset.focusKey = "earnings-check-details";
+    const list = document.createElement("ul");
+    list.className = "earnings-check-list";
+    details.append(label, list);
+    els.earningsStatus.append(details);
+  }
+  details.querySelector("summary").textContent = `查看 ${rows.length} 家公司的核验状态`;
+  const labels = { "review-required": "待复核", "no-newer-report": "本次未发现更新季度", unknown: "最新性待核对" };
+  details.querySelector("ul").innerHTML = states.map(({ row, check, status }) => {
+    const report = row.latestReport || check?.latestReport;
+    const reportPeriod = report ? [report.period, report.periodEnd ? `期末 ${report.periodEnd}` : ""].filter(Boolean).join(" · ") : "";
+    const source = report?.source || report?.url;
+    const checkedAt = Date.parse(check?.checkedAt);
+    const checkTime = Number.isFinite(checkedAt) && checkedAt <= Date.now() ? `最近成功核对 ${formatDate(check.checkedAt)}` : "最近成功核对时间未知";
+    const fallback = status === "review-required" ? "官方新报告已发布，原财报解读待复核，暂不参与自动评分。"
+      : status === "no-newer-report" ? `本次官方来源未发现比已审核 ${row.period} 更新的季度报告。` : "尚无法确认是否有更新季度报告。";
+    return `<li data-earnings-ticker="${escapeHtml(row.ticker)}"><div class="earnings-check-heading"><strong>${escapeHtml(row.company)} · ${escapeHtml(row.ticker)}</strong><span>${labels[status]}</span></div><p>${escapeHtml(check?.message || fallback)}</p><small>${escapeHtml(checkTime)}</small>${source ? `<a class="earnings-report-link" data-focus-key="earnings-source-${escapeHtml(row.ticker)}" aria-label="查看发布监测报告：${escapeHtml(row.company)} ${escapeHtml(row.ticker)} ${escapeHtml(reportPeriod)}" href="${safeExternalUrl(source)}" target="_blank" rel="noreferrer">查看官方报告：${escapeHtml(reportPeriod || report.title)}</a>` : ""}</li>`;
   }).join("");
 }
 
@@ -443,7 +509,7 @@ function renderErrors(errors = []) {
   const remaining = errors.length - visibleErrors.length;
   const text = state.loadError
     ? `无法更新数据：${state.loadError}。${state.data ? "已保留上次显示的数据，" : ""}请稍后重试。`
-    : errors.length ? `部分数据源暂时不可用，当前显示的数据可能不完整或来自缓存：${visibleErrors.join("；")}${remaining ? `；另有 ${remaining} 个来源` : ""}` : "";
+    : errors.length ? `部分数据或研究资料仍待核对，当前显示内容可能不完整或来自缓存：${visibleErrors.join("；")}${remaining ? `；另有 ${remaining} 项详情` : ""}` : "";
   els.error.hidden = !text;
   els.error.removeAttribute("title");
   if (message.textContent !== text) message.textContent = text;
@@ -487,16 +553,17 @@ function render() {
   state.displayValidity = `${dateInTimeZone()}:${data.cacheExpired}`;
   renderSummary(data);
   renderMethodology(data);
+  renderSourceRevisions(data.sourceRevisions);
   renderCategories(data.categories);
   renderDrivers(data);
   renderIndicators(data);
-  renderAiEarnings(data.aiEarnings, data.aiChainLayers);
+  renderAiEarnings(data.aiEarnings, data.aiChainLayers, data.earningsChecks);
   renderReminders(data.reminders);
   renderCalendarSync(data.calendarSync);
   renderPublicationChecks(data.publicationChecks);
   const calendarErrors = Object.entries(data.calendarSync?.sources || {}).filter(([, source]) => source?.error)
     .map(([key]) => `${({ bls: "CPI / 就业", fomc: "美联储", earnings: "财报" })[key] || key}日程来源暂不可用`);
-  renderErrors([...(data.errors || []), ...calendarErrors, ...(data.publicationErrors || [])]);
+  renderErrors([...(data.errors || []), ...calendarErrors, ...(data.publicationErrors || []), ...(data.earningsErrors || [])]);
   if (focusKey && !focused.isConnected && (document.activeElement === document.body || document.activeElement === focused)) {
     const matching = document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`);
     const fallback = focusKey.startsWith("driver-") ? els.drivers.querySelector(".driver-item") : els.manualButton;
@@ -507,7 +574,138 @@ function render() {
 
 function renderPublicationChecks(checks = []) {
   els.publicationStatus.hidden = checks.length === 0;
-  els.publicationStatus.innerHTML = checks.length ? `<strong>CPI / 就业发布核验</strong><span>${checks.map((row) => `<a data-focus-key="publication-${escapeHtml(row.kind)}" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">${escapeHtml(row.label)}</a>：${escapeHtml(row.message)}`).join("；")}</span>` : "";
+  els.publicationStatus.innerHTML = checks.length ? `<strong>宏观发布核验</strong><span>${checks.map((row) => `<a data-focus-key="publication-${escapeHtml(row.kind)}" href="${safeExternalUrl(row.releaseUrl || row.source)}" target="_blank" rel="noreferrer">${escapeHtml(row.label)}</a>：${escapeHtml(row.message)}`).join("；")}</span>` : "";
+}
+
+function renderSourceRevisions(revisions = []) {
+  if (!els.sourceRevisions || !els.revisionList) return;
+  const rows = Array.isArray(revisions) ? revisions.filter((row) => row && typeof row.series === "string" && typeof row.label === "string"
+    && typeof row.date === "string" && Number.isFinite(row.before) && Number.isFinite(row.after) && typeof row.firstDetectedAt === "string") : [];
+  const focused = els.sourceRevisions.contains(document.activeElement);
+  els.sourceRevisions.hidden = rows.length === 0;
+  els.sourceRevisions.querySelector("summary").textContent = `供应商历史值修订（${rows.length}条）`;
+  els.revisionList.innerHTML = rows.map((row) => `<li><strong>${escapeHtml(row.label)} · ${escapeHtml(row.series)}</strong><span>观测期 ${escapeHtml(row.date)}：${escapeHtml(row.before)} → ${escapeHtml(row.after)}</span><small>首次检测 ${escapeHtml(row.firstDetectedAt)}</small></li>`).join("");
+  if (!rows.length && focused) document.querySelector("#scoreMethodology > summary").focus({ preventScroll: true });
+}
+
+function validationObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function validationCount(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function validationTextList(value) {
+  return Array.isArray(value) && value.length <= 30 && value.every((item) => typeof item === "string" && item.length <= 3000);
+}
+
+function validHistoryReport(data) {
+  const history = data?.history;
+  const stats = (row) => validationObject(row) && validationCount(row.n)
+    && ["meanReturnPct", "meanMaxDrawdownPct", "worstMaxDrawdownPct"].every((key) => row.n === 0 ? row[key] === null || Number.isFinite(row[key]) : Number.isFinite(row[key]))
+    && (row.meanMaxDrawdownPct === null || row.meanMaxDrawdownPct <= 0)
+    && (row.worstMaxDrawdownPct === null || row.worstMaxDrawdownPct <= 0);
+  return validationObject(data) && data.version === 1 && typeof data.scoringVersion === "string" && data.scoringVersion.length <= 80
+    && typeof data.updatedAt === "string" && Number.isFinite(Date.parse(data.updatedAt))
+    && validationObject(history) && history.status === "partial-diagnostic"
+    && [history.from, history.to].every((date) => typeof date === "string" && Number.isFinite(Date.parse(date))) && history.from <= history.to
+    && validationCount(history.scheduledSamples) && validationCount(history.scoredSamples) && history.scoredSamples <= history.scheduledSamples
+    && validationObject(history.coverage) && Number.isFinite(history.coverage.min) && Number.isFinite(history.coverage.max)
+    && history.coverage.min >= 0 && history.coverage.max <= 100 && history.coverage.min <= history.coverage.max
+    && Number.isFinite(history.excludedWeight) && history.excludedWeight >= 0 && history.excludedWeight <= 100
+    && typeof history.conclusion === "string" && history.conclusion.length <= 5000 && validationTextList(history.limitations)
+    && Array.isArray(history.horizons) && history.horizons.length === 2
+    && new Set(history.horizons.map((row) => row?.tradingDays)).size === 2
+    && history.horizons.every((row) => validationObject(row) && [21, 63].includes(row.tradingDays) && validationCount(row.samples)
+      && stats(row.baseline) && row.baseline.n === row.samples && Array.isArray(row.bands) && row.bands.length <= 10
+      && row.bands.every((band) => stats(band) && typeof band.label === "string" && band.label.length <= 80));
+}
+
+function validForwardReport(data) {
+  const date = (value) => value === null || (typeof value === "string" && Number.isFinite(Date.parse(value)));
+  return validationObject(data) && data.version === 1 && ["awaiting-outcomes", "descriptive-only"].includes(data.status)
+    && validationCount(data.observedSamples) && date(data.firstObservationDate) && date(data.lastObservationDate)
+    && (data.generatedAt === null ? data.observedSamples === 0 : typeof data.generatedAt === "string" && Number.isFinite(Date.parse(data.generatedAt))) && validationTextList(data.limitations)
+    && (data.benchmark === undefined || (validationObject(data.benchmark) && (data.benchmark.error == null || (typeof data.benchmark.error === "string" && data.benchmark.error.length <= 3000))))
+    && Array.isArray(data.outcomes) && data.outcomes.length === 2 && new Set(data.outcomes.map((row) => row?.tradingDays)).size === 2
+    && data.outcomes.every((row) => validationObject(row) && [21, 63].includes(row.tradingDays)
+      && validationCount(row.samples) && validationCount(row.immatureSamples)
+      && (row.unavailableScoreSamples === undefined || validationCount(row.unavailableScoreSamples))
+      && row.samples + row.immatureSamples + (row.unavailableScoreSamples || 0) <= data.observedSamples
+      && ["meanReturnPercent", "meanDrawdownPercent", "worstDrawdownPercent"].every((key) => row[key] === null || Number.isFinite(row[key])));
+}
+
+function historicalPercent(value, samples) {
+  return samples === 0 || !Number.isFinite(value) ? "—" : `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function historyStatsCells(row) {
+  return `<td>${row.n}</td><td>${historicalPercent(row.meanReturnPct, row.n)}</td><td>${historicalPercent(row.meanMaxDrawdownPct, row.n)}</td><td>${historicalPercent(row.worstMaxDrawdownPct, row.n)}</td>`;
+}
+
+function renderHistoryReport(data) {
+  const history = data.history;
+  const columns = '<th scope="col">样本</th><th scope="col">平均收益</th><th scope="col">平均最大回撤</th><th scope="col">最差最大回撤</th>';
+  els.modelHistory.innerHTML = `<h3>历史检验：部分指标诊断</h3>
+    <p class="validation-coverage"><strong>${history.scoredSamples} / ${history.scheduledSamples} 个计划检验样本可评分</strong><span>有效权重覆盖 ${history.coverage.min}–${history.coverage.max}%</span><strong>${history.excludedWeight}% 权重未纳入本次诊断</strong></p>
+    <p class="validation-note">${escapeHtml(history.from)} 至 ${escapeHtml(history.to)} · 评分模型 ${escapeHtml(data.scoringVersion)} · 资料更新 ${escapeHtml(data.updatedAt.slice(0, 10))}</p>
+    <p>${escapeHtml(history.conclusion)}</p>
+    <p class="validation-caution">以下统计仅描述这一批可评分样本，不能用于校准完整十二项模型、风险阈值或个人仓位。低分不保证未来回撤更小。</p>
+    <div class="validation-table-wrap" tabindex="0" aria-label="历史诊断总体统计，可横向滚动"><table class="validation-table"><caption>同一批可评分样本的后续表现 · 描述统计</caption><thead><tr><th scope="col">后续交易日</th>${columns}</tr></thead><tbody>${history.horizons.map((row) => `<tr><th scope="row">${row.tradingDays} 日</th>${historyStatsCells(row.baseline)}</tr>`).join("")}</tbody></table></div>
+    <details class="validation-bands"><summary>按风险分档查看描述统计</summary>${history.horizons.map((row) => `<div class="validation-table-wrap" tabindex="0" aria-label="后续 ${row.tradingDays} 交易日分档统计，可横向滚动"><table class="validation-table"><caption>后续 ${row.tradingDays} 交易日 · 无样本的分档显示 —</caption><thead><tr><th scope="col">风险分档</th>${columns}</tr></thead><tbody>${row.bands.map((band) => `<tr><th scope="row">${escapeHtml(band.label)}</th>${historyStatsCells(band)}</tr>`).join("")}</tbody></table></div>`).join("")}</details>
+    <ul class="validation-limitations">${history.limitations.map((text) => `<li>${escapeHtml(text)}</li>`).join("")}</ul><p><a href="/model-validation.json">查看历史诊断汇总数据</a> · <a href="https://github.com/closedoor/kk-us-equity-radar/blob/main/reports/history-validation-2019-2025.json" target="_blank" rel="noreferrer">查看完整历史检验记录</a></p>`;
+}
+
+function renderForwardReport(data) {
+  const benchmarkError = data.benchmark?.error;
+  const pending = data.outcomes.some((row) => row.immatureSamples > 0);
+  const unavailable = data.outcomes.some((row) => row.unavailableScoreSamples > 0);
+  const noMature = data.outcomes.every((row) => row.samples === 0);
+  const caution = data.observedSamples === 0
+    ? "尚未积累前瞻观察样本，未来的可评分记录需等待结果成熟；这不表示收益或回撤为 0。"
+    : pending ? "尚有样本等待对应期限的价格观察成熟；这不表示收益或回撤为 0。"
+      : noMature && unavailable ? "当前没有可计算的成熟样本；无有效评分的记录不会因继续等待而自动纳入。这不表示收益或回撤为 0。"
+        : noMature ? "当前没有可计算的成熟样本，结果状态仍待核对；这不表示收益或回撤为 0。"
+          : "已成熟样本仅用于描述性观察，尚不能据此校准模型或仓位。";
+  els.forwardValidation.innerHTML = `<h3>前瞻记录：${benchmarkError ? "基准价格待核验" : data.status === "awaiting-outcomes" ? "等待结果成熟" : "描述性观察"}</h3>
+    <p>已记录 <strong>${data.observedSamples}</strong> 个观察样本${data.observedSamples && data.firstObservationDate && data.lastObservationDate ? ` · ${escapeHtml(data.firstObservationDate)} 至 ${escapeHtml(data.lastObservationDate)}` : ""}。</p>
+    ${benchmarkError ? `<p class="validation-caution">基准价格暂不可用，结果计数待核验；不将本次计数作为正常成熟进度或零收益。${escapeHtml(benchmarkError)}</p>` : `<ul class="validation-outcomes">${data.outcomes.map((row) => {
+      const excluded = row.unavailableScoreSamples || 0;
+      const unknown = data.observedSamples - row.samples - row.immatureSamples - excluded;
+      return `<li><strong>后续 ${row.tradingDays} 交易日</strong><span>${row.samples} 个已成熟 · ${row.immatureSamples} 个等待观察${excluded ? ` · ${excluded} 个无有效评分，不纳入` : ""}${unknown ? ` · ${unknown} 个结果状态待核对` : ""}</span></li>`;
+    }).join("")}</ul><p class="validation-caution">${caution}</p>`}
+    <ul class="validation-limitations">${data.limitations.map((text) => `<li>${escapeHtml(text)}</li>`).join("")}</ul><p class="validation-note">${data.generatedAt ? `记录生成 ${escapeHtml(data.generatedAt.slice(0, 10))}` : "尚无前瞻记录生成时间"} · <a href="/forward-validation.json">查看前瞻汇总数据</a> · <a href="https://github.com/closedoor/kk-us-equity-radar/tree/main/evidence/forward" target="_blank" rel="noreferrer">查看完整前瞻记录</a></p>`;
+}
+
+async function loadValidationReport(url, target, validate, renderReport, label) {
+  if (!target) return;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
+  try {
+    const response = await fetch(url, { signal: controller.signal, cache: "no-store" });
+    if (!response.ok) throw new Error("report unavailable");
+    const data = await response.json();
+    if (!validate(data)) throw new Error("invalid report");
+    renderReport(data);
+    target.dataset.state = "available";
+  } catch {
+    target.dataset.state = "unavailable";
+    target.textContent = `${label}资料待核验：暂时无法读取或格式异常。行情和评分仍独立展示。`;
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+
+let validationLoad = null;
+function loadValidationReports() {
+  if (validationLoad) return validationLoad;
+  validationLoad = Promise.allSettled([
+    loadValidationReport("/model-validation.json", els.modelHistory, validHistoryReport, renderHistoryReport, "历史检验"),
+    loadValidationReport("/forward-validation.json", els.forwardValidation, validForwardReport, renderForwardReport, "前瞻记录"),
+  ]).finally(() => { validationLoad = null; });
+  return validationLoad;
 }
 
 function renderInitialState() {
@@ -585,6 +783,7 @@ function loadData(force = false) {
       if (retryDelay !== null) scheduleRetry(retryDelay);
     }
   })();
+  loadValidationReports();
   return activeLoad;
 }
 

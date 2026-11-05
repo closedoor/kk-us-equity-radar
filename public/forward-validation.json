@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "status": "awaiting-outcomes",
+  "generatedAt": null,
+  "observedSamples": 0,
+  "firstObservationDate": null,
+  "lastObservationDate": null,
+  "outcomes": [
+    { "tradingDays": 21, "samples": 0, "immatureSamples": 0, "meanReturnPercent": null, "meanDrawdownPercent": null, "worstDrawdownPercent": null },
+    { "tradingDays": 63, "samples": 0, "immatureSamples": 0, "meanReturnPercent": null, "meanDrawdownPercent": null, "worstDrawdownPercent": null }
+  ],
+  "limitations": ["从实际抓取日开始保存原始判断，不补造历史样本。", "满21或63个有效交易日价格观察后，才计算对应结果；未成熟不记为零收益。"]
+}

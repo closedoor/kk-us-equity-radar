@@ -12,7 +12,7 @@ const recorded = JSON.parse(await readFile(path.join(root, "dashboard-cache.json
 const sourceGeneratedAt = recorded.generatedAt;
 const host = "127.0.0.1";
 const port = Number(process.env.PORT || 4173);
-const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml" };
+const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml" };
 const headers = {
   "content-security-policy": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'",
   "referrer-policy": "strict-origin-when-cross-origin",

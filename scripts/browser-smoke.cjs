@@ -15,9 +15,9 @@ async function main() {
   };
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined });
   let passed = 0;
-  async function scenario(name, check, width = 1440, height = 960) {
+  async function scenario(name, check, width = 1440, height = 960, options = {}) {
     if (process.env.RADAR_TEST && !name.includes(process.env.RADAR_TEST)) return;
-    const context = await browser.newContext({ viewport: { width, height } });
+    const context = await browser.newContext({ viewport: { width, height }, ...options });
     const page = await context.newPage();
     const errors = [];
     const failedRequests = [];
@@ -744,6 +744,155 @@ async function main() {
         })).toBe(true);
       }, width);
     }
+    await scenario("macro publication checks display the official PCE release link", async (page) => {
+      const data = fresh();
+      const releaseUrl = "https://www.bea.gov/news/2026/personal-income-and-outlays-september-2026";
+      data.publicationSchedule = { version: 1, sources: { cpi: null, employment: null, pce: {
+        period: "2026-09", publishedAt: "2026-10-29T12:30:00.000Z", checkedAt: new Date().toISOString(),
+        source: "https://www.bea.gov/data/personal-consumption-expenditures-price-index", releaseUrl, error: null,
+      } } };
+      await mock(page, () => ({ body: data }));
+      await page.goto(baseURL);
+      await expect(page.locator("#publicationStatus")).toContainText("宏观发布核验");
+      await expect(page.locator('[data-focus-key="publication-pce"]')).toHaveAttribute("href", releaseUrl);
+      await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(12);
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+      if (outputDir) await page.locator("#publicationStatus").screenshot({ path: path.join(outputDir, "macro-publication-pce-390.png"), animations: "disabled" });
+    }, 390);
+    await scenario("new official earnings reports disclose historical commentary and all eight source states", async (page) => {
+      const data = fresh();
+      const row = data.aiEarnings.find((item) => item.ticker === "GOOG");
+      const now = new Date().toISOString();
+      const report = { period: "2026 Q3", periodEnd: "2026-09-30", publishedAt: "2026-10-29T00:29:06.000Z",
+        source: "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000084/goog-20260930.htm",
+        form: "10-Q", title: "Alphabet Inc. 10-Q for period ended 2026-09-30" };
+      data.earningsSchedule = { version: 1, sources: { GOOG: { checkedAt: now, attemptedAt: now, error: null, reports: [report] } } };
+      await mock(page, () => ({ body: data }));
+      await page.goto(baseURL);
+      const card = page.locator('.ai-company-card[data-earnings-status="review-required"]');
+      await expect(card).toHaveCount(1);
+      await expect(card.locator(".ai-stale-badge")).toHaveText("待复核");
+      await expect(card).toHaveClass(/snapshot-stale/);
+      await expect(card.locator(".ai-financials")).toContainText("历史营收");
+      await expect(card.locator(".ai-financials")).toContainText(row.revenue);
+      await expect(card.locator(".ai-readout")).toContainText("历史指引");
+      await expect(card.locator('[data-focus-key="new-report-GOOG"]')).toHaveAttribute("href", report.source);
+      await expect(card).toContainText("2026 Q3");
+      await expect(page.locator("#earningsStatus")).toContainText("8 家公司 · 1 家新报告解读待复核 · 7 家最新性待核对");
+      await page.locator("#earningsStatus summary").click();
+      await expect(page.locator(".earnings-check-list li")).toHaveCount(8);
+      await expect(page.locator("#errorBanner")).toContainText("原财报解读待复核");
+      await expect(page.locator("#liveText")).toContainText("财报待复核");
+      if (outputDir) await page.locator("#earningsStatus").screenshot({ path: path.join(outputDir, "earnings-source-review.png"), animations: "disabled" });
+    }, 390);
+    await scenario("historical diagnostics disclose partial coverage and immature forward samples", async (page) => {
+      await mock(page, () => ({ body: fresh() }));
+      await page.goto(baseURL);
+      await expect(page.locator("#modelHistory")).toHaveAttribute("data-state", "available");
+      await expect(page.locator("#forwardValidation")).toHaveAttribute("data-state", "available");
+      await page.locator("#modelValidation > summary").click();
+      await expect(page.locator("#modelHistory")).toContainText("27 / 28 个计划检验样本可评分");
+      await expect(page.locator("#modelHistory")).toContainText("37–70%");
+      await expect(page.locator("#modelHistory")).toContainText("30% 权重未纳入");
+      await expect(page.locator("#modelHistory")).toContainText("不能用于校准完整十二项模型");
+      await expect(page.locator("#modelHistory")).toContainText("-33.92%");
+      await page.locator(".validation-bands > summary").click();
+      await expect(page.locator(".validation-bands")).toContainText("0–20");
+      await expect(page.locator("#forwardValidation")).toContainText("等待结果成熟");
+      await expect(page.locator("#forwardValidation")).toContainText("0 个已成熟");
+      await expect(page.locator("#forwardValidation")).toContainText("不表示收益或回撤为 0");
+      assert.ok(!/0\.0+%/.test(await page.locator("#forwardValidation").textContent()), "Immature samples must not be shown as zero-percent returns");
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+      await expect(page.locator("#actionCallout > span")).toHaveText("当前研究重点");
+      await expect(page.locator(".action-note")).toContainText("不能据此校准个人仓位");
+      await expect(page.locator(".footer")).toContainText("v4.8.0");
+      if (outputDir) await page.locator("#modelValidation").screenshot({ path: path.join(outputDir, "model-history-forward-390.png"), animations: "disabled" });
+    }, 390);
+    await scenario("auxiliary validation report failures and body timeouts never block the dashboard", async (page) => {
+      await freeze(page);
+      await mock(page, () => ({ body: fresh() }));
+      await page.addInitScript(() => {
+        const original = window.fetch;
+        window.fetch = async (...args) => {
+          if (String(args[0]) === "/model-validation.json") return { ok: true, json: async () => ({ version: 99 }) };
+          if (["/model-validation.json", "/forward-validation.json"].includes(String(args[0]))) {
+            return { ok: true, json: () => new Promise((_resolve, reject) => {
+              args[1].signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+            }) };
+          }
+          return original(...args);
+        };
+      });
+      await page.goto(baseURL);
+      await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(12);
+      const score = await page.locator("#scoreValue").textContent();
+      await page.clock.runFor(6000);
+      await expect(page.locator("#modelHistory")).toHaveAttribute("data-state", "unavailable");
+      await expect(page.locator("#forwardValidation")).toHaveAttribute("data-state", "unavailable");
+      await expect(page.locator("#modelHistory")).toContainText("待核验");
+      await expect(page.locator("#scoreValue")).toHaveText(score);
+      await expect(page.locator("#refreshButton")).toBeEnabled();
+      await page.locator('#filters button[data-filter="信用"]').click();
+      await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(1);
+    });
+    await scenario("unscorable forward samples and benchmark outages are disclosed without false waiting progress", async (page) => {
+      await freeze(page);
+      let outage = false;
+      let reportCalls = 0;
+      const now = new Date().toISOString();
+      const data = { version: 1, status: "awaiting-outcomes", observedSamples: 1, firstObservationDate: now.slice(0, 10), lastObservationDate: now.slice(0, 10),
+        generatedAt: now, limitations: ["Unscorable observations stay out of return statistics."],
+        outcomes: [21, 63].map((tradingDays) => ({ tradingDays, samples: 0, immatureSamples: 0, unavailableScoreSamples: 1,
+          meanReturnPercent: null, meanDrawdownPercent: null, worstDrawdownPercent: null })) };
+      await mock(page, () => ({ body: fresh() }));
+      await page.route("**/forward-validation.json", (route) => {
+        reportCalls += 1;
+        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...data, benchmark: { error: outage ? "Fixture benchmark outage" : null } }) });
+      });
+      await page.goto(baseURL);
+      await expect(page.locator("#forwardValidation")).toHaveAttribute("data-state", "available");
+      await page.locator("#modelValidation > summary").click();
+      await expect(page.locator("#forwardValidation")).toContainText("1 个无有效评分，不纳入");
+      await expect(page.locator("#forwardValidation")).toContainText("不会因继续等待而自动纳入");
+      outage = true;
+      const beforeManualRefresh = reportCalls;
+      await page.locator("#refreshButton").click();
+      await expect.poll(() => reportCalls).toBeGreaterThan(beforeManualRefresh);
+      await expect(page.locator("#forwardValidation")).toContainText("基准价格暂不可用，结果计数待核验");
+      await expect(page.locator("#forwardValidation .validation-outcomes li")).toHaveCount(0);
+      await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(12);
+      outage = false;
+      const beforeTimedRefresh = reportCalls;
+      await page.clock.runFor(15 * 60 * 1000);
+      await expect.poll(() => reportCalls).toBeGreaterThan(beforeTimedRefresh);
+      await expect(page.locator("#forwardValidation")).toContainText("1 个无有效评分，不纳入");
+    });
+    await scenario("vendor source revisions stay hidden when empty and disclose raw units by keyboard and touch", async (page) => {
+      let revised = false;
+      await mock(page, () => ({ body: { ...fresh(), sourceRevisions: revised ? [{
+        series: "PAYEMS", label: "非农 <img src=x onerror=evil()>", date: "2026-09-01", before: 154000, after: 153800,
+        firstDetectedAt: new Date().toISOString(),
+      }] : [] } }));
+      await page.goto(baseURL);
+      await expect(page.locator("#sourceRevisions")).toBeHidden();
+      revised = true;
+      await page.locator("#refreshButton").click();
+      const summary = page.locator("#sourceRevisions > summary");
+      await expect(summary).toHaveText("供应商历史值修订（1条）");
+      await summary.focus();
+      await summary.press("Enter");
+      await expect(page.locator("#sourceRevisions")).toHaveAttribute("open", "");
+      await expect(page.locator("#revisionList")).toContainText("154000 → 153800");
+      await expect(page.locator("#sourceRevisions")).toContainText("供应商原始序列单位");
+      await expect(page.locator("#sourceRevisions")).toContainText("不代表官方全部历史版本对账");
+      assert.equal(await page.locator("#revisionList img").count(), 0);
+      await summary.press("Space");
+      await expect(page.locator("#sourceRevisions")).not.toHaveAttribute("open", "");
+      await summary.tap();
+      await expect(page.locator("#sourceRevisions")).toHaveAttribute("open", "");
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+      if (outputDir) await page.locator("#sourceRevisions").screenshot({ path: path.join(outputDir, "source-revisions-390.png"), animations: "disabled" });
+    }, 390, 844, { hasTouch: true });
     console.log(`${passed} browser scenarios passed`);
   } finally {
     await browser.close();

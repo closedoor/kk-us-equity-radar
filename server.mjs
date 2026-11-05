@@ -9,10 +9,14 @@ import { computeScores, actionFor, INDICATOR_WEIGHTS, normalizeIndicator, SCORIN
 import { projectDashboard, resolveAiIndicator, shouldReplaceDashboard, isDashboardSnapshot, checkPolicyBounds } from "./public/dashboard-state.js";
 import { aiEarnings, aiChainLayers } from "./earnings-data.mjs";
 import { createPublicationService } from "./publication.mjs";
+import { createEarningsMonitor } from "./earnings-monitor.mjs";
+import { hydrateSourceLedger, updateSourceLedger } from "./source-revisions.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
 const dashboardCacheFile = path.join(__dirname, "dashboard-cache.json");
+const productVersion = JSON.parse(await readFile(path.join(__dirname, "package.json"), "utf8")).version;
+const buildCommit = /^[a-f0-9]{40}$/.test(process.env.RENDER_GIT_COMMIT || "") ? process.env.RENDER_GIT_COMMIT : null;
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";
 const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -31,11 +35,13 @@ let lastDashboardAttemptAt = 0;
 let refreshPromise = null;
 let lastRefreshErrors = [];
 let dashboardWritePromise = Promise.resolve();
+let sourceLedger = hydrateSourceLedger(null);
 
 const weights = INDICATOR_WEIGHTS;
 
 const calendarService = createCalendarService({ fetchText, aiEarnings });
-const publicationService = createPublicationService({ fetchText });
+const publicationService = createPublicationService({ fetchText, onChange: () => publishDashboard() });
+const earningsMonitor = createEarningsMonitor({ fetchText, aiEarnings, onChange: () => publishDashboard() });
 
 const fredMeta = {
   DCOILBRENTEU: ["Brent 现货", "日度"],
@@ -213,7 +219,7 @@ function seriesData(result) {
   return result?.ok ? result.data : [];
 }
 
-function indicator({ id, title, category, weight, risk, value, detail, date, description, why, source, cadence, confidence = "high", sparkline = [], available = true, unavailableReason = "数据不足", methodology = "", breakdown = null, judgment = null }) {
+function indicator({ id, title, category, weight, risk, value, detail, date, description, why, source, cadence, confidence = "high", sparkline = [], available = true, unavailableReason = "数据不足", methodology = "", breakdown = null, judgment = null, inputDates }) {
   const normalizedRisk = available && Number.isFinite(risk) ? clamp(risk) : null;
   return {
     id,
@@ -237,6 +243,7 @@ function indicator({ id, title, category, weight, risk, value, detail, date, des
     methodology,
     breakdown,
     judgment,
+    ...(inputDates ? { inputDates } : {}),
   };
 }
 
@@ -491,6 +498,7 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
       value: Number.isFinite(headlineCpiYoy) ? `${round(headlineCpiYoy, 1)}%` : "暂无数据", detail: `整体 CPI 同比；三个月年化 ${Number.isFinite(headlineCpi3m) ? round(headlineCpi3m, 1) : "--"}%`,
       date: latest(headlineCpiNsa)?.date || latest(headlineCpi)?.date, description: "同比采用 BLS 未季调正式口径，月率与三个月年化采用季调数据；重点看核心 CPI、核心 PCE 的短期趋势。卡片日期表示最新数据期，不冒充官方发布日期。", why: "通胀黏性决定美联储能否降息，也决定估值压力会持续多久。",
       source: { label: "BLS / BEA / FRED · CPI 与 PCE", url: "https://www.bls.gov/news.release/cpi.nr0.htm" }, cadence: "月度", confidence: Number.isFinite(inflationRisk) ? "high" : "unavailable", unavailableReason: "子数据不足", sparkline: spark(headlineCpi, 18), methodology: "CPI 四条季调与未季调序列先对齐同月；整体 CPI 三个月年化和同比占 60%，核心 PCE 与核心 CPI 占 40%。",
+      inputDates: { headlinePce: latest(headlinePce)?.date ?? null, corePce: latest(corePce)?.date ?? null },
       breakdown: [
         { label: "CPI", value: Number.isFinite(headlineCpiYoy) ? `${round(headlineCpiYoy, 1)}%` : "--", detail: `${monthLabel(latest(headlineCpiNsa) || latest(headlineCpi))} · 月率 ${signedPercent(headlineCpiMom)}` },
         { label: "核心 CPI", value: Number.isFinite(coreCpiYoy) ? `${round(coreCpiYoy, 1)}%` : "--", detail: `${monthLabel(latest(coreCpiNsa) || latest(coreCpi))} · 月率 ${signedPercent(coreCpiMom)}` },
@@ -592,9 +600,13 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
 
   return {
     dataQualityVersion: 1,
+    productVersion,
+    buildCommit,
     generatedAt: new Date().toISOString(),
+    _sourceObservations: Object.fromEntries(fredResults.filter(([, result]) => result.ok).map(([id, result]) => [id, result.data])),
     ...model,
     scoringContext,
+    validationReference: spLast ? { series: "SP500", date: spLast.date, close: spLast.value } : null,
     action: actionFor(model.score, model.coverage),
     categories,
     indicators,
@@ -669,12 +681,13 @@ function resolveDashboardCalendar(snapshot) {
     calendarSchedule: calendarService.snapshot(),
     calendarSync: calendarService.syncStatus(),
     publicationSchedule: publicationService.snapshot(),
+    earningsSchedule: earningsMonitor.snapshot(),
   });
 }
 
 function publishDashboard(snapshot = dashboardCache) {
   if (!snapshot) return Promise.resolve(null);
-  dashboardCache = resolveDashboardCalendar(snapshot);
+  dashboardCache = resolveDashboardCalendar({ ...snapshot, sourceLedger });
   return persistDashboard(dashboardCache).then(() => dashboardCache);
 }
 
@@ -693,11 +706,17 @@ function refreshDashboard(force = false) {
     .then(() => publicationService.refresh({ force }))
     .catch((error) => console.warn(`[publication] refresh failed: ${error.message}`))
     .then(() => publishDashboard());
+  const earningsRefresh = Promise.resolve()
+    .then(() => earningsMonitor.refresh({ force }))
+    .catch((error) => console.warn(`[earnings-monitor] refresh failed: ${error.message}`))
+    .then(() => publishDashboard());
   const marketRefresh = Promise.resolve()
     .then(() => buildDashboard())
     .then((next) => {
+      const { _sourceObservations, ...marketSnapshot } = next;
+      sourceLedger = updateSourceLedger(sourceLedger, _sourceObservations, new Date().toISOString()).ledger;
       lastRefreshErrors = next.errors;
-      const resolved = resolveDashboardCalendar(next);
+      const resolved = resolveDashboardCalendar(marketSnapshot);
       // Official evidence may make a previously higher-coverage cache obsolete.
       // Project both candidates before the existing cache-retention comparison.
       if (dashboardCache) dashboardCache = resolveDashboardCalendar(dashboardCache);
@@ -713,7 +732,7 @@ function refreshDashboard(force = false) {
       return dashboardCache;
     });
   // Market publication is independent; calendars and publication checks also settle.
-  refreshPromise = Promise.allSettled([marketRefresh, calendarRefresh, publicationRefresh])
+  refreshPromise = Promise.allSettled([marketRefresh, calendarRefresh, publicationRefresh, earningsRefresh])
     .then((results) => {
       const failed = results.find((result) => result.status === "rejected");
       if (failed) {
@@ -750,13 +769,19 @@ async function handleRequest(req, res) {
     if (force) refreshDashboard(true);
     else if (!fresh) refreshDashboard();
     const cacheAgeMs = Math.max(0, Date.now() - dashboardCachedAt);
+    const { sourceLedger: _privateLedger, ...publicCache } = dashboardCache;
     return sendJson(res, 200, projectDashboard({
-      ...dashboardCache,
+      ...publicCache,
+      productVersion,
+      buildCommit,
+      validationReference: dashboardCache.validationReference ?? null,
+      sourceRevisions: sourceLedger.revisions.map(row => ({ ...row, label: fredMeta[row.series]?.[0] || row.series })),
       reminders: calendarService.buildReminders(),
       aiEarnings: calendarService.resolvedAiEarnings(),
       calendarSchedule: calendarService.snapshot(),
       calendarSync: calendarService.syncStatus(),
       publicationSchedule: publicationService.snapshot(),
+      earningsSchedule: earningsMonitor.snapshot(),
       errors: lastRefreshErrors.length ? lastRefreshErrors : dashboardCache.errors,
       cache: !force && cacheAgeMs < CACHE_TTL_MS,
       stale: cacheAgeMs >= CACHE_TTL_MS,
@@ -801,6 +826,8 @@ try {
   lastRefreshErrors = Array.isArray(dashboardCache.errors) ? dashboardCache.errors : [];
   calendarService.hydrate(dashboardCache.calendarSchedule);
   publicationService.hydrate(dashboardCache.publicationSchedule);
+  earningsMonitor.hydrate(dashboardCache.earningsSchedule);
+  sourceLedger = hydrateSourceLedger(dashboardCache.sourceLedger);
 } catch {
   dashboardCache = null;
 }

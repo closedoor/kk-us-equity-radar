@@ -67,11 +67,11 @@
             <div><span>同向共振修正</span><strong id="upliftValue">--</strong><small>风险链同时恶化与高位脆弱</small></div>
           </div>
           <div class="action-callout" id="actionCallout">
-            <span>当前风险动作</span>
+            <span>当前研究重点</span>
             <strong id="actionLabel">等待数据</strong>
-            <p id="actionDetail">正在计算 12 项指标的加权结果。</p>
+            <p id="actionDetail">正在整理 12 项指标的研究线索。</p>
           </div>
-          <p class="action-note">这是基于模型的条件式风险管理提示，不是针对个人账户的买卖指令。</p>
+          <p class="action-note">部分指标用于历史状态诊断；评分尚不能据此校准个人仓位，也不构成买卖指令。</p>
           <div class="band-scale" aria-label="风险区间">
             <span class="band-low"></span><span class="band-watch"></span><span class="band-elevated"></span><span class="band-high"></span><span class="band-crisis"></span>
             <i id="bandMarker"></i>
@@ -86,6 +86,19 @@
       <details class="methodology shell" id="scoreMethodology">
         <summary>评分口径与权重<span>规则评分 · 非下跌概率</span></summary>
         <div id="methodologyContent"><p class="methodology-note">等待有效数据。</p></div>
+      </details>
+
+      <details class="source-revisions shell" id="sourceRevisions" hidden>
+        <summary data-focus-key="source-revision-details">供应商历史值修订</summary>
+        <p>以下使用供应商原始序列单位，未换算为风险分；例如 PAYEMS 以千人为单位，CPI 为指数值。这里只记录本功能启用后检测到的同一序列、同一观测期数值变化，不代表官方全部历史版本对账。</p>
+        <ul id="revisionList"></ul>
+      </details>
+
+      <details class="model-validation shell" id="modelValidation">
+        <summary>模型历史检验与前瞻记录<span>部分指标诊断 · 尚不支持仓位校准</span></summary>
+        <p class="validation-note">低分不保证未来回撤更小。历史描述统计与持续积累的前瞻记录，将分别说明样本、覆盖和局限。</p>
+        <div class="validation-section" id="modelHistory" role="status" aria-live="polite"><p>历史检验资料正在核验。</p></div>
+        <div class="validation-section" id="forwardValidation" role="status" aria-live="polite"><p>前瞻观察记录正在核验。</p></div>
       </details>
 
       <section class="drivers shell" aria-labelledby="driversTitle">
@@ -125,6 +138,7 @@
           <div><p class="eyebrow">AI EARNINGS WATCH</p><h2 id="aiTitle">AI 产业链财报与指引</h2></div>
           <p>核心名单按“能否改变全行业需求或供给预期”筛选，而不是按市值排名。覆盖算力、晶圆、云资本开支和 HBM 四个关键层级。</p>
         </div>
+        <div class="earnings-status" id="earningsStatus" role="status" aria-live="polite"><p>财报发布进度正在核对；当前解读是否覆盖最新报告仍待确认。</p></div>
         <div class="ai-chain-map" id="aiChainMap" aria-label="AI产业链四层地图"></div>
         <div class="ai-selection-note"><strong>为什么是这 8 家？</strong><span>它们分别控制算力平台、定制芯片与互连、先进制造与封装、云端资本开支、HBM 与存储供给。三星、Meta、AMD、ASML 保留为次级观察名单，当其财报成为主要风险来源时再进入核心组。</span></div>
         <div class="ai-company-grid" id="aiCompanyGrid"></div>
@@ -140,7 +154,7 @@
     </main>
 
     <footer class="footer shell">
-      <span>US EQUITY RISK RADAR · v4.7.5</span>
+      <span>US EQUITY RISK RADAR · v4.8.0</span>
       <span>数据：公司 IR / SEC / BLS / BEA / Federal Reserve / FRED / Cboe / Nasdaq</span>
     </footer>
 

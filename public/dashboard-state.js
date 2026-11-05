@@ -1,5 +1,6 @@
 import { computeScores, actionFor, INDICATOR_WEIGHTS, normalizeIndicator, SCORING_VERSION, SCORING_NOTE } from "./risk-model.js";
 import { applyPublicationChecks, isPublicationSchedule } from "./publication-state.js";
+import { applyEarningsChecks, isEarningsSchedule } from "./earnings-state.js";
 
 export const MAX_MARKET_CACHE_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -28,6 +29,7 @@ export function isDashboardSnapshot(data) {
     && (data.dataQualityVersion === undefined || (Number.isInteger(data.dataQualityVersion) && data.dataQualityVersion > 0))
     && (data.refreshing === undefined || typeof data.refreshing === "boolean")
     && (data.scoringContext === undefined || object(data.scoringContext))
+    && optionalObject(data.validationReference, row => row.series === "SP500" && validDate(row.date) && Number.isFinite(row.close) && row.close > 0)
     && rows(data.aiEarnings, company)
     && data.aiEarnings.length > 0 && new Set(data.aiEarnings.map((row) => row.ticker)).size === data.aiEarnings.length
     && rows(data.categories, (row) => object(row) && typeof row.name === "string" && row.name.length > 0)
@@ -37,6 +39,8 @@ export function isDashboardSnapshot(data) {
       && textFields(row, ["value", "detail", "description", "why", "date", "status", "confidence", "cadence", "unavailableReason"])
       && optionalObject(row.source, (source) => textFields(source, ["url", "label"]))
       && optionalObject(row.judgment, (judgment) => textFields(judgment, ["tone", "label", "text"]))
+      && (row.inputDates === undefined || (object(row.inputDates) && Object.keys(row.inputDates).length === 2
+        && ["headlinePce", "corePce"].every(key => Object.hasOwn(row.inputDates, key) && (row.inputDates[key] === null || validDate(row.inputDates[key])))))
       && (row.available ? Number.isFinite(row.risk) : row.risk === null)
       && data.categories.some((category) => category.name === row.category)
       && (row.risk === null || (Number.isFinite(row.risk) && row.risk >= 0 && row.risk <= 100))
@@ -50,7 +54,11 @@ export function isDashboardSnapshot(data) {
       && (row.date == null || validDate(row.date)) && optionalRows(row.companies, (item) => object(item) && textFields(item, ["ticker", "released", "next", "status", "basis", "source"])))
     && optionalObject(data.calendarSchedule, calendarSchedule)
     && (data.publicationSchedule == null || isPublicationSchedule(data.publicationSchedule))
+    && (data.earningsSchedule == null || isEarningsSchedule(data.earningsSchedule))
     && optionalObject(data.calendarSync, (sync) => timestamp(sync.updatedAt) && calendarSources(sync.sources))
+    && optionalRows(data.sourceRevisions, row => object(row) && typeof row.series === "string" && /^[A-Z0-9]+$/.test(row.series)
+      && textFields(row, ["label"]) && validDate(row.date) && Number.isFinite(row.before) && Number.isFinite(row.after)
+      && typeof row.firstDetectedAt === "string" && timestamp(row.firstDetectedAt))
     && optionalRows(data.errors, (error) => typeof error === "string"));
 }
 
@@ -134,7 +142,7 @@ function resolveReminders(rows = [], aiEarnings, nowMs) {
 
 export function resolveAiIndicator(template, rows) {
   const toneRisk = { positive: 0.12, mixed: 0.34, negative: 0.75 };
-  const current = rows.filter((row) => !row.snapshotStale && Object.hasOwn(toneRisk, row.guidanceTone));
+  const current = rows.filter((row) => !row.snapshotStale && !row.reviewRequired && Object.hasOwn(toneRisk, row.guidanceTone));
   const available = current.length >= 3;
   const risk = available ? Math.min(100, (current.reduce((sum, row) => sum + toneRisk[row.guidanceTone], 0) / current.length + 0.03) * 100) : null;
   const latest = [...current].sort((a, b) => a.released.localeCompare(b.released)).at(-1);
@@ -154,7 +162,8 @@ export function resolveAiIndicator(template, rows) {
 export function projectDashboard(data, nowMs = Date.now()) {
   const expired = cacheExpired(data, nowMs);
   const cacheAgeMs = Math.max(0, nowMs - Date.parse(data.generatedAt)) || 0;
-  const aiEarnings = resolveAiSnapshots(data.aiEarnings, nowMs);
+  const earnings = applyEarningsChecks(data.aiEarnings, data.earningsSchedule, nowMs);
+  const aiEarnings = resolveAiSnapshots(earnings.aiEarnings, nowMs);
   const reminders = resolveReminders(data.reminders, aiEarnings, nowMs);
   const policyErrors = [];
   const policyIndicators = data.indicators.map((item) => {
@@ -179,6 +188,7 @@ export function projectDashboard(data, nowMs = Date.now()) {
     const weight = items.reduce((sum, item) => sum + item.weight, 0);
     return { ...category, weight, score: weight ? Math.round(items.reduce((sum, item) => sum + item.points, 0) / weight * 1000) / 10 : null };
   });
-  return { ...data, ...model, aiEarnings, reminders, indicators, categories, errors: [...new Set([...(data.errors || []), ...policyErrors])], publicationChecks: publication.checks, publicationErrors: publication.errors, cacheAgeMs, stale: expired || cacheAgeMs >= 15 * 60_000, cacheExpired: expired,
+  return { ...data, ...model, aiEarnings, reminders, indicators, categories, errors: [...new Set([...(data.errors || []), ...policyErrors])], publicationChecks: publication.checks, publicationErrors: publication.errors,
+    earningsChecks: earnings.checks, earningsErrors: earnings.errors, cacheAgeMs, stale: expired || cacheAgeMs >= 15 * 60_000, cacheExpired: expired,
     methodology: { ...data.methodology, version: SCORING_VERSION, note: SCORING_NOTE }, action: actionFor(model.score, model.coverage) };
 }

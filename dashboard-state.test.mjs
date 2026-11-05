@@ -13,6 +13,14 @@ function sample() {
   return data;
 }
 
+test("revision metadata cannot introduce malformed nested display values", () => {
+  const row = { series: "PAYEMS", label: "非农就业", date: "2026-08-01", before: 150000, after: 150010, firstDetectedAt: "2026-09-06T11:00:00Z" };
+  assert.equal(isDashboardSnapshot({ ...sample(), sourceRevisions: [row] }), true);
+  for (const changed of [{ label: { toString: null } }, { before: "150000" }, { after: null }, { series: [] }, { date: "2026-02-31" }, { firstDetectedAt: "invalid" }]) {
+    assert.equal(isDashboardSnapshot({ ...sample(), sourceRevisions: [{ ...row, ...changed }] }), false);
+  }
+});
+
 test("market caches stop scoring at 24 hours while independent financial reports remain visible", () => {
   const data = sample();
   const before = projectDashboard(data, now + MAX_MARKET_CACHE_AGE_MS - 1);
@@ -144,6 +152,75 @@ test("old cached weights and inconsistent points migrate without changing source
 test("structurally broken disk caches are rejected before API rendering", () => {
   assert.equal(isDashboardSnapshot(sample()), true);
   for (const data of [null, {}, { ...sample(), indicators: null }, { ...sample(), indicators: [{}] }, { ...sample(), generatedAt: "invalid" }]) {
+    assert.equal(isDashboardSnapshot(data), false);
+  }
+});
+
+test("PCE input dates distinguish valid unknown components from malformed structured metadata", () => {
+  for (const inputDates of [
+    undefined,
+    { headlinePce: "2026-08-01", corePce: "2026-08-01" },
+    { headlinePce: null, corePce: null },
+    { headlinePce: "2026-08-01", corePce: null },
+  ]) {
+    const data = sample();
+    if (inputDates !== undefined) data.indicators.find((row) => row.id === "inflation").inputDates = inputDates;
+    assert.equal(isDashboardSnapshot(data), true);
+  }
+  for (const inputDates of [
+    null, [], "2026-08-01", {}, { corePce: "2026-08-01" },
+    { headlinePce: "2026-08-01", corePce: "2026-02-30" },
+    { headlinePce: "2026-13-01", corePce: "2026-08-01" },
+    { headlinePce: "2026-08-01", corePce: {} },
+    { headlinePce: "2026-08-01", corePce: "2026-08-01", extra: "2026-08-01" },
+  ]) {
+    const data = sample();
+    data.indicators.find((row) => row.id === "inflation").inputDates = inputDates;
+    assert.equal(isDashboardSnapshot(data), false, JSON.stringify(inputDates));
+  }
+});
+
+test("numeric validation references cannot accept malformed prices, dates, or benchmark identities", () => {
+  for (const validationReference of [undefined, null, { series: "SP500", date: "2026-09-04", close: 5000 }]) {
+    const data = sample();
+    if (validationReference !== undefined) data.validationReference = validationReference;
+    assert.equal(isDashboardSnapshot(data), true);
+  }
+  for (const validationReference of [
+    [], "5000", {}, { series: "SP500", date: "2026-02-30", close: 5000 },
+    { series: "VIX", date: "2026-09-04", close: 5000 },
+    ...[0, -1, NaN, Infinity, "5000", null, {}].map((close) => ({ series: "SP500", date: "2026-09-04", close })),
+  ]) {
+    const data = sample();
+    data.validationReference = validationReference;
+    assert.equal(isDashboardSnapshot(data), false);
+  }
+});
+
+test("earnings evidence must be structurally valid before a dashboard cache can be hydrated", () => {
+  const record = {
+    checkedAt: "2026-08-01T12:00:00Z", attemptedAt: "2026-08-01T12:00:00Z", error: null,
+    reports: [{ period: "FY2026 Q4", periodEnd: "2026-06-30", publishedAt: "2026-07-30T12:00:00Z",
+      source: "https://www.sec.gov/Archives/edgar/data/789019/000078901926000001/msft-20260630.htm", form: "10-K", title: "MSFT annual report" }],
+  };
+  const schedule = { version: 1, sources: { MSFT: record } };
+  for (const earningsSchedule of [undefined, null, { version: 1, sources: {} }, schedule]) {
+    const data = sample();
+    if (earningsSchedule !== undefined) data.earningsSchedule = earningsSchedule;
+    assert.equal(isDashboardSnapshot(data), true);
+  }
+  const malformed = [[], {}, { version: 2, sources: {} }, { version: 1, sources: [] }, { version: 1, sources: { UNKNOWN: record } }];
+  for (const edit of [
+    (value) => { value.sources.MSFT.reports = "reports"; },
+    (value) => { value.sources.MSFT.checkedAt = "not a timestamp"; },
+    (value) => { value.sources.MSFT.error = {}; },
+    (value) => { value.sources.MSFT.reports[0].periodEnd = "2026-02-30"; },
+    (value) => { value.sources.MSFT.reports[0].publishedAt = "2026-08-02T12:00:00Z"; },
+    (value) => { value.sources.MSFT.reports[0].source = "https://example.com/report"; },
+    (value) => { value.sources.MSFT.reports[0].title = {}; },
+  ]) { const value = structuredClone(schedule); edit(value); malformed.push(value); }
+  for (const earningsSchedule of malformed) {
+    const data = sample(); data.earningsSchedule = earningsSchedule;
     assert.equal(isDashboardSnapshot(data), false);
   }
 });

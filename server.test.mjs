@@ -11,8 +11,23 @@ import { isDashboardSnapshot } from "./public/dashboard-state.js";
 
 const fixture = JSON.parse(await readFile(new URL("./dashboard-cache.json", import.meta.url), "utf8"));
 const earningsFixture = JSON.parse(await readFile(new URL("./fixtures/earnings-data.json", import.meta.url), "utf8"));
+const beaFixture = JSON.parse(await readFile(new URL("./fixtures/bea-pce-publication.json", import.meta.url), "utf8"));
 const earningsFixtureModule = `export const aiEarnings = ${JSON.stringify(earningsFixture.aiEarnings)};\nexport const aiChainLayers = ${JSON.stringify(earningsFixture.aiChainLayers)};\n`;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const stalledFetchPreload = `
+  let startedSecRequests = 0;
+  let readyQueued = false;
+  globalThis.fetch = (value, { signal }) => new Promise((_resolve, reject) => {
+    process.stdout.write("TEST_FETCH\\n");
+    const url = new URL(value);
+    if (url.hostname === "data.sec.gov" && url.pathname.startsWith("/submissions/")) startedSecRequests += 1;
+    if (startedSecRequests === 2 && !readyQueued) {
+      readyQueued = true;
+      setImmediate(() => process.stdout.write("TEST_STALLED_READY"));
+    }
+    signal.addEventListener("abort", () => reject(new Error("test timeout")), { once: true });
+  });
+`;
 
 async function withOfflineServer(cache, check, { stalled = false, preload = null } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "radar-server-test-"));
@@ -23,17 +38,17 @@ async function withOfflineServer(cache, check, { stalled = false, preload = null
   await new Promise((resolve) => reservation.close(resolve));
   let child;
   try {
-    for (const name of ["server.mjs", "calendar.mjs", "publication.mjs", "market-data.mjs", "package.json", "public"]) {
+    for (const name of ["server.mjs", "calendar.mjs", "publication.mjs", "earnings-monitor.mjs", "source-revisions.mjs", "market-data.mjs", "package.json", "public"]) {
       await cp(new URL(name, import.meta.url), path.join(dir, name), { recursive: true });
     }
     // Keep historical scenario dates independent of the current production quarter.
     await writeFile(path.join(dir, "earnings-data.mjs"), earningsFixtureModule);
     await writeFile(path.join(dir, "dashboard-cache.json"), JSON.stringify(cache));
     await writeFile(path.join(dir, "offline.mjs"), preload ?? (stalled
-      ? 'let readyQueued = false; globalThis.fetch = (_url, { signal }) => new Promise((_resolve, reject) => { process.stdout.write("TEST_FETCH\\n"); if (!readyQueued) { readyQueued = true; setImmediate(() => process.stdout.write("TEST_STALLED_READY")); } signal.addEventListener("abort", () => reject(new Error("test timeout")), { once: true }); });'
+      ? stalledFetchPreload
       : 'globalThis.fetch = async () => { throw new Error("test upstream outage"); };'));
     child = spawn(process.execPath, ["--import", path.join(dir, "offline.mjs"), path.join(dir, "server.mjs")], {
-      cwd: dir, env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) }, stdio: ["ignore", "pipe", "pipe"],
+      cwd: dir, env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) }, stdio: ["ignore", "pipe", "pipe", "ipc"],
     });
     let output = "";
     child.stdout.on("data", (chunk) => { output += chunk; });
@@ -42,8 +57,8 @@ async function withOfflineServer(cache, check, { stalled = false, preload = null
     while (!output.includes("已启动") && Date.now() < deadline && child.exitCode === null) await delay(50);
     assert.match(output, /已启动/, output);
     if (stalled && preload === null) {
-      // Same-stream readiness follows all initial fetch logs; a listening log
-      // alone can arrive before the startup refresh has entered its pending wave.
+      // The monitor starts its second held SEC request after its pacing gate.
+      // Same-stream readiness follows that last initial worker and all fetch logs.
       while (!output.includes("TEST_STALLED_READY") && Date.now() < deadline && child.exitCode === null) await delay(10);
       assert.match(output, /TEST_STALLED_READY/, output);
     }
@@ -71,7 +86,8 @@ async function withOfflineServer(cache, check, { stalled = false, preload = null
       req.setTimeout(3000, () => req.destroy(new Error("HTTP test timed out")));
       req.end();
     });
-    await check({ read, finished, request, dir, requestCount: () => output.split("TEST_FETCH").length - 1 });
+    const send = (message) => new Promise((resolve, reject) => child.send(message, (error) => error ? reject(error) : resolve()));
+    await check({ read, finished, request, dir, send, requestCount: () => output.split("TEST_FETCH").length - 1 });
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill("SIGTERM");
@@ -119,6 +135,25 @@ test("a malformed saved calendar cannot enter service hydration", async () => {
   });
 });
 
+test("malformed input dates, market references, and earnings schedules cannot bootstrap disk caches", async (t) => {
+  const cases = [
+    ["inputDates", (cache) => { cache.indicators.find((row) => row.id === "inflation").inputDates = { headlinePce: "2026-09-01", corePce: "2026-02-30" }; }],
+    ["validationReference", (cache) => { cache.validationReference = { series: "SP500", date: "2026-11-04", close: "5000" }; }],
+    ["earningsSchedule", (cache) => { cache.earningsSchedule = { version: 1, sources: { MSFT: { reports: "not an array" } } }; }],
+  ];
+  for (const [name, edit] of cases) {
+    await t.test(name, async () => {
+      const cache = { ...structuredClone(fixture), generatedAt: new Date().toISOString() };
+      edit(cache);
+      await withOfflineServer(cache, async ({ read }) => {
+        const result = await read();
+        assert.equal(result.status, 202);
+        assert.equal(result.body.warming, true);
+      }, { stalled: true });
+    });
+  }
+});
+
 const publicationClock = "2026-10-15T16:00:00.000Z";
 const publicationClockPreload = `
   const PublicationNativeDate = Date;
@@ -131,6 +166,105 @@ const publicationHeaders = {
   cpi: "Transmission of material in this release is embargoed until 8:30 a.m. (ET) Wednesday, October 14, 2026 USDL-26-1574 CONSUMER PRICE INDEX - SEPTEMBER 2026",
   employment: "Transmission of material in this news release is embargoed until USDL-26-1549 8:30 a.m. (ET) Friday, October 2, 2026 THE EMPLOYMENT SITUATION - SEPTEMBER 2026",
 };
+
+const pceClock = "2026-10-29T16:00:00.000Z";
+const pceClockPreload = publicationClockPreload.replaceAll(publicationClock, pceClock);
+function oldCorePceCache() {
+  const cache = { ...structuredClone(fixture), generatedAt: pceClock, errors: [] };
+  for (const row of cache.indicators) {
+    if (["inflation", "unemployment", "payrolls"].includes(row.id)) row.date = "2026-09-01";
+    if (row.id !== "inflation") continue;
+    row.inputDates = { headlinePce: "2026-09-01", corePce: "2026-08-01" };
+    row.breakdown = row.breakdown.map((metric) => metric.label === "PCE"
+      ? { ...metric, detail: "2026 年 9 月 · 月率 +0.5%" } : metric);
+  }
+  return cache;
+}
+
+test("a newly verified PCE release removes obsolete core inputs before held markets finish and cannot revive cached scores", async () => {
+  const cache = oldCorePceCache();
+  const preload = pceClockPreload + `
+    const bea = ${JSON.stringify(beaFixture)};
+    const publicationHeaders = ${JSON.stringify(publicationHeaders)};
+    let releasePce;
+    const pceGate = new Promise((resolve) => { releasePce = resolve; });
+    process.on("message", (message) => { if (message.type === "release-pce") releasePce(); });
+    globalThis.fetch = async (value, { signal }) => {
+      const url = new URL(value);
+      if (url.href === bea.indexUrl) return new Response(bea.indexHtml);
+      if (url.href === bea.releaseUrl) { await pceGate; return new Response(bea.releaseHtml); }
+      if (url.pathname === "/news.release/cpi.nr0.htm") return new Response(publicationHeaders.cpi);
+      if (url.pathname === "/news.release/empsit.nr0.htm") return new Response(publicationHeaders.employment);
+      return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("test held market source")), { once: true }));
+    };
+  `;
+  await withOfflineServer(cache, async ({ read, send, dir }) => {
+    const before = await read();
+    assert.equal(before.status, 200);
+    assert.equal(before.body.coverage, 90);
+    assert.ok(Number.isFinite(before.body.score));
+    await send({ type: "release-pce" });
+    let body;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      ({ body } = await read());
+      if (body.publicationChecks?.some((row) => row.kind === "pce" && row.status === "lagging")) break;
+      await delay(20);
+    }
+    for (const result of [body, (await read("?refresh=1")).body, (await read()).body]) {
+      assert.equal(result.generatedAt, cache.generatedAt);
+      assert.equal(result.refreshing, true);
+      assert.equal(result.coverage, 57);
+      assert.equal(result.score, null);
+      assert.equal(result.action.key, "unavailable");
+      assert.equal(result.publicationSchedule.sources.pce.period, "2026-09");
+      assert.equal(result.publicationSchedule.sources.pce.releaseUrl, beaFixture.releaseUrl);
+      for (const id of ["inflation", "fed", "unemployment", "payrolls"]) {
+        const row = result.indicators.find((item) => item.id === id);
+        assert.equal(row.available, false, id); assert.equal(row.risk, null); assert.equal(row.points, null);
+        assert.equal(row.value, cache.indicators.find((item) => item.id === id).value);
+      }
+      const inflation = result.indicators.find((row) => row.id === "inflation");
+      assert.deepEqual(inflation.inputDates, cache.indicators.find((row) => row.id === "inflation").inputDates);
+      assert.deepEqual(inflation.breakdown, cache.indicators.find((row) => row.id === "inflation").breakdown);
+      assert.deepEqual(result.errors, []);
+      assert.match(result.publicationErrors.join(" "), /PCE.*2026-09.*核心 PCE.*2026-08/);
+    }
+    let stored;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      stored = JSON.parse(await readFile(path.join(dir, "dashboard-cache.json"), "utf8"));
+      if (stored.publicationSchedule?.sources.pce?.period === "2026-09") break;
+      await delay(20);
+    }
+    assert.equal(stored.publicationSchedule.sources.pce.period, "2026-09");
+    assert.equal(stored.coverage, 57);
+  }, { preload });
+});
+
+test("a verified PCE lower bound survives offline restart without re-enabling obsolete core inputs", async () => {
+  const cache = oldCorePceCache();
+  cache.publicationSchedule = { version: 1, sources: { cpi: null, employment: null, pce: {
+    period: "2026-09", publishedAt: "2026-10-29T12:30:00.000Z", checkedAt: "2026-10-29T13:00:00.000Z",
+    source: beaFixture.indexUrl, releaseUrl: beaFixture.releaseUrl, error: null,
+  } } };
+  await withOfflineServer(cache, async ({ read, finished }) => {
+    const first = (await read()).body;
+    const after = await finished();
+    for (const body of [first, after]) {
+      assert.equal(body.generatedAt, cache.generatedAt);
+      assert.equal(body.coverage, 57);
+      assert.equal(body.score, null);
+      assert.equal(body.publicationSchedule.sources.pce.period, "2026-09");
+      assert.equal(body.publicationSchedule.sources.pce.releaseUrl, beaFixture.releaseUrl);
+      assert.equal(body.publicationSchedule.sources.pce.checkedAt, cache.publicationSchedule.sources.pce.checkedAt);
+      for (const id of ["inflation", "fed", "unemployment", "payrolls"]) assert.equal(body.indicators.find((row) => row.id === id).available, false, id);
+      const inflation = body.indicators.find((row) => row.id === "inflation");
+      assert.equal(inflation.value, cache.indicators.find((row) => row.id === "inflation").value);
+      assert.deepEqual(inflation.inputDates, cache.indicators.find((row) => row.id === "inflation").inputDates);
+    }
+    assert.match(after.publicationSchedule.sources.pce.error, /test PCE outage/);
+    assert.equal(after.publicationSchedule.sources.pce.attemptedAt, pceClock);
+  }, { preload: pceClockPreload + `globalThis.fetch = async () => { throw new Error("test PCE outage"); };` });
+});
 
 test("a newly verified release immediately removes obsolete cached CPI dependencies while markets are still pending", async () => {
   const cache = { ...fixture, generatedAt: publicationClock, errors: [], indicators: fixture.indicators.map((row) =>
