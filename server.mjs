@@ -776,6 +776,7 @@ async function handleRequest(req, res) {
       buildCommit,
       validationReference: dashboardCache.validationReference ?? null,
       sourceRevisions: sourceLedger.revisions.map(row => ({ ...row, label: fredMeta[row.series]?.[0] || row.series })),
+      ...(url.searchParams.get("evidence") === "1" ? { sourceLedger } : {}),
       reminders: calendarService.buildReminders(),
       aiEarnings: calendarService.resolvedAiEarnings(),
       calendarSchedule: calendarService.snapshot(),
@@ -831,6 +832,14 @@ try {
 } catch {
   dashboardCache = null;
 }
+
+// Repository checkpoints survive host rebuilds; service hydration never rolls proof backward.
+try {
+  const checkpoint = JSON.parse(await readFile(path.join(__dirname, "evidence/source-ledger.json"), "utf8"));
+  if (!Object.keys(sourceLedger.sources).length) sourceLedger = hydrateSourceLedger(checkpoint);
+  publicationService.hydrate(checkpoint.publicationSchedule);
+  earningsMonitor.hydrate(checkpoint.earningsSchedule);
+} catch { /* First deployment can legitimately have no recorded baseline. */ }
 
 server.listen(port, host, () => {
   const displayHost = host === "0.0.0.0" ? "127.0.0.1" : host;

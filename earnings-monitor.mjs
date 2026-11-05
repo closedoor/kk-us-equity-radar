@@ -137,6 +137,11 @@ function mergeReports(previous, incoming) {
   return [...merged.values()].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt)).slice(0, 12);
 }
 
+function latestTimestamp(first, second) {
+  const timestamps = [first, second].filter(Boolean).map((value) => Date.parse(value));
+  return timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null;
+}
+
 export function createEarningsMonitor({ fetchText, aiEarnings = Object.keys(EARNINGS_COMPANIES).map((ticker) => ({ ticker })),
   now = () => new Date(), logger = console, cacheTtlMs = 6 * 3_600_000, failureRetryMs = 30 * 60_000,
   fetchBudgetMs = 60_000, secUserAgent = SEC_AGENT, onChange = null,
@@ -156,7 +161,10 @@ export function createEarningsMonitor({ fetchText, aiEarnings = Object.keys(EARN
       const reports = record.reports.filter((report) => Date.parse(report.publishedAt) <= time && (!report.periodEnd || Date.parse(report.periodEnd) <= time));
       const previous = state.sources[ticker];
       const newer = Date.parse(record.attemptedAt || record.checkedAt) >= Date.parse(previous.attemptedAt || previous.checkedAt) || !previous.attemptedAt;
-      state.sources[ticker] = { ...(newer ? record : previous), reports: mergeReports(previous.reports, reports) };
+      state.sources[ticker] = { ...(newer ? record : previous),
+        checkedAt: latestTimestamp(previous.checkedAt, record.checkedAt),
+        attemptedAt: latestTimestamp(previous.attemptedAt, record.attemptedAt),
+        reports: mergeReports(previous.reports, reports) };
     }
   }
   async function runRefresh() {

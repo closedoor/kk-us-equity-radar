@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-05T12:43:37.367Z",
+  "generatedAt": "2026-11-05T13:16:09.037Z",
   "scoringVersion": "4.7.0",
   "sourceSnapshot": {
-    "capturedAt": "2026-11-05T12:43:06.926Z",
+    "capturedAt": "2026-11-05T13:15:38.204Z",
     "baseCommit": "3336e2a4168b98c19b2fa64cc430b1dcfe4abd5d",
     "workingTreeDirty": true,
     "kind": "Frozen working-tree bytes; baseCommit is lineage, not a claim of a clean commit",
@@ -11,10 +11,10 @@
     "runtimeHashes": {
       "calendar.mjs": "70fef95fc1f34284fecec214f1e7851d963e9d50d51266bdce39e93e679eede2",
       "earnings-data.mjs": "2ece5e1894cc8388e62796fbdc02ba88015941b6d0a80b62ba742a90ac7ebd96",
-      "earnings-monitor.mjs": "b8431a9be1d7761cdc9948beac740de27b6a08139e5aa3cf0ca600dc38e85afe",
+      "earnings-monitor.mjs": "b6bbb7b4a67748fb093a0c593bd7e9f8ef1c0f4db893358b9decce89d4d4d112",
       "history-validation.mjs": "3ec59ae38951342203c43b8120c1c5816850b52928898c967912a1b6e7de07a0",
       "market-data.mjs": "f66bc78ec1eae73e981646109147e1b9d66efbe35ec884a8f108dbc4f81dbe89",
-      "package.json": "7a636709faca8b603aed09ea068f762509973b7d96b2d0f953af8e90871ac1b9",
+      "package.json": "09ec74bc1bbb467630bd9125c7e3b3ca5514292cb060a0008762d61811cfcaa3",
       "public/app.js": "d2710ba33c07bc742fd96bd1808904a28c25fbfe4150882f878f62cf45869724",
       "public/dashboard-client.js": "a0a34978145a2258ecb21744911ab64175ba9676a699bdf377a3181f5ba67934",
       "public/dashboard-state.js": "95a4ea0ce11826e5cb92b373c2bb4d7ed232eb6ccbd4f52bdf59e69b1013548f",
@@ -23,12 +23,12 @@
       "public/forward-validation.json": "f0d8a80842e501ef467c854b12b584fc1fe425e5e3cd18a048bea6c041330945",
       "public/index.html": "a7659bfa435b4f2bac6804488006d194b82e2217d2a6ae2133e49cf2439737a9",
       "public/manual-state.js": "be46d584ae059e0687c2ae582ae0b5eab97df4a04d1853e42a239dede5077a45",
-      "public/model-validation.json": "795e61c8fad695e3f73118b7a08ea38606b36f98b7778460418c44a300a34abb",
+      "public/model-validation.json": "0edc7e7e5260b2e6ad8e46dbe753e678ea40fd1d343bf3d318ab12a74a99956f",
       "public/publication-state.js": "0ce1d401bbb1c20c90e245cab6c021ee4a855a2c7f21970ebebffa990d571e78",
       "public/risk-model.js": "7c0df42062dd3d326cb1f52cec5bb2796226218f385fcb4cf83b633f1f8f8bbd",
       "public/styles.css": "477b72b14c176880a48ecb149bd4ff192254ffc2cb73265d904ea86d94b89675",
       "publication.mjs": "72f304b4de175203abb65dccf5ab667e60b2de1156f02e9e7f6287c0ff821373",
-      "server.mjs": "f00225079bc70872265129d72a83b0748cc97a3f51a937a5282d40b23b566d90",
+      "server.mjs": "37c0d742fb986faf01c3d817ef6cf1df9b0eb261864dc7b10022399223d37531",
       "source-revisions.mjs": "6219c23438387d3523d94a7763f6fc7dcfa7f4e43e76def068b848f729f5b0ea",
       "validation-evidence.mjs": "31e59e3e323a1cbafbd968e2e663d766442f679313a39595dea9c8f16b400cc9"
     },
@@ -306,18 +306,18 @@
       "sha256": "04a9639cd38b146e18bb15e73e5ca495e941bb0c29a6b3bb31ea137eb824d5e4"
     },
     {
-      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=CPIAUCSL%2CCPIAUCSL%2CCPIAUCSL%2CCPIAUCSL&vintage_date=2025-03-31%2C2025-06-30%2C2025-09-30%2C2025-12-31&cosd=2016-01-01&coed=2025-12-31",
-      "retrievedAt": "2026-11-05T12:16:05.295Z",
-      "status": 200,
-      "bytes": 33564,
-      "sha256": "174e5e3477a6dbef11d5b683fcfe12eaa9de93c68f8d12c6981c699693dfda96"
-    },
-    {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=CPIAUCSL%2CCPIAUCSL%2CCPIAUCSL%2CCPIAUCSL%2CCPIAUCSL%2CCPIAUCSL%2CCPIAUCSL%2CCPIAUCSL%2CCPIAUCSL%2CCPIAUCSL%2CCPIAUCSL%2CCPIAUCSL&vintage_date=2022-03-31%2C2022-06-30%2C2022-09-30%2C2022-12-31%2C2023-03-31%2C2023-06-30%2C2023-09-30%2C2023-12-31%2C2024-03-31%2C2024-06-30%2C2024-09-30%2C2024-12-31&cosd=2016-01-01&coed=2024-12-31",
       "retrievedAt": "2026-11-05T12:16:05.266Z",
       "status": 200,
       "bytes": 88267,
       "sha256": "7484689a76df2b7c30192215fbd3b84301710f0b6c813060cc031c1a52601396"
+    },
+    {
+      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=CPIAUCSL%2CCPIAUCSL%2CCPIAUCSL%2CCPIAUCSL&vintage_date=2025-03-31%2C2025-06-30%2C2025-09-30%2C2025-12-31&cosd=2016-01-01&coed=2025-12-31",
+      "retrievedAt": "2026-11-05T12:16:05.295Z",
+      "status": 200,
+      "bytes": 33564,
+      "sha256": "174e5e3477a6dbef11d5b683fcfe12eaa9de93c68f8d12c6981c699693dfda96"
     },
     {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=CPIAUCNS%2CCPIAUCNS%2CCPIAUCNS%2CCPIAUCNS%2CCPIAUCNS%2CCPIAUCNS%2CCPIAUCNS%2CCPIAUCNS%2CCPIAUCNS%2CCPIAUCNS%2CCPIAUCNS%2CCPIAUCNS&vintage_date=2019-03-31%2C2019-06-30%2C2019-09-30%2C2019-12-31%2C2020-03-31%2C2020-06-30%2C2020-09-30%2C2020-12-31%2C2021-03-31%2C2021-06-30%2C2021-09-30%2C2021-12-31&cosd=2016-01-01&coed=2021-12-31",
@@ -334,18 +334,18 @@
       "sha256": "a28c635f5164977ea84bb8f103920775ee7e98cf2100327689b3faf3a71c9582"
     },
     {
-      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=CPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL&vintage_date=2019-03-31%2C2019-06-30%2C2019-09-30%2C2019-12-31%2C2020-03-31%2C2020-06-30%2C2020-09-30%2C2020-12-31%2C2021-03-31%2C2021-06-30%2C2021-09-30%2C2021-12-31&cosd=2016-01-01&coed=2021-12-31",
-      "retrievedAt": "2026-11-05T12:16:08.735Z",
-      "status": 200,
-      "bytes": 73735,
-      "sha256": "1e687a4dc9014c76490fe9161d847ae47c82bd16825f67fb98795be5bb9541b1"
-    },
-    {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=CPIAUCNS%2CCPIAUCNS%2CCPIAUCNS%2CCPIAUCNS&vintage_date=2025-03-31%2C2025-06-30%2C2025-09-30%2C2025-12-31&cosd=2016-01-01&coed=2025-12-31",
       "retrievedAt": "2026-11-05T12:16:08.446Z",
       "status": 200,
       "bytes": 46986,
       "sha256": "d11d1558a229b9fa54583da269e3fba857ee1169043f7ee7f0f7b11f809eeecd"
+    },
+    {
+      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=CPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL&vintage_date=2019-03-31%2C2019-06-30%2C2019-09-30%2C2019-12-31%2C2020-03-31%2C2020-06-30%2C2020-09-30%2C2020-12-31%2C2021-03-31%2C2021-06-30%2C2021-09-30%2C2021-12-31&cosd=2016-01-01&coed=2021-12-31",
+      "retrievedAt": "2026-11-05T12:16:08.735Z",
+      "status": 200,
+      "bytes": 73735,
+      "sha256": "1e687a4dc9014c76490fe9161d847ae47c82bd16825f67fb98795be5bb9541b1"
     },
     {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=CPILFESL%2CCPILFESL%2CCPILFESL%2CCPILFESL&vintage_date=2025-03-31%2C2025-06-30%2C2025-09-30%2C2025-12-31&cosd=2016-01-01&coed=2025-12-31",
@@ -404,18 +404,18 @@
       "sha256": "cbabfbf489b2022140f26242d23afbe64539a832962cc46939be08a3bccec996"
     },
     {
-      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=PCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE&vintage_date=2022-03-31%2C2022-06-30%2C2022-09-30%2C2022-12-31%2C2023-03-31%2C2023-06-30%2C2023-09-30%2C2023-12-31%2C2024-03-31%2C2024-06-30%2C2024-09-30%2C2024-12-31&cosd=2016-01-01&coed=2024-12-31",
-      "retrievedAt": "2026-11-05T12:16:16.435Z",
-      "status": 200,
-      "bytes": 71274,
-      "sha256": "c5daba7575c2865d9781149c0963e2e857db27fd8a1a4536cca161d052cf6dea"
-    },
-    {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=PCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE&vintage_date=2019-03-31%2C2019-06-30%2C2019-09-30%2C2019-12-31%2C2020-03-31%2C2020-06-30%2C2020-09-30%2C2020-12-31%2C2021-03-31%2C2021-06-30%2C2021-09-30%2C2021-12-31&cosd=2016-01-01&coed=2021-12-31",
       "retrievedAt": "2026-11-05T12:16:15.848Z",
       "status": 200,
       "bytes": 67761,
       "sha256": "5b11fbce2f76432eafc7e52b36256bc25cc397ef19e25ea40639b1aede31f060"
+    },
+    {
+      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=PCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE&vintage_date=2022-03-31%2C2022-06-30%2C2022-09-30%2C2022-12-31%2C2023-03-31%2C2023-06-30%2C2023-09-30%2C2023-12-31%2C2024-03-31%2C2024-06-30%2C2024-09-30%2C2024-12-31&cosd=2016-01-01&coed=2024-12-31",
+      "retrievedAt": "2026-11-05T12:16:16.435Z",
+      "status": 200,
+      "bytes": 71274,
+      "sha256": "c5daba7575c2865d9781149c0963e2e857db27fd8a1a4536cca161d052cf6dea"
     },
     {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=PCEPILFE%2CPCEPILFE%2CPCEPILFE%2CPCEPILFE&vintage_date=2025-03-31%2C2025-06-30%2C2025-09-30%2C2025-12-31&cosd=2016-01-01&coed=2025-12-31",
@@ -474,18 +474,18 @@
       "sha256": "7566e099075d0707de35c20dd54143a30198d7ec3a2d2afdec2550ddbc6df1bb"
     },
     {
-      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=DGS2%2CDGS2%2CDGS2%2CDGS2%2CDGS2%2CDGS2%2CDGS2%2CDGS2%2CDGS2%2CDGS2%2CDGS2%2CDGS2&vintage_date=2022-03-31%2C2022-06-30%2C2022-09-30%2C2022-12-31%2C2023-03-31%2C2023-06-30%2C2023-09-30%2C2023-12-31%2C2024-03-31%2C2024-06-30%2C2024-09-30%2C2024-12-31&cosd=2016-01-01&coed=2024-12-31",
-      "retrievedAt": "2026-11-05T12:16:30.709Z",
-      "status": 200,
-      "bytes": 831108,
-      "sha256": "edaa4897c1409a1862bbe4d228a36c42c4b7e7935f71854469c03d79849af50f"
-    },
-    {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=DGS2%2CDGS2%2CDGS2%2CDGS2&vintage_date=2025-03-31%2C2025-06-30%2C2025-09-30%2C2025-12-31&cosd=2016-01-01&coed=2025-12-31",
       "retrievedAt": "2026-11-05T12:16:34.171Z",
       "status": 200,
       "bytes": 354743,
       "sha256": "0bc01d51881f175da32ed7843ec49d55f9ba7370ffe03f680754ea407c6b7770"
+    },
+    {
+      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=DGS2%2CDGS2%2CDGS2%2CDGS2%2CDGS2%2CDGS2%2CDGS2%2CDGS2%2CDGS2%2CDGS2%2CDGS2%2CDGS2&vintage_date=2022-03-31%2C2022-06-30%2C2022-09-30%2C2022-12-31%2C2023-03-31%2C2023-06-30%2C2023-09-30%2C2023-12-31%2C2024-03-31%2C2024-06-30%2C2024-09-30%2C2024-12-31&cosd=2016-01-01&coed=2024-12-31",
+      "retrievedAt": "2026-11-05T12:16:30.709Z",
+      "status": 200,
+      "bytes": 831108,
+      "sha256": "edaa4897c1409a1862bbe4d228a36c42c4b7e7935f71854469c03d79849af50f"
     },
     {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=DGS10%2CDGS10%2CDGS10%2CDGS10%2CDGS10%2CDGS10%2CDGS10%2CDGS10%2CDGS10%2CDGS10%2CDGS10%2CDGS10&vintage_date=2019-03-31%2C2019-06-30%2C2019-09-30%2C2019-12-31%2C2020-03-31%2C2020-06-30%2C2020-09-30%2C2020-12-31%2C2021-03-31%2C2021-06-30%2C2021-09-30%2C2021-12-31&cosd=2016-01-01&coed=2021-12-31",
@@ -509,18 +509,18 @@
       "sha256": "134a4841ac644f955c19e64f4a9bb43ea4a0035370f98e3c9c6ea1ddcc4f025d"
     },
     {
-      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=DFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10&vintage_date=2019-03-31%2C2019-06-30%2C2019-09-30%2C2019-12-31%2C2020-03-31%2C2020-06-30%2C2020-09-30%2C2020-12-31%2C2021-03-31%2C2021-06-30%2C2021-09-30%2C2021-12-31&cosd=2016-01-01&coed=2021-12-31",
-      "retrievedAt": "2026-11-05T12:16:47.447Z",
-      "status": 200,
-      "bytes": 319190,
-      "sha256": "be7900c1f1e4d34660db1afe1fe3159e0303587dbf6f5bdbc9461b4e53ab9323"
-    },
-    {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=DFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10&vintage_date=2022-03-31%2C2022-06-30%2C2022-09-30%2C2022-12-31%2C2023-03-31%2C2023-06-30%2C2023-09-30%2C2023-12-31%2C2024-03-31%2C2024-06-30%2C2024-09-30%2C2024-12-31&cosd=2016-01-01&coed=2024-12-31",
       "retrievedAt": "2026-11-05T12:16:50.432Z",
       "status": 200,
       "bytes": 377872,
       "sha256": "599b0ce8f0e99ab6668710b6182f4bcb145df0887b3e484edd9e807d0768c52a"
+    },
+    {
+      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=DFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10%2CDFII10&vintage_date=2019-03-31%2C2019-06-30%2C2019-09-30%2C2019-12-31%2C2020-03-31%2C2020-06-30%2C2020-09-30%2C2020-12-31%2C2021-03-31%2C2021-06-30%2C2021-09-30%2C2021-12-31&cosd=2016-01-01&coed=2021-12-31",
+      "retrievedAt": "2026-11-05T12:16:47.447Z",
+      "status": 200,
+      "bytes": 319190,
+      "sha256": "be7900c1f1e4d34660db1afe1fe3159e0303587dbf6f5bdbc9461b4e53ab9323"
     },
     {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=DFII10%2CDFII10%2CDFII10%2CDFII10&vintage_date=2025-03-31%2C2025-06-30%2C2025-09-30%2C2025-12-31&cosd=2016-01-01&coed=2025-12-31",
@@ -537,13 +537,6 @@
       "sha256": "224b40cd3f1533733d33ba0d5e8ce23e9cadbd8cdb50c256d324017f8b589535"
     },
     {
-      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=T10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M&vintage_date=2022-03-31%2C2022-06-30%2C2022-09-30%2C2022-12-31%2C2023-03-31%2C2023-06-30%2C2023-09-30%2C2023-12-31%2C2024-03-31%2C2024-06-30%2C2024-09-30%2C2024-12-31&cosd=2016-01-01&coed=2024-12-31",
-      "retrievedAt": "2026-11-05T12:16:56.918Z",
-      "status": 200,
-      "bytes": 733252,
-      "sha256": "1ea3cbd128a541c2dcc73d0bed2109687ff715de9c9c9bc9d301501d9eb90f3e"
-    },
-    {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=T10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M&vintage_date=2025-03-31%2C2025-06-30%2C2025-09-30%2C2025-12-31&cosd=2016-01-01&coed=2025-12-31",
       "retrievedAt": "2026-11-05T12:16:58.199Z",
       "status": 200,
@@ -551,11 +544,11 @@
       "sha256": "fe8de9307094d7ff0221821e350ef6410d145d4a6e458f69748b73f57f743028"
     },
     {
-      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=VIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS&vintage_date=2019-03-31%2C2019-06-30%2C2019-09-30%2C2019-12-31%2C2020-03-31%2C2020-06-30%2C2020-09-30%2C2020-12-31%2C2021-03-31%2C2021-06-30%2C2021-09-30%2C2021-12-31&cosd=2016-01-01&coed=2021-12-31",
-      "retrievedAt": "2026-11-05T12:17:08.778Z",
+      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=T10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M%2CT10Y3M&vintage_date=2022-03-31%2C2022-06-30%2C2022-09-30%2C2022-12-31%2C2023-03-31%2C2023-06-30%2C2023-09-30%2C2023-12-31%2C2024-03-31%2C2024-06-30%2C2024-09-30%2C2024-12-31&cosd=2016-01-01&coed=2024-12-31",
+      "retrievedAt": "2026-11-05T12:16:56.918Z",
       "status": 200,
-      "bytes": 621469,
-      "sha256": "10df5bdaa39f04d3532f5dedd79558f9e1a6e38237737450cd079f3a3b457146"
+      "bytes": 733252,
+      "sha256": "1ea3cbd128a541c2dcc73d0bed2109687ff715de9c9c9bc9d301501d9eb90f3e"
     },
     {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=VIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS&vintage_date=2022-03-31%2C2022-06-30%2C2022-09-30%2C2022-12-31%2C2023-03-31%2C2023-06-30%2C2023-09-30%2C2023-12-31%2C2024-03-31%2C2024-06-30%2C2024-09-30%2C2024-12-31&cosd=2016-01-01&coed=2024-12-31",
@@ -563,6 +556,13 @@
       "status": 200,
       "bytes": 685370,
       "sha256": "139b777d2de02a3da91fdac471bb8e47a748ebd10cd8f5eb6788e0119ebef535"
+    },
+    {
+      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=VIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS%2CVIXCLS&vintage_date=2019-03-31%2C2019-06-30%2C2019-09-30%2C2019-12-31%2C2020-03-31%2C2020-06-30%2C2020-09-30%2C2020-12-31%2C2021-03-31%2C2021-06-30%2C2021-09-30%2C2021-12-31&cosd=2016-01-01&coed=2021-12-31",
+      "retrievedAt": "2026-11-05T12:17:08.778Z",
+      "status": 200,
+      "bytes": 621469,
+      "sha256": "10df5bdaa39f04d3532f5dedd79558f9e1a6e38237737450cd079f3a3b457146"
     },
     {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=DRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM&vintage_date=2019-03-31%2C2019-06-30%2C2019-09-30%2C2019-12-31%2C2020-03-31%2C2020-06-30%2C2020-09-30%2C2020-12-31%2C2021-03-31%2C2021-06-30%2C2021-09-30%2C2021-12-31&cosd=2016-01-01&coed=2021-12-31",
@@ -579,18 +579,18 @@
       "sha256": "9f52d889bbd3e4e7b49e8cc2e3643c686e3a894e86aff367c0a7529a6d17ffa5"
     },
     {
-      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=DRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM&vintage_date=2025-03-31%2C2025-06-30%2C2025-09-30%2C2025-12-31&cosd=2016-01-01&coed=2025-12-31",
-      "retrievedAt": "2026-11-05T12:17:13.011Z",
-      "status": 200,
-      "bytes": 4104,
-      "sha256": "278c803b85e55bcaa004292bc0ff7d940ff794424fe5f767265f618eb02bdfe8"
-    },
-    {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=DRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM&vintage_date=2022-03-31%2C2022-06-30%2C2022-09-30%2C2022-12-31%2C2023-03-31%2C2023-06-30%2C2023-09-30%2C2023-12-31%2C2024-03-31%2C2024-06-30%2C2024-09-30%2C2024-12-31&cosd=2016-01-01&coed=2024-12-31",
       "retrievedAt": "2026-11-05T12:17:12.021Z",
       "status": 200,
       "bytes": 9544,
       "sha256": "87136088b68a9aa1f8dee851b15191dc44bb85cd7e864a629abc225b64f33ff4"
+    },
+    {
+      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=DRTSCILM%2CDRTSCILM%2CDRTSCILM%2CDRTSCILM&vintage_date=2025-03-31%2C2025-06-30%2C2025-09-30%2C2025-12-31&cosd=2016-01-01&coed=2025-12-31",
+      "retrievedAt": "2026-11-05T12:17:13.011Z",
+      "status": 200,
+      "bytes": 4104,
+      "sha256": "278c803b85e55bcaa004292bc0ff7d940ff794424fe5f767265f618eb02bdfe8"
     },
     {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=SAHMREALTIME%2CSAHMREALTIME%2CSAHMREALTIME%2CSAHMREALTIME%2CSAHMREALTIME%2CSAHMREALTIME%2CSAHMREALTIME%2CSAHMREALTIME%2CSAHMREALTIME%2CSAHMREALTIME%2CSAHMREALTIME%2CSAHMREALTIME&vintage_date=2019-09-30%2C2019-12-31%2C2020-03-31%2C2020-06-30%2C2020-09-30%2C2020-12-31%2C2021-03-31%2C2021-06-30%2C2021-09-30%2C2021-12-31%2C2022-03-31%2C2022-06-30&cosd=2016-01-01&coed=2022-06-30",
@@ -621,13 +621,6 @@
       "sha256": "167b57401d225ba812212c1d91384b470978f4e3dd596ffbf3c74daf47807bef"
     },
     {
-      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=ICSA%2CICSA%2CICSA%2CICSA%2CICSA%2CICSA%2CICSA%2CICSA%2CICSA%2CICSA%2CICSA%2CICSA&vintage_date=2022-03-31%2C2022-06-30%2C2022-09-30%2C2022-12-31%2C2023-03-31%2C2023-06-30%2C2023-09-30%2C2023-12-31%2C2024-03-31%2C2024-06-30%2C2024-09-30%2C2024-12-31&cosd=2016-01-01&coed=2024-12-31",
-      "retrievedAt": "2026-11-05T12:17:19.177Z",
-      "status": 200,
-      "bytes": 267316,
-      "sha256": "ca51a1aba2fafe823918ce14998f64c8528c0544924d05efdaf014f290f22ca2"
-    },
-    {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=ICSA%2CICSA%2CICSA%2CICSA&vintage_date=2025-03-31%2C2025-06-30%2C2025-09-30%2C2025-12-31&cosd=2016-01-01&coed=2025-12-31",
       "retrievedAt": "2026-11-05T12:17:19.755Z",
       "status": 200,
@@ -635,11 +628,11 @@
       "sha256": "613dc0770279fc861bcd1431181a063c1d7cd5fe6219876289178dbae9a35c83"
     },
     {
-      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=NFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI&vintage_date=2022-03-31%2C2022-06-30%2C2022-09-30%2C2022-12-31%2C2023-03-31%2C2023-06-30%2C2023-09-30%2C2023-12-31%2C2024-03-31%2C2024-06-30%2C2024-09-30%2C2024-12-31&cosd=2016-01-01&coed=2024-12-31",
-      "retrievedAt": "2026-11-05T12:17:25.831Z",
+      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=ICSA%2CICSA%2CICSA%2CICSA%2CICSA%2CICSA%2CICSA%2CICSA%2CICSA%2CICSA%2CICSA%2CICSA&vintage_date=2022-03-31%2C2022-06-30%2C2022-09-30%2C2022-12-31%2C2023-03-31%2C2023-06-30%2C2023-09-30%2C2023-12-31%2C2024-03-31%2C2024-06-30%2C2024-09-30%2C2024-12-31&cosd=2016-01-01&coed=2024-12-31",
+      "retrievedAt": "2026-11-05T12:17:19.177Z",
       "status": 200,
-      "bytes": 300518,
-      "sha256": "3c18a8acc3d387f6563cc3cd1f0345b60d8d8dba77a0a56248f23fcd3efc3c0c"
+      "bytes": 267316,
+      "sha256": "ca51a1aba2fafe823918ce14998f64c8528c0544924d05efdaf014f290f22ca2"
     },
     {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=NFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI&vintage_date=2019-03-31%2C2019-06-30%2C2019-09-30%2C2019-12-31%2C2020-03-31%2C2020-06-30%2C2020-09-30%2C2020-12-31%2C2021-03-31%2C2021-06-30%2C2021-09-30%2C2021-12-31&cosd=2016-01-01&coed=2021-12-31",
@@ -647,6 +640,13 @@
       "status": 200,
       "bytes": 243882,
       "sha256": "e54fa20a682a047d072f0e0f872f31bd30a836c035c7c2e710be2262a3a7f023"
+    },
+    {
+      "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=NFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI%2CNFCI&vintage_date=2022-03-31%2C2022-06-30%2C2022-09-30%2C2022-12-31%2C2023-03-31%2C2023-06-30%2C2023-09-30%2C2023-12-31%2C2024-03-31%2C2024-06-30%2C2024-09-30%2C2024-12-31&cosd=2016-01-01&coed=2024-12-31",
+      "retrievedAt": "2026-11-05T12:17:25.831Z",
+      "status": 200,
+      "bytes": 300518,
+      "sha256": "3c18a8acc3d387f6563cc3cd1f0345b60d8d8dba77a0a56248f23fcd3efc3c0c"
     },
     {
       "url": "https://alfred.stlouisfed.org/graph/alfredgraph.csv?id=NFCI%2CNFCI%2CNFCI%2CNFCI&vintage_date=2025-03-31%2C2025-06-30%2C2025-09-30%2C2025-12-31&cosd=2016-01-01&coed=2025-12-31",

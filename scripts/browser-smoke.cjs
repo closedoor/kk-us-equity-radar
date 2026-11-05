@@ -787,6 +787,13 @@ async function main() {
     }, 390);
     await scenario("historical diagnostics disclose partial coverage and immature forward samples", async (page) => {
       await mock(page, () => ({ body: fresh() }));
+      // Production evidence grows over time; this case specifically checks the
+      // initial no-mature-outcomes state. Journeys still read the actual file.
+      await page.route("**/forward-validation.json", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        version: 1, status: "awaiting-outcomes", observedSamples: 0, firstObservationDate: null, lastObservationDate: null, generatedAt: null,
+        outcomes: [21, 63].map((tradingDays) => ({ tradingDays, samples: 0, immatureSamples: 0, meanReturnPercent: null, meanDrawdownPercent: null, worstDrawdownPercent: null })),
+        limitations: ["No observed sample has a mature outcome yet; immature outcomes are not zero returns."],
+      }) }));
       await page.goto(baseURL);
       await expect(page.locator("#modelHistory")).toHaveAttribute("data-state", "available");
       await expect(page.locator("#forwardValidation")).toHaveAttribute("data-state", "available");

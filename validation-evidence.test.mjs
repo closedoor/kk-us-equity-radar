@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { createEvidence, evaluateEvidence as evaluate, isEvidence } from "./validation-evidence.mjs";
 import { projectDashboard } from "./public/dashboard-state.js";
+import { hydrateSourceLedger, updateSourceLedger } from "./source-revisions.mjs";
 
 const capturedAt = "2026-11-05T22:30:00.000Z";
 const evaluateEvidence = (records, prices, options = {}) => evaluate(records, prices, { asOf: "2026-12-01T00:00:00.000Z", ...options });
@@ -138,6 +139,8 @@ test("the capture CLI preserves its first immutable daily record across repeated
   try {
     const data = snapshot();
     data.generatedAt = new Date().toISOString();
+    data.sourceLedger = hydrateSourceLedger({ version: 1, sources: { PAYEMS: { checkedAt: data.generatedAt,
+      points: [{ date: "2026-09-01", value: 150000 }] } }, revisions: [] });
     const preload = path.join(dir, "fetch.mjs");
     await writeFile(preload, `globalThis.fetch = async url => {
       if (String(url).includes('/api/dashboard')) return new Response(${JSON.stringify(JSON.stringify(data))});
@@ -145,10 +148,11 @@ test("the capture CLI preserves its first immutable daily record across repeated
       throw Error('Unexpected test network request');
     };`);
     const args = ["--import", preload, new URL("./scripts/capture-evidence.mjs", import.meta.url).pathname,
-      "--url", "https://unit.test/api/dashboard", "--attempts", "1", "--output-dir", path.join(dir, "records"), "--summary", path.join(dir, "summary.json")];
+      "--url", "https://unit.test/api/dashboard", "--attempts", "1", "--output-dir", path.join(dir, "records"), "--summary", path.join(dir, "summary.json"), "--ledger-output", path.join(dir, "seed.json")];
     const run = () => promisify(execFile)(process.execPath, args, { timeout: 10000 });
     const first = JSON.parse((await run()).stdout);
     assert.equal(first.saved, true);
+    assert.equal(first.ledgerSaved, true);
     const names = await readdir(path.join(dir, "records"));
     assert.equal(names.length, 1);
     const file = path.join(dir, "records", names[0]);
@@ -159,6 +163,7 @@ test("the capture CLI preserves its first immutable daily record across repeated
     const summary = JSON.parse(await readFile(path.join(dir, "summary.json"), "utf8"));
     assert.equal(summary.observedSamples, 1);
     assert.equal(summary.outcomes[0].samples, 0);
+    data.sourceLedger = updateSourceLedger(data.sourceLedger, { PAYEMS: [{ date: "2026-09-01", value: 150010 }] }, new Date().toISOString()).ledger;
     await writeFile(preload, `globalThis.fetch = async url => {
       if (String(url).includes('/api/dashboard')) return new Response(${JSON.stringify(JSON.stringify(data))});
       throw Error('test benchmark outage');
@@ -170,5 +175,8 @@ test("the capture CLI preserves its first immutable daily record across repeated
     assert.deepEqual(failedSummary.outcomes, summary.outcomes);
     assert.match(failedSummary.benchmark.error, /benchmark outage/);
     assert.equal(await readFile(file, "utf8"), contents);
+    const checkpoint = JSON.parse(await readFile(path.join(dir, "seed.json"), "utf8"));
+    assert.equal(checkpoint.sources.PAYEMS.points[0].value, 150010);
+    assert.equal(checkpoint.revisions.length, 1);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

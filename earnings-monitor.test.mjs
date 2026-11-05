@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createEarningsMonitor, parseSecEarnings, parseSkEarningsFeed, earningsMonitorSources } from "./earnings-monitor.mjs";
-import { applyEarningsChecks } from "./public/earnings-state.js";
+import { applyEarningsChecks, isEarningsSchedule } from "./public/earnings-state.js";
 
 const at = "2026-11-05T12:00:00.000Z";
 const sec = (cik, entries) => ({ cik, name: "Official company", fiscalYearEnd: ({ "1045810": "0125", "1730168": "1102", "723125": "0903", "789019": "0630" })[String(cik).replace(/^0+/, "")] || "1231", filings: { recent: Object.fromEntries([
@@ -164,4 +164,34 @@ test("onChange rejection is separate from provider status and does not stop rema
   assert.ok(Object.values(service.snapshot().sources).every((record) => record.error === null && record.reports.length === 1));
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /onChange.*test persistence failed/);
+});
+
+test("checkpoint hydration retains last successful evidence across a newer unknown failure in either order", () => {
+  const reports = parseSecEarnings(sec("1652044", [filing()]), "GOOG", at);
+  const successTime = "2026-11-04T12:00:00.000Z";
+  const attemptTime = "2026-11-05T11:00:00.000Z";
+  const good = { version: 1, sources: { GOOG: { checkedAt: successTime, attemptedAt: successTime, error: null, reports } } };
+  const failed = { version: 1, sources: { GOOG: { checkedAt: null, attemptedAt: attemptTime, error: "new host upstream outage", reports: [] } } };
+  assert.equal(isEarningsSchedule(good), true);
+  assert.equal(isEarningsSchedule(failed), true);
+  const results = [];
+  for (const order of [[good, failed], [failed, good]]) {
+    let calls = 0;
+    const monitor = createEarningsMonitor({ aiEarnings: [{ ticker: "GOOG" }], now: () => new Date(at),
+      fetchText: async () => { calls++; throw new Error("Hydration must not fetch"); },
+    });
+    for (const checkpoint of order) monitor.hydrate(checkpoint);
+    const merged = monitor.snapshot();
+    assert.equal(calls, 0);
+    assert.equal(isEarningsSchedule(merged), true);
+    assert.equal(merged.sources.GOOG.checkedAt, successTime, "A failed attempt must not erase or advance successful verification time");
+    assert.equal(merged.sources.GOOG.attemptedAt, attemptTime);
+    assert.equal(merged.sources.GOOG.error, "new host upstream outage");
+    assert.deepEqual(merged.sources.GOOG.reports, reports);
+    const projected = applyEarningsChecks([{ ticker: "GOOG", period: "2026 Q2", released: "2026-07-22" }], merged, Date.parse(at));
+    assert.equal(projected.aiEarnings[0].reviewRequired, true);
+    assert.match(projected.errors.join(" "), /upstream outage/);
+    results.push(merged);
+  }
+  assert.deepEqual(results[0], results[1]);
 });

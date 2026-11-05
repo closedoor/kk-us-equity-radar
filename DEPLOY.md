@@ -45,6 +45,7 @@
 - `.github/workflows/`
 - `reports/`
 - `evidence/forward/`（首次采集后生成）
+- `evidence/source-ledger.json`（首次采集后生成的最近来源基线）
 - `package.json`
 - `dashboard-cache.json`
 - `README.md`
