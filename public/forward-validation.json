@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "evaluatedAt": "2026-11-05T13:19:25.583Z",
+  "evaluatedAt": "2026-11-06T02:42:12.225Z",
   "status": "awaiting-outcomes",
   "scoringVersions": [
     "4.7.0"
@@ -131,7 +131,7 @@
     "价格指数不含分红、交易成本或仓位策略。"
   ],
   "retainedResults": false,
-  "generatedAt": "2026-11-05T13:19:25.750Z",
+  "generatedAt": "2026-11-06T02:42:12.441Z",
   "source": "https://kk-us-equity-radar.onrender.com/api/dashboard?evidence=1",
   "benchmark": {
     "series": "SP500",
