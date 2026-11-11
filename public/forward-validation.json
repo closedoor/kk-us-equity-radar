@@ -1,18 +1,18 @@
 {
   "version": 1,
-  "evaluatedAt": "2026-11-10T04:15:04.890Z",
+  "evaluatedAt": "2026-11-11T02:04:29.246Z",
   "status": "awaiting-outcomes",
   "scoringVersions": [
     "4.7.0"
   ],
-  "observedSamples": 3,
+  "observedSamples": 4,
   "firstObservationDate": "2026-11-05",
-  "lastObservationDate": "2026-11-09",
+  "lastObservationDate": "2026-11-10",
   "outcomes": [
     {
       "tradingDays": 21,
       "immatureSamples": 3,
-      "unavailableScoreSamples": 0,
+      "unavailableScoreSamples": 1,
       "samples": 0,
       "meanReturnPercent": null,
       "meanDrawdownPercent": null,
@@ -69,7 +69,7 @@
     {
       "tradingDays": 63,
       "immatureSamples": 3,
-      "unavailableScoreSamples": 0,
+      "unavailableScoreSamples": 1,
       "samples": 0,
       "meanReturnPercent": null,
       "meanDrawdownPercent": null,
@@ -131,7 +131,7 @@
     "价格指数不含分红、交易成本或仓位策略。"
   ],
   "retainedResults": false,
-  "generatedAt": "2026-11-10T04:15:05.103Z",
+  "generatedAt": "2026-11-11T02:04:29.379Z",
   "source": "https://kk-us-equity-radar.onrender.com/api/dashboard?evidence=1",
   "benchmark": {
     "series": "SP500",
