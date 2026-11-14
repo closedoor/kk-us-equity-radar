@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {reconcileStockQuote,createMarketPolicy,ASSETS} from '../worker/index.js';
+const P=createMarketPolicy(),time=Date.parse('2026-11-13T17:00:00Z');
+const a={symbol:'NVDA',price:162.85,ts:time,provider:'tencent',verification:'single'},b={...a,provider:'sina'};
+test('same-time prices independently verify a stock quote',()=>{const q=reconcileStockQuote(a,b);assert.equal(q.verification,'cross_checked');assert.equal(q.provider,'tencent');assert.equal(a.verification,'single');});
+test('same-time material price conflict blocks execution',()=>{const q=reconcileStockQuote(a,{...b,price:170});assert.equal(q.verification,'conflict');assert.equal(P.assess(ASSETS.find(x=>x.symbol==='NVDA'),q,time).canTrade,false);});
+test('different intraday timestamps do not produce a false conflict',()=>{const q=reconcileStockQuote(a,{...b,price:170,ts:time+180000});assert.equal(q.verification,'single');assert.equal(q.provider,'sina');assert.equal(q.price,170);});
+test('closing prints at 16:00 and 16:03 can be reconciled',()=>{const q=reconcileStockQuote({...a,ts:Date.parse('2026-11-13T21:03:12Z')},{...b,ts:Date.parse('2026-11-13T21:00:00Z')});assert.equal(q.verification,'cross_checked');});
+test('one source failing retains exact source identity and timestamp',()=>{const q=reconcileStockQuote(null,b);assert.equal(q.provider,'sina');assert.equal(q.ts,time);assert.equal(q.verification,'single');assert.equal(reconcileStockQuote(null,null),null);});

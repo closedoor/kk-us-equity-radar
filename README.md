@@ -1,153 +1,48 @@
-# kk的美股雷达
+# 环球模拟盘 · 美股与加密
 
-一个零依赖的本地网页，用 12 项高权重宏观、信用、盈利、就业和市场指标计算 0–100 的美国股市综合风险分，并单独显示滞胀 / 政策压力、衰退 / 信用压力和同向共振修正。
+Chinese-language paper trading with 100,000 virtual USDT, browser-local accounts and 1–100x isolated leverage. No real orders, account credentials, deposits or exchange connection.
 
-## 当前维护 · v4.8.1
+## Instruments
 
-- **分开两个期限。** 首页增加当日市场压力，展示 SPX、等权 RSP、QQQ、SMH、VIX、VXSMH 的纽约交易日与报价时间。SPX 与 RSP 必须同日、同时段且时间接近；分别跌至少 3% 和 2% 时标记“大盘急跌”。RSP 是等权 ETF 代理，不是下跌家数。科技和半导体压力单列。VXSMH 是从 SMH 期权得到的 30 日年化隐含波动率，不进入结构分。阈值是监测规则，未经预测校准。
-- **11 月 5 日现场核对。** FRED 日度 VIX 仍为 11 月 4 日的 16.61，Cboe 当日收盘附近延时报价已是 28.18；VXSMH 65.89，按日线前收 45.82 核算升约 43.80%。SPX 跌 4.36%、RSP 跌 2.80%，QQQ 跌 6.27%、SMH 跌 11.50%（ETF 常规收盘口径）。页面的已核对参考记录有日期，之后会标为历史。公开站默认提供 [VIX](https://www.cboe.com/us/indices/dashboard/vix/) 和 [VXSMH](https://www.cboe.com/us/indices/dashboard/vxsmh/) 官方报价入口。自动更新可连接具备公开展示授权的报价服务，配置见 [DEPLOY.md](./DEPLOY.md)。
-- **43.9 分复算。** 当时 VIX、宽度、标普均为 11 月 4 日的结构输入，计划权重合计 22%。VIX 5% 权重，分项主要看 20 个交易日平均；宽度看 60 日相对表现与行业长期均线；标普看距 52 周高点及 200 日均线。宏观与政策 35%、就业 13%、信用 15%、盈利 15%（其中 EPS 修正 10% 缺失）。有效权重 90%，基础分约 35.44，主导压力修正约 8.44，共振修正为 0。仅将 11 月 5 日 VIX 代入、其余输入不变约为 44.6。结构评分公式与权重继续用 4.7.0；单日急跌由独立监测直接呈现。
+10 crypto assets: BTC, ETH, SOL, BNB, XRP, DOGE, ADA, AVAX, LINK, DOT.
 
-## v4.8.0 维护记录
+28 US equities/ETFs: NVDA, AMD, AVGO, INTC, QCOM, ARM, TSM, ASML, AMAT, LRCX, KLAC, SMH; MU, STX, WDC, SNDK; MSFT, ORCL, PLTR, CRM, ADBE, NOW, CRWD, SNOW; AAPL, GOOGL, AMZN, META.
 
-本版补上历史诊断、前瞻证据保存、PCE 发布期核验与官方财报监测。页面的“模型历史检验与前瞻记录”会同时显示已执行范围及未完成验证，不把一轮测试通过当成模型预测有效。
+## Data and execution
 
-- **真实历史诊断：**固定检验2019—2025年28个季度末，使用当时可得的宏观版本和今天获取的历史市场收盘价；27期可评分。信用利差的历史版本、AI人工解读和EPS修正没有伪造填充，最高只覆盖计划权重70%，两期62%，一期因PCE超龄只有37%而暂停评分。分档关系未呈稳定单调结果，高风险档样本很少，不能据此校准概率或仓位。完整资料、来源哈希、代码快照和限制保存在 `reports/history-validation-2019-2025.json`。
-- **前瞻记录：**GitHub Actions在北京时间周二至周六06:30保存上一美国日的真实接口观察，并将证据提交到版本历史。每个纽约日期/模型版本只保留第一份记录，来源错误和无评分状态也保留；不存浏览器人工覆盖。结果从实际观察日之后首个市场收盘开始，满21/63个有效收盘观察后才计算，未成熟不记为零收益。S&P基准暂不可用时保留上次统计并明确标记待核验。代码不会把刚建立的记录伪装成已通过前瞻检验。
-- **PCE与修订：**从BEA固定指标页跟随经过验证的Current Release，核对真实新闻稿月份和发布时间。核心PCE落后时，暂停通胀、政策及相关就业组合的完整评分。22项FRED来源另保存原始同日观察值；新日期不算修订，同一期数值改变才记入最多100条记录。每日采集还把最近原始数据基线保存到 `evidence/source-ledger.json`，云端重新部署后可恢复，不因运行磁盘被替换而从空账本开始。该账本从首次采集开始，重启会校验事件链，不宣称已重建过去所有官方修订。普通接口保持紧凑；`/api/dashboard?evidence=1` 是只读的完整来源账本导出，供采集使用。
-- **财报维护：**六家美股用SEC正式申报、TSM用经过验证的季度earnings exhibit、SK hynix用官方结果RSS检测新季度。明确新报告后，旧解读标记待复核并退出AI自动评分；不会自动编造财报分析或修改 `guidanceTone`。同季晚申报、未来电话会和月营收不会当作新季度。每6小时复核，失败来源30分钟后具备重试资格；重试实际随15分钟调度触发。申报可能晚于新闻稿，页面只说本次来源未发现更新，不承诺实时最早发现。
-- **研究表达：**完整指标计算、权重、分档阈值和模型版本4.7.0保持；未经验证的仓位指令改为需要复核的研究重点，风险说明描述当前规则压力。产品版本为4.8.0，独立于模型公式版本。
-- **持续验收：**新增GitHub Linux全Chromium自动检查，覆盖完整交互、真实最小字号偏好、触摸/键盘模拟及320/390/440×956/1440尺寸截图。440像素仅近似iPhone Pro Max视口，不能当作实体iPhone/iOS Safari验收。每条官方发布或公司报告证据确认后独立保存，慢来源不会拖住其他已知证据的持久化。
+- Crypto: Binance public spot data; transparent OKX spot fallback. Quotes expire at 30 seconds. Polling every 4 seconds.
+- Stocks: Tencent Finance quote feed with Sina Finance verification/fallback. Quote identity, USD currency, source timestamp and OHLC are validated. Prefer newer regular-session quotes; compare independent sources only at effectively the same timestamp or for closing prints. Same-time material conflicts disable execution.
+- US source time is parsed as America/New_York, with explicit EST/EDT handling for Sina. Its Beijing page-refresh timestamp is never substituted for quote time.
+- Stock reference data may be delayed. Delays over two minutes are labeled, and reference quotes up to 20 minutes old can be used for clearly labeled delayed simulation. Older, wrong-session, future or conflicting data cannot execute.
+- Stock execution runs only during the regular NY session, with weekends, holidays, early close and daylight saving handled for 2026–2028. Unknown calendar years fail closed. Off-hours limit orders reserve funds and remain queued.
+- Stock candles are genuine Tencent forward-adjusted daily data. Weekly/monthly bars aggregate actual daily OHLCV. Stock trading reference prices are unadjusted. No invented price/history fallback.
+- Market, limit, cancellation, absolute TP/SL, isolated liquidation and per-position long/short. Fees 0.05% of notional per side; maintenance 0.5% plus projected exit fee. Isolated losses cannot consume unrelated free cash.
+- Stocks are simulated CFDs, not exchange-listed futures/options. USD stock prices settle at the explicit virtual equivalence 1 USD = 1 USDT. Funding, slippage, dividends and corporate-action adjustments to held positions are not modeled.
+- Orders/TP/SL/liquidation are browser-driven. Closing/suspending the page pauses them; fresh quotes are used on return without replaying the offline path.
 
-可复现命令：
+## Accounts and public access
 
-```sh
-npm run check
-npm run check:earnings
-npm run validate:history -- --cache-dir /tmp/radar-history-source-cache --out reports/history-validation-2019-2025.json
-# 已有完整且哈希一致的缓存才可离线重放；缺失缓存会失败。
-npm run validate:history -- --cache-dir /tmp/radar-history-source-cache --out reports/history-validation-2019-2025.json --offline
-npm run capture:evidence
-```
+Each visitor's account is stored only in that browser. The original v1 storage key and ledger remain compatible. Web Locks serialize same-origin tabs. JSON backups validate ledger balance, symbols, fees and timestamps; CSV exports retain signed numbers. Different origins/devices have independent accounts, transferable by backup.
 
-`check:earnings` 默认只读输出，可用 `--input` 重放已保存证明；`capture:evidence`会创建实际观察文件及前瞻汇总，不覆写已存在的同日证据，同时推进最近来源基线和已确认的发布/财报证明。云端冷部署也会恢复这些证明；一次新失败不会抹去旧的成功时间。历史原始市场文件不随公开报告整批再分发，报告保留获取时间、来源URL与SHA256。当前完整验收结果见 [AUDIT.md](./AUDIT.md)。
+The production UI, scripts, styles and fonts are self-contained. Browsers call only the site's own API; blocked overseas quote/CDN domains are not required on visitors' devices. Public deployment does not require a ChatGPT account. Actual mainland carrier reachability must be verified on those networks; an international smoke test is not mainland verification.
 
-## 维护验收 · v4.7.5
+## Run and test
 
-2026-11-05 继续审查并修复上一轮未覆盖的问题。联邦基金目标区间的上下限必须来自同一天，且下限不得高于上限；否则只暂停政策指标的评分，保留两项原始观察值与日期，并显示等待同步或区间无效。服务器抓取、已保存缓存、候选缓存比较和浏览器重算共享这条防线。有完整证据的异常旧缓存无法借较高覆盖率继续计分；缺少边界观察资料的历史缓存保持兼容，不宣称已完成核验。
+Requires Node 22+. No npm dependencies.
 
-人工表单提交时会重新读取已保存内容，再合并真正修改的项目；另一标签页已经保存、但异步通知尚未送达时，不会覆盖它修改的其他项目。读取或写入失败时保留本页修改，包括尚未保存的清除操作。此规则解决已复现的通知滞后时序，不提供跨标签页完全同时读写的原子事务保证。
+- `npm start`: standalone Node server for Render, binding 0.0.0.0 and PORT.
+- `npm run dev -- --port 4173`: local preview; development-only `/__qa/mobile?width=440` or `375` iframe viewports.
+- `npm test`: deterministic accounting, market calendar, data parsing, source reconciliation and HTTP contract tests.
+- `npm run build && npm run validate`: dependency-free Worker deployment artifact for the canonical Sites checkout.
 
-刷新后离开前三名的风险主因按钮有可预期的键盘焦点回退；人工值旁的链接明确标为公开参考资料，不能当作人工判断的来源。利率和非农卡片的说明也与实际输入对齐，不再暗示已纳入利率上涨速度、就业历史版本修正、工时或行业分布。客户端收到错误状态后会关闭未读完的响应，避免流式错误响应继续占用连接。
+## QA
 
-权重、评分公式和动作阈值未改。新增三项浏览器回归已写入脚本，但本机 Chrome 仍在启动时崩溃，尚未运行；实际提交和渲染函数另有 Node VM 复现及修复验证，不能代替浏览器验收。完整执行记录和产品验证空白见 [AUDIT.md](./AUDIT.md)。
+Three rounds: engine/data/calendar tests; desktop live-feed and limit/cancel flows; phone viewport, persistence, multi-market and production checks. See QA.md. Physical iPhone/Safari and continuous offline operation are not represented as tested.
 
-## 发布期核验验收 · v4.7.4
+## Sources
 
-2026-11-05 继续补齐官方发布期核验。系统从 BLS 的 CPI 与 Employment Situation 最新新闻稿中同时读取报告月份及真实 embargo 发布时间，按纽约夏令时转换，只使用确实已经发布的证据；不会根据未来日程猜测已经发布。CPI 核对四序列的共同月份，就业分别核对 UNRATE / PAYEMS。
-
-若来源落后于已确认官方月份，相关完整指标退出当前评分：CPI 会影响通胀、政策、失业率组合与非农组合；UNRATE / PAYEMS 分别影响自己的组合及政策指标。当前缓存、候选缓存比较和接口返回均执行同一规则，覆盖不足时暂停总分。旧观察值保留可读，但不能靠较高覆盖率绕过已发布新期的约束。
-
-核验失败或未知发布时间不会凭空剔除数据；上次已确认的官方期仍保留为下限，并记录失败尝试。FRED 比已保存官方记录更新时不会被反向误杀。页面单独展示 CPI / 就业发布核验与官方原文链接，市场数据错误与发布核验错误分别保存。新闻稿核验与市场抓取并行，既有缓存不必等它返回。自动复核随原有 15 分钟刷新；服务内部的失败重试窗口不代表新增 5 分钟后台调度。
-
-本轮全部 149 项自动检查通过，包括 20 项新闻稿/状态缓存、12 项共享核验投影，以及两项新 HTTP 缓存回归。真实数据源运行完成：两类官方发布期和 FRED 共同数据期均为 2026-09、覆盖率 90%、来源错误为零。七项完整 Chrome 最小字号偏好测试仍因本机浏览器注册启动失败而未执行；上轮浏览器通过数没有重复计为本轮验收。
-
-本轮只补了 CPI、UNRATE、PAYEMS 的已证实发布期下限，不等同于全部宏观数据、数值或修订版本对账。PCE、Sahm、信用等仍使用各自原有数据期校验，未把独立来源的 Sahm 强行套入 BLS 同时发布规则。权重、评分公式和仓位提示阈值未改。
-
-## 上轮维护验收 · v4.7.3
-
-2026-11-05 完成一轮代码、数据与浏览器回归。修复 Nasdaq 成功撤回日期后仍保留旧预估、人工弹窗快速重开时的返回焦点竞态，以及来源错误消失后的焦点恢复；移除会阻塞首屏的 Google Fonts 请求，改用系统字体。十二项权重、评分公式和动作阈值未改。
-
-按官方 IR / SEC 公告更新 TSM、MSFT、GOOG、AMZN、MU 和 SK hynix 的最新季度正文，并加入 NVIDIA 已确认的 11 月 17 日财报日期。研究解读、公司指引和已实现数据分别说明；微软的正式指引另附电话会原文链接，SK hynix 的营业利润率不再与毛利率混读。未找到官方确认的日期仍标为预估或待官宣。
-
-财报资料独立放在 `earnings-data.mjs`；固定历史测试资料放在 `fixtures/earnings-data.json`，避免以后更新公司正文时意外改变固定时钟的故障场景。实际页面仍自动核对资料有效期，不能只把旧资料的日期改成今天。
-
-验收：115 项自动测试、37 个浏览器交互场景、23 个产品专项场景通过。另有 7 项真实 Chrome 最小字号偏好检查因本次只能运行 headless shell，明确跳过、未计为通过；完整 Chrome 仍会执行这些检查。生产代码连接真实数据源后，320 / 390 / 1440 像素页面无错误与横向溢出，接口覆盖率 90%、八家财报有效、来源错误为零。这是本轮时点验收，部署状态另行核对，不代表长期可用性保证。
-
-## 上轮审查结论 · v4.7.2
-
-2026-10-03 完成独立产品审查和实际修复。日常查看、风险主因定位、日程、人工录入、取消、重新打开、多标签页同步及故障恢复已验证。修复缺子数据仍按完整权重计分、CPI 月份混算、旧财报跨季度重新生效、异常缓存、写入失败和请求资源释放问题；改善放大字号导航、来源可读性、错误详情和键盘焦点。完整输入下的权重、公式和动作阈值未改。
-
-本轮最终验收：113 项自动检查、36 个浏览器回归场景、30 个产品专项场景全部通过；另用真实接口完成 8 个用户任务，并读取核对八家公司的实际财报日程。测试使用独立工作区和临时浏览器，没有改动原目录或个人浏览器数据。本地验收与公网部署分别核对，上线后应确认页脚版本为 v4.7.2，并复测真实接口与核心页面。
-
-仍需注意：官方最新已发布期尚未逐次核验，自动抓取成功不等于供应商已经更新；AI 财报正文不是自动解读，过期资料会退出计分；EPS 修正广度未接入；权重没有完整历史回测。未验证真实手机、其他浏览器和完整辅助技术。90 秒抓取预算使用加速时钟测试，不是长时间线上压力测试。
-
-后续优先级：官方发布进度核验 → 可追溯的财报资料更新 → 浏览器人工数据导入导出 → 历史校准；简化长页面应先验证真实用户任务，不删来源、覆盖率和日期。详细问题、复现、修复、验收证据与每项建议的收益/成本/风险见 [完整审查记录](./AUDIT.md)。
-
-## 启动
-
-需要 Node.js 18 或更高版本：
-
-```bash
-npm start
-```
-
-然后打开 <http://127.0.0.1:4173>。
-
-## 公网部署
-
-见 [DEPLOY.md](./DEPLOY.md)。推荐部署为 Render Web Service。
-
-## 数据与评分
-
-- 服务端从 FRED 和 Nasdaq 抓取市场指标，并使用公司 IR、SEC、BLS、BEA 和美联储官方资料补充财报与事件日历，缓存 15 分钟。
-- 空响应、历史样本不足或超过合理发布周期的旧数据不会参与评分；日度、周度、月度和季度数据分别使用与发布频率匹配的时效门槛。手动刷新有 1 分钟冷却，既避免误把残缺数据算成低风险，也避免重复请求压垮公开数据源。
-- FRED 的 PCE 日期是统计月份的第一天，并非发布日期。考虑 BEA 通常在下个月月底发布，PCE 使用 100 天的观测日期门槛，避免正常发布间隔内被误剔除；其他指标保留各自门槛。
-- 刷新会立即返回已有数据，浏览器随后自动检查后台进度；首批数据同步超过 30 秒也会继续等待。单次请求（含完整响应正文）最多等待 30 秒，失败后自动重试，异常响应不会替换上次有效数据。隐藏页面暂停轮询，返回页面或联网后恢复。
-- 服务端单个来源请求限时 25 秒，整轮行情抓取限时 90 秒，队列和重试共享这段时间；日历独立更新，不再挡住首批行情。缓存先写临时文件再替换，并按顺序保存，写入失败不会破坏上一份好数据。
-- 首次连接失败时，首页会明确显示失败及重试状态；数据或日程来源部分失败会在页头和顶部提示，不再显示全部更新成功。抓取时间与日程日期分开标注，时间戳包含本地时区，日程倒计时按纽约日期计算。
-- 12 项权重总计 100%，基础分按有效权重归一化。暂时取不到的数据不会当成零风险，而是从可用权重中剔除，并在页面显示覆盖率。权重和完整评分口径可在首页展开查看。
-- 风险链至少有两项有效信号且覆盖本组 60% 权重，才能参与主导修正。修正只向上，按本组实际覆盖率折减；基础分、三条风险链、主导修正和共振修正分别展示。指标点数始终由风险值和当前权重重新计算，旧缓存升级不改变原始资料时间。
-- 综合分需要至少 60% 的有效权重；低于此值时保留指标展示，暂停总分和仓位提示。市场缓存超过 24 小时后退出评分，断网或页面跨日也会重新核对有效期。
-- CPI/PCE 和就业变化按实际年月匹配比较期；缺少对应月份时返回缺失值。同比使用去年同月、月率使用上月，参见 [BLS 计算口径](https://www.bls.gov/cpi/factsheets/calculating-percent-changes.htm)。
-- 网页、服务器和人工重算共用评分规则；告警按显示分数判断。标普跌幅使用最近 252 个交易日的高点，标为“52 周高点”。
-- 同一数据期的重复记录只计一次；数值冲突的记录会报错退出本次抓取。市场宽度使用 SPY/RSP 完全一致的起止日期，行业也须有同日价格和 200 个不同交易日历史；不足 8 个行业时不计分。收益差以百分点显示，不混用不同截至日。
-- 首页会按实际加权贡献列出前三项风险信号，点击可直接筛选并定位到对应指标。
-- 手机和平板保留四个区块的快捷导航，跳转不会被固定页头遮挡；后台刷新保留键盘操作位置，人工数据保存或取消后回到原入口，风险驱动项支持键盘直达对应信号。
-- 页面包含条件式风险动作提示、十二项风险信号、实时政策利率与 2 年期美债定价、八家 AI 产业链巨头的分层财报卡片，以及精简后的重要日期提醒。
-- CPI、非农和 FOMC 日期会从 BLS/FRED 与美联储日历自动同步，AI 公司下次财报日期会从 Nasdaq 更新；页面按纽约日期计算“今天”和倒计时。服务运行时每 15 分钟更新市场数据、每 6 小时复核日历，失败来源会在 30 分钟后重试。休眠后会在下一次访问时补抓；浏览器从后台恢复或网络重连时也会主动检查。
-- 页面跨过纽约午夜后会重新检查日程；即使离线，也不会继续把昨天当作下次发布日。暂时没有有效日期时显示“待核对”，财报卡片与日期提醒使用同一份状态。断网会立即显示离线状态，重连后自动补查。
-- AI 财报正文属于公司公告快照。已跨过下一次财报日或超过 120 天的快照会标记“待更新”并退出自动评分，避免旧解读继续冒充实时判断。
-- 财报卡片和综合评分共用有效期判断；已过去的财报日期会保存，日程滚动到下一季不会让旧解读重新生效。公司已确认的日期优先于市场预估，部分公司日程抓取失败时保留已有日期并提示重试。
-- 财报日期区分公司确认、Nasdaq 预估和依据上期财报日期的季度推算。季度推算只用于仍可核对的上期资料；未知、未来或超过 120 天的上期财报在无来源日期时显示待核对，不自行生成具体日期。过期财报保留资料日期，并把表现与指引标为历史资料。
-- 标普盈利修正广度需要稳定的专业 EPS 数据源。未接入前保持“待接入”且不计分，不再使用固定日期的旧结论。
-- AI 财报风险和标普盈利修正广度可通过页面顶部“人工数据”覆盖。人工值和录入时间保存在当前浏览器的 `localStorage`；刷新不会把旧判断的日期改成今天，旧版本未记录时间的值会明确标注。
-- 人工输入支持回车保存、Esc 取消。同一浏览器的标签页会同步已保存的人工数据；提交时重读最新保存值，再合并实际改动项目及本页尚未保存的修改。同一项目修改按保存覆盖处理；跨页完全同时的读写不属于原子事务。浏览器拒绝保存或清除时，会明确提示本次页面与持久保存的区别。
-- 首页明确显示评分中包含的人工判断数量；确认日期未知或至少 30 天未复核时提醒复核。旧值保留，不自动改分或删除。可在人工表单勾选“确认仍有效”更新同值的确认时间；直接保存未改动的表单不会把旧日期改成今天。清除后关闭窗口会返回可见入口。
-- 完整性校验要求十二项已知信号、明确的布尔可用状态、对应的类别及唯一公司代码。残缺或类型错误的响应不会替换正常画面，残缺磁盘缓存也不能用来启动一个貌似完整的评分。点数始终按当前有效风险值重算，保留旧点数兼容性。
-- 已保存日程也检查日期、文本和来源元数据，损坏缓存不会进入日历恢复流程。旧版本带来源错误的缓存需要重新抓取验证；完整的旧缓存仍可读取。
-- 复合指标必须具备声明的评分子输入，不能缺一项后悄悄回退为单项并保留完整权重。CPI 四条季调/未季调序列先对齐共同月份，PCE 独立标注数据期；信用组件分别显示各自观测日期。来源发布进度尚未逐次核验，自动抓取时间不等于指标的官方发布时间。
-- “机构标普目标”已删除：系统化共识依赖付费数据，而且该指标通常滞后于市场，预测价值有限。
-- 免费公开数据有不同发布频率。“实时”表示自动查询最新可用值，不表示月度或季度指标会按秒变化。
-
-## 测试
-
-`npm run check` 执行数据解析、日历、评分、请求校验与本地服务回归测试，不依赖外部数据源。新增服务测试包括缓存写失败与重启、写入排序、真实本地流式错误响应资源释放、日历等待时市场数据独立显示。
-
-启动服务后可执行 `npm run check:browser` 检查桌面/手机布局、冷启动、后台轮询、断网恢复、异常响应、人工输入与旧值复核、多标签页同步、跨日显示、键盘焦点与手机/平板导航。新增检查覆盖 740 像素高的手机首屏与 640×360 横屏复核窗口。测试环境需提供 Playwright 及 Chromium；`RADAR_URL` 可指定站点（默认本地 4173 端口），`CHROME_PATH` 可指定浏览器，`RADAR_SCREENSHOTS` 可指定截图目录，`RADAR_TEST` 可按名称筛选场景；失败时记录页面错误和请求失败信息，并在指定目录保留截图。这些测试工具不是网站运行依赖。
-
-浏览器检查还会运行独立产品回归脚本，覆盖 Chrome 实际最小字号设置、放大视口模拟、来源链接对比度、键盘风险信号定位与完整错误列表。真实设备、其他浏览器和完整辅助技术测试不在本机验证范围内。完整审查范围、问题复现、修复状态、验收证据和剩余风险见 [AUDIT.md](./AUDIT.md)。
-
-## v4.6.7 三轮检查记录
-
-| 轮次 | 检查范围 | 状态与证据 |
-| --- | --- | --- |
-| 1 | HTTP 请求与服务稳定性 | 已完成：复现异常 Host/URL 导致连接中断、写请求被接受；修复后 56 项自动测试通过，覆盖错误响应后的服务存活、HEAD、安全响应头与私有文件隔离。 |
-| 2 | 市场历史数据与比较日期 | 已完成：5 个新增故障用例先复现失败；修复重复/冲突记录、基金起止日期错位、旧行业价格混入后，62 项自动测试通过，另补测共同截至日缺失边界。 |
-| 3 | 手机导航与键盘操作 | 已完成：先复现手机导航隐藏、刷新及编辑框关闭后焦点丢失，再修复并通过 22 个浏览器场景；320/390/768/1024 像素导航无重叠，跳转标题无遮挡；62 项自动测试再次全部通过。 |
-
-## v4.6.8 产品检查
-
-2026-10-03 从首次访问、数据可信度和手机阅读的角度检查，修复首次连接失败仍停在读取中、部分来源失败却显示更新成功、季度推算被误标成市场预估、过期财报隐藏资料日期等问题。错误提示移到首页顶部，财报卡片和日历共用日期来源标记，手机正文与窄屏金额布局已改善。64 项自动测试和 24 个浏览器场景通过，并检查 1440/390/320 像素截图。
-
-## v4.7.0 评分检查
-
-2026-10-03 调整 AI / 信用 / 宽度权重为 5% / 15% / 10%，其余保持不变。修复单项残缺风险链被完整放大、主导混合降低基础分，以及缓存旧点数与当前风险值不一致的问题。首页增加三条风险链覆盖信息和全部权重，删除未经概率校准的未来 6–12 个月标签；后台刷新保留评分依据链接的键盘焦点和展开状态。73 项自动测试、27 个桌面与手机浏览器场景通过，另验证全部 4096 种缺失组合和 10 个构造情景。详细依据、假设和可复现情景对照见 [SCORING.md](./SCORING.md)。此次调整不是完整历史回测的结论。
-
-## v4.7.1 第三视角检查
-
-2026-10-03 从每天使用和新用户理解的角度检查。加严残缺数据保护，首页披露人工判断并提醒复核，增加同值明确确认流程，修复清除后返回隐藏入口的问题，压缩手机总览以便直接看到核心分数与结论。评分权重和 v4.7.0 的评分口径不变。76 项自动测试、33 个浏览器场景覆盖相关行为；窄屏与横屏截图另行检查。重排检查参考 [W3C Reflow](https://www.w3.org/WAI/WCAG22/Understanding/reflow.html)，不表示已获得完整无障碍认证。
-
-## 注意
-
-该页面是研究工具，不构成投资建议。公开数据源若临时限流，页面会剔除缺失指标、降低覆盖率，并明确显示错误，不会把缺失数据当成零风险。
+- https://developers.binance.com/docs/binance-spot-api-docs/faqs/market_data_only
+- https://www.okx.com/docs-v5/en/
+- https://gu.qq.com/
+- https://finance.sina.com.cn/stock/usstock/
+- https://www.nyse.com/trade/hours-calendars
