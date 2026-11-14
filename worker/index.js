@@ -1,4 +1,5 @@
 // Self-contained Worker: public read-only quotes + browser-local paper trading.
+export const APP_VERSION='2026.11.14.2';
 export const COINS = [
  {symbol:'BTC',name:'Bitcoin',color:'#f7931a',icon:'₿'},
  {symbol:'ETH',name:'Ethereum',color:'#8797d5',icon:'Ξ'},
@@ -362,7 +363,7 @@ function clientMain(engineFactory, coins, policyFactory) {
   const text=$('marketSearch').value.toLowerCase().trim(),filtered=coins.filter(c=>c.market===market&&(group==='all'||c.group===group)&&(c.symbol+' '+c.name).toLowerCase().includes(text));
   $('marketCount').textContent=filtered.length+(market==='stock'?' 支美股 / ETF':' 个币种');
   $('marketList').innerHTML=filtered.map(c=>'<button type="button" class="market-row'+(selected===c.symbol?' selected':'')+'" data-symbol="'+c.symbol+'" aria-label="选择 '+c.symbol+'" aria-pressed="'+(selected===c.symbol)+'"><div class="market-label"><span class="coin'+(c.market==='stock'?' stock-icon':'')+'" style="--coin-color:'+c.color+'">'+c.icon+'</span><div><div class="market-symbol">'+c.symbol+'<span class="muted tiny"> / '+unit(c.symbol)+'</span></div><div class="market-name">'+c.name+'</div></div></div><div class="market-numbers"><div class="market-price" id="mp-'+c.symbol+'">—</div><div class="market-change" id="mc-'+c.symbol+'">—</div></div></button>').join('')||'<div class="market-empty">没有找到这个标的</div>';
-  updateMarketNumbers();
+  updateMarketNumbers();requestAnimationFrame(()=>{const list=$('marketList'),active=list.querySelector('[aria-pressed=\"true\"]');if(!active)return;if(matchMedia('(max-width:980px)').matches)list.scrollLeft=Math.max(0,active.offsetLeft-list.offsetLeft-(list.clientWidth-active.clientWidth)/2);else list.scrollTop=Math.max(0,active.offsetTop-list.offsetTop-list.clientHeight/2);});
  }
  function updateMarketNumbers(){for(const c of coins){const q=quotes[c.symbol],p=$('mp-'+c.symbol),ch=$('mc-'+c.symbol);if(p&&q){p.textContent=price(q.price,c.symbol);ch.textContent=Number.isFinite(q.change)?signed(q.change)+'%':'—';ch.className='market-change '+tone(q.change);}}}
  function renderPair(){
@@ -416,16 +417,18 @@ function clientMain(engineFactory, coins, policyFactory) {
   if(renderedTab!==tab||!panel.querySelector('[data-record]')||!result.includes('data-record=')){panel.innerHTML=result;renderedTab=tab;return;}
   const template=document.createElement('template');template.innerHTML=result;
   const oldCards=new Map(Array.from(panel.querySelectorAll('[data-record]')).map(el=>[el.dataset.record,el]));
-  const keep=new Set();
+  const keep=new Set();let cursor=panel.firstElementChild;
   for(const next of Array.from(template.content.children)){
    const key=next.dataset.record,current=key?oldCards.get(key):null;
-   if(!current){panel.append(next);if(key)keep.add(key);continue;}
-   keep.add(key);
-   for(const selector of ['.position-top','.position-grid']){const a=current.querySelector(selector),b=next.querySelector(selector);if(a&&b&&a.innerHTML!==b.innerHTML)a.innerHTML=b.innerHTML;}
-   const oldTime=current.querySelector('time'),newTime=next.querySelector('time');if(oldTime&&newTime)oldTime.textContent=newTime.textContent;
-   const oldClose=current.querySelector('[data-close-position]'),newClose=next.querySelector('[data-close-position]');if(oldClose&&newClose)oldClose.disabled=newClose.disabled;
+   const node=current||next;
+   if(current){
+    for(const selector of ['.position-top','.position-grid']){const a=current.querySelector(selector),b=next.querySelector(selector);if(a&&b&&a.innerHTML!==b.innerHTML)a.innerHTML=b.innerHTML;}
+    const oldTime=current.querySelector('time'),newTime=next.querySelector('time');if(oldTime&&newTime)oldTime.textContent=newTime.textContent;
+    const oldClose=current.querySelector('[data-close-position]'),newClose=next.querySelector('[data-close-position]');if(oldClose&&newClose)oldClose.disabled=newClose.disabled;
+   }
+   keep.add(node);if(node!==cursor)panel.insertBefore(node,cursor);cursor=node.nextElementSibling;
   }
-  for(const [key,el] of oldCards)if(!keep.has(key))el.remove();
+  for(const child of Array.from(panel.children))if(!keep.has(child))child.remove();
   renderedTab=tab;
  }
  function renderStatus(){
@@ -523,7 +526,7 @@ function clientMain(engineFactory, coins, policyFactory) {
  $('stopToggle').addEventListener('click',()=>{const expanded=$('stopFields').hidden;$('stopFields').hidden=!expanded;$('stopToggle').setAttribute('aria-expanded',String(expanded));$('stopArrow').textContent=expanded?'−':'＋';renderOrder();});
  $('tradeForm').addEventListener('submit',async e=>{
   e.preventDefault();if(orderBusy)return;orderBusy=true;renderOrder();$('orderError').textContent='';
-  try{const o=options();const r=await transaction(s=>{E.process(s,activeQuotes());const q=freshQuote(o.symbol);if(asset(o.symbol).market==='stock'&&o.type==='limit'&&!q)return E.open(s,{...o,queueOnly:true},o.limit);return E.open(s,o,assertQuote(o.symbol).price);});toast(r.kind==='pending'?'模拟限价委托已提交，保证金与手续费已冻结':selected+' 模拟'+(side==='long'?'做多':'做空')+'已开仓');if(r.kind==='pending')setTab('orders');else setTab('positions');}
+  try{const o=options();if(o.type==='limit'&&(!Number.isFinite(o.limit)||o.limit<=0))throw Error('请输入大于 0 的委托价格');const r=await transaction(s=>{E.process(s,activeQuotes());const q=freshQuote(o.symbol);if(asset(o.symbol).market==='stock'&&o.type==='limit'&&!q)return E.open(s,{...o,queueOnly:true},o.limit);return E.open(s,o,assertQuote(o.symbol).price);});toast(r.kind==='pending'?'模拟限价委托已提交，保证金与手续费已冻结':selected+' 模拟'+(side==='long'?'做多':'做空')+'已开仓');if(r.kind==='pending')setTab('orders');else setTab('positions');}
   catch(error){$('orderError').textContent=error.message;}
   finally{orderBusy=false;renderOrder();}
  });
@@ -534,7 +537,7 @@ function clientMain(engineFactory, coins, policyFactory) {
   try{
    if(close){close.disabled=true;const h=await transaction(s=>{const p=s.positions.find(x=>x.id===close.dataset.closePosition);if(!p)throw Error('该持仓已平仓');const q=assertQuote(p.symbol);return E.close(s,p.id,q.price);});toast('模拟平仓完成，净收益 '+signed(h.net)+' USDT');}
    if(cancel){cancel.disabled=true;await transaction(s=>E.cancel(s,cancel.dataset.cancel));toast('委托已撤销，冻结资金已返还');}
-   if(edit){const p=state.positions.find(x=>x.id===edit.dataset.edit);if(!p)return;editingId=p.id;$('editTpLabel').textContent='止盈价 / '+unit(p.symbol);$('editSlLabel').textContent='止损价 / '+unit(p.symbol);$('stopsPosition').textContent=p.symbol+' / USDT · '+(p.side==='long'?'做多':'做空')+' '+p.leverage+'× · 当前参考价 '+(quotes[p.symbol]?price(quotes[p.symbol].price):'—');$('editTp').value=p.tp||'';$('editSl').value=p.sl||'';$('stopsError').textContent='';$('stopsDialog').showModal();}
+   if(edit){const p=state.positions.find(x=>x.id===edit.dataset.edit);if(!p)return;editingId=p.id;$('editTpLabel').textContent='止盈价 / '+unit(p.symbol);$('editSlLabel').textContent='止损价 / '+unit(p.symbol);$('stopsPosition').textContent=p.symbol+' / '+unit(p.symbol)+' · '+(p.side==='long'?'做多':'做空')+' '+p.leverage+'× · 当前参考价 '+(quotes[p.symbol]?price(quotes[p.symbol].price,p.symbol):'—');$('editTp').value=p.tp||'';$('editSl').value=p.sl||'';$('stopsError').textContent='';$('stopsDialog').showModal();}
   }catch(error){toast(error.message,true);if(close)close.disabled=false;if(cancel)cancel.disabled=false;}
  });
  $('saveStops').addEventListener('click',async()=>{
@@ -569,8 +572,8 @@ function clientMain(engineFactory, coins, policyFactory) {
  });
  $('exportHistory').addEventListener('click',()=>{
   if(!state.history.length){toast('暂无已平仓记录可导出');return;}
-  const header=['币种','方向','杠杆','保证金USDT','数量','开仓价','平仓价','手续费USDT','净收益USDT','平仓原因','开仓时间','平仓时间'];
-  const rows=state.history.map(h=>[h.symbol,h.side==='long'?'做多':'做空',h.leverage,h.margin,h.qty,h.entry,h.exit,h.fees,h.net,h.reason,new Date(h.time).toISOString(),new Date(h.closedAt).toISOString()]);
+  const header=['标的','市场','报价币种','方向','杠杆','保证金USDT','数量','开仓价','平仓价','手续费USDT','净收益USDT','平仓原因','开仓时间','平仓时间'];
+  const rows=state.history.map(h=>[h.symbol,asset(h.symbol).market==='stock'?'美股模拟合约':'加密模拟合约',unit(h.symbol),h.side==='long'?'做多':'做空',h.leverage,h.margin,h.qty,h.entry,h.exit,h.fees,h.net,h.reason,new Date(h.time).toISOString(),new Date(h.closedAt).toISOString()]);
   const csv=[header,...rows].map(row=>row.map(v=>'"'+(typeof v==='number'?String(v):String(v??'').replace(/^[=+@\-]/,c=>"'"+c)).replace(/"/g,'""')+'"').join(',')).join('\r\n');
   download('paper-trades-'+new Date().toISOString().slice(0,10)+'.csv','\ufeff'+csv,'text/csv;charset=utf-8');
  });
@@ -598,7 +601,7 @@ export default {
    if(!coinSymbols.includes(symbol)||!['15m','1h','4h','1d'].includes(interval)||!['binance','okx'].includes(provider))return json({error:'不支持的标的或周期'},400);
    try{return json(await getCandles(symbol,interval,provider));}catch{return json({error:'历史行情暂不可用'},503);}
   }
-  if(url.pathname==='/api/health')return json({ok:true,mode:'paper',supported:ASSETS.map(s=>s.symbol),crypto:COINS.length,stocks:STOCKS.length,quoteBasis:'spot_and_equity_reference',maxLeverage:100,public:true});
+  if(url.pathname==='/api/health')return json({ok:true,version:APP_VERSION,mode:'paper',supported:ASSETS.map(s=>s.symbol),crypto:COINS.length,stocks:STOCKS.length,quoteBasis:'spot_and_equity_reference',maxLeverage:100,public:true});
   if(url.pathname!=='/')return new Response('Not found',{status:404,headers:security});
   return new Response(request.method==='HEAD'?null:page,{headers:{...security,'content-type':'text/html; charset=utf-8','cache-control':'no-cache'}});
  }
