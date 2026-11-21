@@ -2,7 +2,7 @@
   "version": 1,
   "sources": {
     "DCOILBRENTEU": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
         {
           "date": "2025-04-22",
@@ -1607,7 +1607,7 @@
       ]
     },
     "CPIAUCSL": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
         {
           "date": "2023-11-01",
@@ -1752,7 +1752,7 @@
       ]
     },
     "CPIAUCNS": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
         {
           "date": "2023-11-01",
@@ -1897,7 +1897,7 @@
       ]
     },
     "CPILFESL": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
         {
           "date": "2023-11-01",
@@ -2042,7 +2042,7 @@
       ]
     },
     "CPILFENS": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
         {
           "date": "2023-11-01",
@@ -2187,7 +2187,7 @@
       ]
     },
     "PCEPI": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
         {
           "date": "2023-11-01",
@@ -2332,7 +2332,7 @@
       ]
     },
     "PCEPILFE": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
         {
           "date": "2023-11-01",
@@ -2477,12 +2477,8 @@
       ]
     },
     "DFEDTARL": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
-        {
-          "date": "2025-10-16",
-          "value": 4
-        },
         {
           "date": "2025-10-17",
           "value": 4
@@ -4077,17 +4073,17 @@
         },
         {
           "date": "2026-11-19",
+          "value": 3.75
+        },
+        {
+          "date": "2026-11-20",
           "value": 3.75
         }
       ]
     },
     "DFEDTARU": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
-        {
-          "date": "2025-10-16",
-          "value": 4.25
-        },
         {
           "date": "2025-10-17",
           "value": 4.25
@@ -5683,16 +5679,16 @@
         {
           "date": "2026-11-19",
           "value": 4
+        },
+        {
+          "date": "2026-11-20",
+          "value": 4
         }
       ]
     },
     "DGS2": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
-        {
-          "date": "2025-04-14",
-          "value": 3.84
-        },
         {
           "date": "2025-04-15",
           "value": 3.84
@@ -7288,16 +7284,16 @@
         {
           "date": "2026-11-18",
           "value": 4.8
+        },
+        {
+          "date": "2026-11-19",
+          "value": 4.76
         }
       ]
     },
     "DGS10": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
-        {
-          "date": "2025-04-14",
-          "value": 4.38
-        },
         {
           "date": "2025-04-15",
           "value": 4.35
@@ -8893,16 +8889,16 @@
         {
           "date": "2026-11-18",
           "value": 5.07
+        },
+        {
+          "date": "2026-11-19",
+          "value": 5.04
         }
       ]
     },
     "DFII10": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
-        {
-          "date": "2025-04-14",
-          "value": 2.15
-        },
         {
           "date": "2025-04-15",
           "value": 2.16
@@ -10498,16 +10494,16 @@
         {
           "date": "2026-11-18",
           "value": 2.88
+        },
+        {
+          "date": "2026-11-19",
+          "value": 2.88
         }
       ]
     },
     "T10Y3M": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
-        {
-          "date": "2025-04-15",
-          "value": 0.02
-        },
         {
           "date": "2025-04-16",
           "value": -0.04
@@ -12103,16 +12099,16 @@
         {
           "date": "2026-11-19",
           "value": 0.7
+        },
+        {
+          "date": "2026-11-20",
+          "value": 0.6
         }
       ]
     },
     "VIXCLS": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
-        {
-          "date": "2025-05-05",
-          "value": 23.64
-        },
         {
           "date": "2025-05-06",
           "value": 24.76
@@ -13708,16 +13704,16 @@
         {
           "date": "2026-11-18",
           "value": 24.56
+        },
+        {
+          "date": "2026-11-19",
+          "value": 28.44
         }
       ]
     },
     "SP500": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
-        {
-          "date": "2025-04-17",
-          "value": 5282.7
-        },
         {
           "date": "2025-04-21",
           "value": 5158.2
@@ -15313,16 +15309,16 @@
         {
           "date": "2026-11-18",
           "value": 7323.63
+        },
+        {
+          "date": "2026-11-19",
+          "value": 7175.83
         }
       ]
     },
     "BAMLH0A0HYM2": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
-        {
-          "date": "2025-05-14",
-          "value": 3.1
-        },
         {
           "date": "2025-05-15",
           "value": 3.2
@@ -16918,11 +16914,15 @@
         {
           "date": "2026-11-18",
           "value": 3.47
+        },
+        {
+          "date": "2026-11-19",
+          "value": 3.52
         }
       ]
     },
     "DRTSCILM": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
         {
           "date": "2023-10-01",
@@ -16979,7 +16979,7 @@
       ]
     },
     "SAHMREALTIME": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
         {
           "date": "2023-11-01",
@@ -17124,7 +17124,7 @@
       ]
     },
     "ICSA": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
         {
           "date": "2023-11-11",
@@ -17761,7 +17761,7 @@
       ]
     },
     "NFCI": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
         {
           "date": "2023-11-10",
@@ -18398,7 +18398,7 @@
       ]
     },
     "UNRATE": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
         {
           "date": "2023-11-01",
@@ -18543,7 +18543,7 @@
       ]
     },
     "PAYEMS": {
-      "checkedAt": "2026-11-20T03:39:03.422Z",
+      "checkedAt": "2026-11-21T03:21:09.584Z",
       "points": [
         {
           "date": "2023-11-01",
@@ -19400,21 +19400,21 @@
       "cpi": {
         "period": "2026-10",
         "publishedAt": "2026-11-10T13:30:00.000Z",
-        "checkedAt": "2026-11-20T03:39:00.307Z",
+        "checkedAt": "2026-11-21T03:21:07.343Z",
         "source": "https://www.bls.gov/news.release/cpi.nr0.htm",
         "error": null
       },
       "employment": {
         "period": "2026-10",
         "publishedAt": "2026-11-06T13:30:00.000Z",
-        "checkedAt": "2026-11-20T03:39:00.211Z",
+        "checkedAt": "2026-11-21T03:21:07.247Z",
         "source": "https://www.bls.gov/news.release/empsit.nr0.htm",
         "error": null
       },
       "pce": {
         "period": "2026-09",
         "publishedAt": "2026-10-29T12:30:00.000Z",
-        "checkedAt": "2026-11-20T03:38:59.813Z",
+        "checkedAt": "2026-11-21T03:21:06.947Z",
         "source": "https://www.bea.gov/data/personal-consumption-expenditures-price-index",
         "error": null,
         "releaseUrl": "https://www.bea.gov/news/2026/personal-income-and-outlays-september-2026"
@@ -19425,8 +19425,8 @@
     "version": 1,
     "sources": {
       "NVDA": {
-        "checkedAt": "2026-11-20T03:39:00.511Z",
-        "attemptedAt": "2026-11-20T03:39:00.511Z",
+        "checkedAt": "2026-11-21T03:21:07.543Z",
+        "attemptedAt": "2026-11-21T03:21:07.543Z",
         "error": null,
         "reports": [
           {
@@ -19480,8 +19480,8 @@
         ]
       },
       "AVGO": {
-        "checkedAt": "2026-11-20T03:39:00.517Z",
-        "attemptedAt": "2026-11-20T03:39:00.517Z",
+        "checkedAt": "2026-11-21T03:21:07.551Z",
+        "attemptedAt": "2026-11-21T03:21:07.551Z",
         "error": null,
         "reports": [
           {
@@ -19535,8 +19535,8 @@
         ]
       },
       "TSM": {
-        "checkedAt": "2026-11-20T03:39:02.086Z",
-        "attemptedAt": "2026-11-20T03:39:02.086Z",
+        "checkedAt": "2026-11-21T03:21:08.981Z",
+        "attemptedAt": "2026-11-21T03:21:08.981Z",
         "error": null,
         "reports": [
           {
@@ -19550,8 +19550,8 @@
         ]
       },
       "MSFT": {
-        "checkedAt": "2026-11-20T03:39:01.209Z",
-        "attemptedAt": "2026-11-20T03:39:01.209Z",
+        "checkedAt": "2026-11-21T03:21:08.249Z",
+        "attemptedAt": "2026-11-21T03:21:08.249Z",
         "error": null,
         "reports": [
           {
@@ -19605,8 +19605,8 @@
         ]
       },
       "GOOG": {
-        "checkedAt": "2026-11-20T03:39:01.434Z",
-        "attemptedAt": "2026-11-20T03:39:01.434Z",
+        "checkedAt": "2026-11-21T03:21:08.541Z",
+        "attemptedAt": "2026-11-21T03:21:08.541Z",
         "error": null,
         "reports": [
           {
@@ -19660,8 +19660,8 @@
         ]
       },
       "AMZN": {
-        "checkedAt": "2026-11-20T03:39:01.629Z",
-        "attemptedAt": "2026-11-20T03:39:01.629Z",
+        "checkedAt": "2026-11-21T03:21:08.814Z",
+        "attemptedAt": "2026-11-21T03:21:08.814Z",
         "error": null,
         "reports": [
           {
@@ -19715,8 +19715,8 @@
         ]
       },
       "MU": {
-        "checkedAt": "2026-11-20T03:39:01.934Z",
-        "attemptedAt": "2026-11-20T03:39:01.934Z",
+        "checkedAt": "2026-11-21T03:21:09.243Z",
+        "attemptedAt": "2026-11-21T03:21:09.243Z",
         "error": null,
         "reports": [
           {
@@ -19770,8 +19770,8 @@
         ]
       },
       "000660.KS": {
-        "checkedAt": "2026-11-20T03:39:02.907Z",
-        "attemptedAt": "2026-11-20T03:39:02.907Z",
+        "checkedAt": "2026-11-21T03:21:10.151Z",
+        "attemptedAt": "2026-11-21T03:21:10.151Z",
         "error": null,
         "reports": [
           {
