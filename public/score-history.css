@@ -1,3 +1,5 @@
+.score-history-entry { margin: .6rem 0; }
+.score-history-entry a { color: #d9f25f; font-size: .875rem; text-underline-offset: .2em; }
 #scoreHistory { scroll-margin-top: 5.5rem; }
 #scoreHistoryContent { max-width: 52rem; min-width: 0; overflow-wrap: anywhere; }
 .history-latest { font-weight: 650; }
