@@ -1,0 +1,28 @@
+name: Verify deployed score history
+on:
+  push:
+    branches: [codex/live-radar-20261122]
+    paths: ['.github/workflows/live-acceptance.yml', 'scripts/verify-deployed-score-history.cjs']
+permissions:
+  contents: read
+jobs:
+  live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: npm install --no-save --package-lock=false playwright@1.57.0
+      - run: node scripts/verify-deployed-score-history.cjs
+      - if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: live-score-history-390
+          path: live-score-history.png
+          if-no-files-found: warn
+          retention-days: 14
