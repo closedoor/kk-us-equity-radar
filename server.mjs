@@ -320,6 +320,10 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
   const headlinePce = getFred("PCEPI");
   const corePce = getFred("PCEPILFE");
   const headlineCpiYoy = monthlyPercentChange(headlineCpiNsa, 12);
+  const annualBaseMonth = cpiAligned ? `${Number(cpiMonth.slice(0, 4)) - 1}${cpiMonth.slice(4)}` : null;
+  const missingAnnualBase = annualBaseMonth !== null
+    && !headlineCpiNsa.some((point) => point.date.slice(0, 7) === annualBaseMonth);
+  const cpiDependencyReason = missingAnnualBase ? "CPI 同比缺基期" : "子数据不足";
   const priorHeadlineCpiYoy = monthlyPercentChange(headlineCpiNsa, 12, 1);
   const headlineCpiMom = monthlyPercentChange(headlineCpi);
   const coreCpiYoy = monthlyPercentChange(coreCpiNsa, 12);
@@ -529,9 +533,11 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
     }),
     indicator({
       id: "inflation", title: "CPI / PCE 通胀趋势", category: "通胀与政策", weight: weights.inflation, risk: inflationRisk,
-      value: Number.isFinite(headlineCpiYoy) ? `${round(headlineCpiYoy, 1)}%` : "暂无数据", detail: `整体 CPI 同比；三个月年化 ${Number.isFinite(headlineCpi3m) ? round(headlineCpi3m, 1) : "--"}%`,
+      value: Number.isFinite(headlineCpiYoy) ? `${round(headlineCpiYoy, 1)}%`
+        : missingAnnualBase && Number.isFinite(headlineCpiMom) ? `${signedPercent(headlineCpiMom)} 环比` : "暂无数据",
+      detail: `整体 CPI 同比${missingAnnualBase ? `缺少 ${annualBaseMonth} 基期` : ""}；三个月年化 ${Number.isFinite(headlineCpi3m) ? round(headlineCpi3m, 1) + "%" : "--"}`,
       date: latest(headlineCpiNsa)?.date || latest(headlineCpi)?.date, description: "同比采用 BLS 未季调正式口径，月率与三个月年化采用季调数据；重点看核心 CPI、核心 PCE 的短期趋势。卡片日期表示最新数据期，不冒充官方发布日期。", why: "通胀黏性决定美联储能否降息，也决定估值压力会持续多久。",
-      source: { label: "BLS / BEA / FRED · CPI 与 PCE", url: "https://www.bls.gov/news.release/cpi.nr0.htm" }, cadence: "月度", confidence: Number.isFinite(inflationRisk) ? "high" : "unavailable", unavailableReason: "子数据不足", sparkline: spark(headlineCpi, 18), methodology: "CPI 四条季调与未季调序列先对齐同月；整体 CPI 三个月年化和同比占 60%，核心 PCE 与核心 CPI 占 40%。",
+      source: { label: "BLS / BEA / FRED · CPI 与 PCE", url: "https://www.bls.gov/news.release/cpi.nr0.htm" }, cadence: "月度", confidence: Number.isFinite(inflationRisk) ? "high" : "unavailable", unavailableReason: cpiDependencyReason, sparkline: spark(headlineCpi, 18), methodology: "CPI 四条季调与未季调序列先对齐同月；整体 CPI 三个月年化和同比占 60%，核心 PCE 与核心 CPI 占 40%。",
       inputDates: { headlinePce: latest(headlinePce)?.date ?? null, corePce: latest(corePce)?.date ?? null },
       breakdown: [
         { label: "CPI", value: Number.isFinite(headlineCpiYoy) ? `${round(headlineCpiYoy, 1)}%` : "--", detail: `${monthLabel(latest(headlineCpiNsa) || latest(headlineCpi))} · 月率 ${signedPercent(headlineCpiMom)}` },
@@ -545,7 +551,7 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
       id: "fed", title: "美联储政策周期", category: "通胀与政策", weight: weights.fed, risk: fedRisk,
       value: fedBounds.valid ? `${round(fedLowerLast.value, 2)}%–${round(fedLast.value, 2)}%` : fedBounds.reason || "暂无数据", detail: `${fedBounds.reason || "当前联邦基金目标区间"}；下次会议 ${nextFomcDate}；2 年期 ${twoYearLast ? round(twoYearLast.value, 2) : "--"}%`,
       date: fedLast?.date, description: "用联邦基金目标区间、2 年期美债和宏观约束判断市场是否在重新定价政策路径。", why: "政策收紧会压制估值和融资；2 年期利率比未经自动核验的概率快照更适合持续监测。",
-      source: { label: "Federal Reserve / FRED · 政策利率", url: sourceUrl("DFEDTARU") }, cadence: "交易日 / 会议", confidence: Number.isFinite(fedRisk) ? "high" : "unavailable", unavailableReason: fedBounds.reason || "子数据不足", sparkline: spark(twoYear, 90), methodology: "市场利率重定价、实际政策变化、通胀和就业约束共同评分；子数据不足时不计分。",
+      source: { label: "Federal Reserve / FRED · 政策利率", url: sourceUrl("DFEDTARU") }, cadence: "交易日 / 会议", confidence: Number.isFinite(fedRisk) ? "high" : "unavailable", unavailableReason: fedBounds.reason || cpiDependencyReason, sparkline: spark(twoYear, 90), methodology: "市场利率重定价、实际政策变化、通胀和就业约束共同评分；子数据不足时不计分。",
       breakdown: [
         { label: "政策目标下限", value: fedLowerLast ? `${round(fedLowerLast.value, 2)}%` : "--", detail: fedLowerLast?.date || "" },
         { label: "政策目标上限", value: fedLast ? `${round(fedLast.value, 2)}%` : "--", detail: fedLast?.date || "" },
@@ -578,13 +584,13 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
       id: "unemployment", title: "美国失业率", category: "就业与经济", weight: weights.unemployment, risk: unemploymentComposite,
       value: unemploymentLast ? `${round(unemploymentLast.value, 1)}%` : "暂无数据", detail: `三个月 ${Number.isFinite(unemployment3mChange) ? `${unemployment3mChange >= 0 ? "+" : ""}${round(unemployment3mChange, 1)}` : "--"} 个百分点；Sahm ${sahmLast ? round(sahmLast.value, 2) : "--"}`,
       date: unemploymentLast?.date, description: "观察本月失业率与三个月前相比的变化，并用基于三个月平均值的 Sahm 规则及初请失业金交叉验证。", why: "就业恶化会削弱消费和盈利，并可能把估值调整升级为衰退型熊市。",
-      source: { label: "BLS / FRED · Unemployment / Sahm", url: sourceUrl("UNRATE") }, cadence: "月度/周度", confidence: Number.isFinite(unemploymentComposite) ? "high" : "unavailable", unavailableReason: "子数据不足", sparkline: spark(unemployment, 24), methodology: "失业率变化与政策压力占 65%，Sahm 与初请变化占 35%；子数据不足时不计分。",
+      source: { label: "BLS / FRED · Unemployment / Sahm", url: sourceUrl("UNRATE") }, cadence: "月度/周度", confidence: Number.isFinite(unemploymentComposite) ? "high" : "unavailable", unavailableReason: cpiDependencyReason, sparkline: spark(unemployment, 24), methodology: "失业率变化与政策压力占 65%，Sahm 与初请变化占 35%；子数据不足时不计分。",
     }),
     indicator({
       id: "payrolls", title: "非农就业数据", category: "就业与经济", weight: weights.payrolls, risk: payrollRisk,
       value: Number.isFinite(payrollLatestChange) ? `${round(payrollLatestChange, 0)}k` : "暂无数据", detail: `三个月平均 ${Number.isFinite(payroll3mAvg) ? round(payroll3mAvg, 0) : "--"}k；六个月平均 ${Number.isFinite(payroll6mAvg) ? round(payroll6mAvg, 0) : "--"}k`,
       date: payrollLast?.date, description: "使用当前可得的非农就业总量计算单月增量、三个月和六个月平均；当前评分未纳入历史版本修正、平均工时或行业分布。", why: "单月数据噪声很大，持续转弱才意味着需求与企业盈利下行。",
-      source: { label: "BLS / FRED · Nonfarm Payrolls", url: sourceUrl("PAYEMS") }, cadence: "月度", confidence: Number.isFinite(payrollRisk) ? "high" : "unavailable", unavailableReason: "子数据不足", sparkline: spark(payrolls, 24), methodology: "取三个月就业恶化与高通胀下的政策约束风险中较高值；两组输入齐全才计分。",
+      source: { label: "BLS / FRED · Nonfarm Payrolls", url: sourceUrl("PAYEMS") }, cadence: "月度", confidence: Number.isFinite(payrollRisk) ? "high" : "unavailable", unavailableReason: cpiDependencyReason, sparkline: spark(payrolls, 24), methodology: "取三个月就业恶化与高通胀下的政策约束风险中较高值；两组输入齐全才计分。",
     }),
     resolveAiIndicator(indicator({
       id: "aiEarnings", title: "AI 产业链财报与指引", category: "盈利与AI", weight: weights.aiEarnings, risk: null,

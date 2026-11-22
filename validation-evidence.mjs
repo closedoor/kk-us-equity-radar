@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isDashboardSnapshot } from "./public/dashboard-state.js";
-import { INDICATOR_WEIGHTS, MIN_SCORE_COVERAGE } from "./public/risk-model.js";
+import { computeScores, INDICATOR_WEIGHTS, MIN_SCORE_COVERAGE, SCORING_VERSION } from "./public/risk-model.js";
 
 const DAY_MS = 86_400_000;
 const nyDate = (value) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value));
@@ -19,6 +19,11 @@ export function createEvidence(data, { capturedAt = new Date().toISOString(), so
   const reference = data.validationReference;
   if (!Object.hasOwn(data, "validationReference") || (reference !== null && (!reference || reference.series !== "SP500" || !validDate(reference.date) || !Number.isFinite(reference.close) || reference.close <= 0
     || reference.date > nyDate(capturedAt)))) throw new Error("Missing or invalid numeric market reference");
+  if (data.scoringVersion !== SCORING_VERSION) throw new Error("Unsupported live scoring version; update the evidence recorder");
+  const scoringContext = Object.fromEntries(["drawdownPercent", "breadthRiskPercent"].map(key => [key,
+    Number.isFinite(data.scoringContext?.[key]) ? data.scoringContext[key] : null]));
+  const calculated = computeScores(data.indicators, scoringContext);
+  if (data.score !== calculated.score || data.coverage !== calculated.coverage) throw new Error("Inconsistent dashboard score or coverage; refusing to persist");
   const sourceUrl = new URL(source);
   if (!new Set(["https:", "http:"]).has(sourceUrl.protocol) || sourceUrl.username || sourceUrl.password) throw new Error("Invalid evidence source URL");
   if (data.indicators.some(row => row.available && validDate(row.date) && row.date > nyDate(capturedAt))) throw new Error("Future observation cannot enter evidence");
@@ -30,7 +35,8 @@ export function createEvidence(data, { capturedAt = new Date().toISOString(), so
     scoringVersion: data.scoringVersion,
     producer: { productVersion: data.productVersion || null, buildCommit: data.buildCommit || null, dataQualityVersion: data.dataQualityVersion || null },
     source: sourceUrl.href,
-    score: Number.isFinite(data.score) ? data.score : null,
+    scoringContext,
+    score: calculated.score,
     coverage: data.coverage,
     indicators: data.indicators.map(({ id, weight, available, risk, date }) => ({ id, weight, available, risk, date: date || null })),
     marketReference: reference === null ? null : { ...reference },
@@ -60,6 +66,13 @@ export function isEvidence(record) {
     || (record.marketReference !== null && (record.marketReference?.series !== "SP500" || !validDate(record.marketReference.date)
       || record.marketReference.date > record.observationDate || !(record.marketReference.close > 0) || !Number.isFinite(record.marketReference.close)))
     || !Array.isArray(record.errors)) return false;
+  // Legacy observations did not retain the two inputs for the synergy adjustment.
+  // Keep them readable and immutable; verify the arithmetic for new records.
+  if (Object.hasOwn(record, "scoringContext") && record.scoringVersion === SCORING_VERSION) {
+    const context = record.scoringContext;
+    if (!context || !["drawdownPercent", "breadthRiskPercent"].every(k => Object.hasOwn(context, k)
+      && (context[k] === null || Number.isFinite(context[k]))) || computeScores(record.indicators, context).score !== record.score) return false;
+  }
   const { sha256, ...contents } = record;
   return typeof sha256 === "string" && sha256 === digest(contents);
 }

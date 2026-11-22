@@ -195,3 +195,69 @@ test("checkpoint hydration retains last successful evidence across a newer unkno
   }
   assert.deepEqual(results[0], results[1]);
 });
+
+const novemberCheck = "2026-11-22T01:30:00.000Z";
+function nvidiaNovemberSubmissions({ items = "2.02,9.01", accepted = "2026-11-17T21:20:51.000Z" } = {}) {
+  const data = sec("1045810", [
+    filing({ form: "8-K", reportDate: "2026-11-17", filingDate: "2026-11-17", acceptanceDateTime: accepted,
+      accessionNumber: "0001045810-26-000088", primaryDocument: "nvda-20261117.htm" }),
+    filing({ form: "8-K", reportDate: "2026-11-11", filingDate: "2026-11-12", acceptanceDateTime: "2026-11-12T13:52:41.000Z",
+      accessionNumber: "0001045810-26-000082", primaryDocument: "nvda-20261111.htm" }),
+    filing({ reportDate: "2026-07-26", filingDate: "2026-08-26", acceptanceDateTime: "2026-08-26T20:36:00.000Z",
+      accessionNumber: "0001045810-26-000075", primaryDocument: "nvda-20260726.htm" }),
+  ]);
+  data.fiscalYearEnd = "0131";
+  data.filings.recent.items = [items, "5.02,9.01", ""];
+  return data;
+}
+const nvidia8k = '<p>Item 2.02 Results of Operations and Financial Condition. NVIDIA issued its results.</p><table><tr><td>99.1</td><td><a href="q3fy27pr.htm">Press Release, dated November 17, 2026, entitled &quot;NVIDIA Announces Financial Results for Third Quarter Fiscal 2027&quot;</a></td></tr></table>';
+const nvidiaRelease = '<h1>NVIDIA Announces Financial Results for Third Quarter Fiscal 2027</h1><p>NVIDIA (NASDAQ&#58; NVDA) today reported revenue for the third quarter ended October 25, 2026, of $115.8 billion.</p>';
+
+test("NVIDIA's filed earnings 8-K proves the new quarter before its 10-Q appears", async () => {
+  const requested = [];
+  const service = createEarningsMonitor({ aiEarnings: [{ ticker: "NVDA" }], now: () => new Date(novemberCheck), logger: { warn() {} },
+    fetchText: async (url) => {
+      requested.push(url);
+      if (url === earningsMonitorSources.NVDA) return JSON.stringify(nvidiaNovemberSubmissions());
+      if (url.endsWith("nvda-20261117.htm")) return nvidia8k;
+      if (url.endsWith("q3fy27pr.htm")) return nvidiaRelease;
+      throw new Error("Unexpected non-results filing fetch");
+    },
+  });
+  await service.refresh();
+  const snapshot = service.snapshot();
+  assert.equal(snapshot.sources.NVDA.error, null);
+  assert.equal(isEarningsSchedule(snapshot), true);
+  const result = applyEarningsChecks([{ ticker: "NVDA", period: "FY2027 Q2", released: "2026-08-26" }], snapshot, Date.parse(novemberCheck));
+  assert.equal(result.aiEarnings[0].reviewRequired, true);
+  assert.equal(result.aiEarnings[0].latestReport.period, "FY2027 Q3");
+  assert.equal(result.aiEarnings[0].latestReport.periodEnd, "2026-10-25");
+  assert.equal(result.aiEarnings[0].latestReport.publishedAt, "2026-11-17T21:20:51.000Z");
+  assert.equal(result.aiEarnings[0].latestReport.form, "earnings-release");
+  assert.match(result.aiEarnings[0].latestReport.source, /000104581026000088\/q3fy27pr.htm$/);
+  assert.equal(requested.length, 3);
+  const reviewed = applyEarningsChecks([{ ticker: "NVDA", period: "FY2027 Q3", released: "2026-11-17" }], snapshot, Date.parse(novemberCheck));
+  assert.equal(reviewed.aiEarnings[0].reviewRequired, false);
+});
+
+test("NVIDIA 8-K monitoring rejects future, unrelated and unverified result announcements", async (t) => {
+  for (const [name, data, primary, exhibit, expectedError] of [
+    ["unrelated 8-K", nvidiaNovemberSubmissions({ items: "5.02,9.01" }), nvidia8k, nvidiaRelease, false],
+    ["future accepted filing", nvidiaNovemberSubmissions({ accepted: "2026-11-23T21:20:51.000Z" }), nvidia8k, nvidiaRelease, false],
+    ["conference invitation", nvidiaNovemberSubmissions(), nvidia8k.replaceAll("NVIDIA Announces Financial Results for Third Quarter Fiscal 2027", "NVIDIA Sets Conference Call for Third-Quarter Financial Results"), nvidiaRelease, true],
+    ["unpublished release text", nvidiaNovemberSubmissions(), nvidia8k, nvidiaRelease.replace("today reported", "will report"), true],
+    ["conflicting report period", nvidiaNovemberSubmissions(), nvidia8k, nvidiaRelease.replace("October 25, 2026", "July 26, 2026"), true],
+  ]) {
+    await t.test(name, async () => {
+      const service = createEarningsMonitor({ aiEarnings: [{ ticker: "NVDA" }], now: () => new Date(novemberCheck), logger: { warn() {} },
+        fetchText: async (url) => url === earningsMonitorSources.NVDA ? JSON.stringify(data) : url.endsWith("nvda-20261117.htm") ? primary : exhibit,
+      });
+      await service.refresh();
+      const snapshot = service.snapshot();
+      const result = applyEarningsChecks([{ ticker: "NVDA", period: "FY2027 Q2", released: "2026-08-26" }], snapshot, Date.parse(novemberCheck));
+      assert.equal(result.aiEarnings[0].reviewRequired, false);
+      assert.equal(Boolean(snapshot.sources.NVDA.error), expectedError);
+      if (expectedError) assert.equal(result.aiEarnings[0].earningsReviewStatus, "unknown");
+    });
+  }
+});

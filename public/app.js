@@ -41,6 +41,7 @@ const els = {
   manualScoreText: document.querySelector("#manualScoreText"),
   reviewManual: document.querySelector("#reviewManualButton"),
   baseScore: document.querySelector("#baseScoreValue"),
+  baseScoreNote: document.querySelector("#baseScoreNote"),
   heat: document.querySelector("#heatValue"),
   recession: document.querySelector("#recessionValue"),
   marketBreak: document.querySelector("#marketBreakValue"),
@@ -81,6 +82,8 @@ const els = {
   pulsePeekVix: document.querySelector("#pulsePeekVix"),
   pulsePeekVxsmh: document.querySelector("#pulsePeekVxsmh"),
   pulseStatus: document.querySelector("#pulseStatus"),
+  dailyVix: document.querySelector("#pulseDailyVix"),
+  pulseHeading: document.querySelector("#marketPulseTitle"),
   pulseQuotes: document.querySelector("#pulseQuotes"),
   pulseJudgments: document.querySelector("#pulseJudgments"),
   pulseErrors: document.querySelector("#pulseErrors"),
@@ -251,6 +254,8 @@ function renderSummary(data) {
   els.manualScoreNote.dataset.review = String(reviewReasons.length > 0);
   els.manualScoreText.textContent = `评分含 ${manual.length} 项人工判断${reviewReasons.length ? `，${reviewReasons.join("、")}，建议复核。` : "。"}`;
   els.baseScore.textContent = Number.isFinite(data.baseScore) ? data.baseScore.toFixed(1) : "--";
+  els.baseScoreNote.textContent = Number.isFinite(data.baseScore) && data.coverage < MIN_SCORE_COVERAGE
+    ? `仅按${data.coverage}%有效权重计算，不是总分` : "按有效权重归一化";
   els.heat.textContent = Number.isFinite(data.heatScore) ? data.heatScore.toFixed(1) : "--";
   els.recession.textContent = Number.isFinite(data.recessionScore) ? data.recessionScore.toFixed(1) : "--";
   els.marketBreak.textContent = Number.isFinite(data.marketBreakScore) ? data.marketBreakScore.toFixed(1) : "--";
@@ -334,7 +339,24 @@ function safeExternalUrl(value) {
   }
 }
 
-function renderStructureTiming() {
+function renderDailyVixReference(pulse) {
+  if (!els.dailyVix) return;
+  const reference = pulse.quotes.find((row) => row.symbol === "VIX");
+  const row = state.data?.indicators.find((item) => item.id === "vix");
+  const date = row?.date;
+  const value = Number(row?.value);
+  const point = row?.sparkline?.at(-1);
+  const show = pulse.mode === "reference" && pulse.status === "stale" && reference?.state === "stale"
+    && row?.available && !cacheExpired(state.data)
+    && /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0, 10) === date
+    && date > reference.date && date <= pulse.today && date <= dateInTimeZone(new Date(state.data.generatedAt))
+    && Number.isFinite(value) && value > 0 && point?.date === date && Number.isFinite(point.value) && Number(point.value.toFixed(2)) === value;
+  els.dailyVix.hidden = !show;
+  els.dailyVix.querySelector("span").textContent = show ? `另有日度 VIX ${value.toFixed(2)}（${date}，模型输入），非当前盘中报价。` : "";
+}
+
+function renderStructureTiming(pulse = projectMarketPulse(pulseState.snapshot)) {
+  renderDailyVixReference(pulse);
   if (!els.structureTiming) return;
   const rows = [["vix", "VIX"], ["breadth", "宽度"], ["sp500", "SPX"]].map(([id, label]) => ({
     label, date: state.data?.indicators.find((item) => item.id === id)?.date || null,
@@ -365,17 +387,18 @@ function renderMarketPulse() {
   const usable = !blocked && (pulse.status === "current" || pulse.status === "last-close");
   const current = usable && pulse.status === "current";
   const bySymbol = new Map(pulse.quotes.map((quote) => [quote.symbol, quote]));
-  const broad = { severe: "大盘急跌", pressure: "大盘承压", none: "大盘未触发急跌", unconfirmed: "大盘待核对" }[pulse.broad.level];
+  const broad = pulse.broad.level === "severe" ? "大盘急跌" : pulse.broad.label;
   const sectorSelloff = pulse.sector.flags.some((flag) => flag.symbol !== "VXSMH" && flag.level === "severe");
   const sector = { severe: sectorSelloff ? "板块急跌" : "板块波动升高", pressure: "板块承压", none: "板块未触发压力", unconfirmed: "板块待核对" }[pulse.sector.level];
   const shortDate = pulse.date?.split("-").slice(1).map(Number).join("/");
   const scope = pulse.session === "close" ? (reference ? "收盘参考" : "收盘段") : "盘中延时";
   const datedScope = shortDate ? `${shortDate} ${scope}` : scope;
+  const datedHistory = pulse.date ? `${pulse.date} 历史报价` : "历史报价";
   const shortStatus = navigator.onLine === false ? "离线 · 当日压力待判断"
-    : pulseState.error ? "报价连接异常 · 当日压力待判断"
+    : pulseState.error ? `${pulseState.error === "报价资料格式异常。" ? "报价格式异常" : "报价连接异常"} · 当日压力待判断`
       : current ? `${datedScope} · ${broad} · ${sector}`
         : usable ? `${shortDate ? `${shortDate} ` : ""}最近收盘 · 当日压力待判断`
-          : pulse.status === "stale" ? "历史报价 · 当日压力待判断"
+          : pulse.status === "stale" ? `${datedHistory} · 当日压力待判断`
             : loading ? "正在读取当日报价 · 压力待判断" : "独立行情待同步 · 可看官方报价";
   if (els.pulsePeekStatus.textContent !== shortStatus) els.pulsePeekStatus.textContent = shortStatus;
   els.pulsePeek.dataset.state = blocked ? "unavailable" : pulse.status;
@@ -383,8 +406,10 @@ function renderMarketPulse() {
   for (const [symbol, target] of [["VIX", els.pulsePeekVix], ["VXSMH", els.pulsePeekVxsmh]]) {
     const row = bySymbol.get(symbol);
     const valid = usable && row?.state === pulse.status;
-    target.textContent = valid ? `${symbol} ${row.value.toFixed(2)}${Number.isFinite(row.changePercent) ? ` ${pulsePercent(row.changePercent, 1)}` : ""}` : `${symbol} —`;
+    const sourceOnly = !valid && (pulse.status === "stale" || (pulseState.snapshot && !loading));
+    target.textContent = valid ? `${symbol} ${row.value.toFixed(2)}${Number.isFinite(row.changePercent) ? ` ${pulsePercent(row.changePercent, 1)}` : ""}` : sourceOnly ? `${symbol} 官网 ↗` : `${symbol} —`;
   }
+  els.pulseHeading.textContent = blocked && pulse.quotes.length ? "上次报价记录" : pulse.status === "stale" ? "历史报价与来源" : pulse.status === "last-close" ? "最近收盘与来源" : "当日报价与判读";
   const checkedAt = pulse.checkedAt ? new Date(pulse.checkedAt) : null;
   const timeNote = checkedAt ? ` · 核对于 ${dateInTimeZone(checkedAt)} ${nyQuoteTime.format(checkedAt)}（纽约）` : "";
   const status = blocked ? `${shortStatus}。下方如有数值，仅为上次记录。`
@@ -392,8 +417,9 @@ function renderMarketPulse() {
       : pulse.status === "unavailable" ? `${shortStatus}。缺失报价不代表市场平静。`
         : `${pulse.label}${pulse.errors.length ? " · 部分来源待核对" : ""}${loading ? " · 正在核对更新" : ""}。`;
   els.pulseStatus.textContent = `${status}${timeNote}${pulse.ruleNote ? ` ${pulse.ruleNote}` : ""}`;
-  if (reference && document.activeElement === els.pulseRefresh) document.querySelector(".pulse-official a")?.focus({ preventScroll: true });
-  els.pulseRefresh.hidden = reference;
+  const hideRefresh = reference && !blocked;
+  if (hideRefresh && document.activeElement === els.pulseRefresh) document.querySelector(".pulse-official a")?.focus({ preventScroll: true });
+  els.pulseRefresh.hidden = hideRefresh;
   els.pulseRefresh.textContent = loading ? "正在读取报价" : pulse.mode === "feed" ? "刷新报价" : "重试读取报价";
   els.pulseRefresh.setAttribute("aria-disabled", String(loading || navigator.onLine === false));
 
@@ -429,7 +455,7 @@ function renderMarketPulse() {
   if (errorList.innerHTML !== list) errorList.innerHTML = list;
   els.pulseErrors.hidden = !errors.length;
   if (hidingFocused) els.pulsePeek.querySelector("a").focus({ preventScroll: true });
-  renderStructureTiming();
+  renderStructureTiming(pulse);
 }
 
 async function loadMarketPulse() {
@@ -444,8 +470,11 @@ async function loadMarketPulse() {
     const response = await fetch("/api/market-pulse", { signal: controller.signal, cache: "no-store" });
     if (!response.ok) throw new Error("报价接口暂不可用。");
     const snapshot = await response.json();
-    if (!isMarketPulseSnapshot(snapshot)) throw new Error("报价资料格式异常。");
     if (pulseState.controller !== controller) return;
+    if (!isMarketPulseSnapshot(snapshot)) {
+      pulseState.error = "报价资料格式异常。";
+      return;
+    }
     pulseState.snapshot = snapshot;
     pulseState.error = null;
   } catch (error) {
@@ -1000,6 +1029,11 @@ els.filters.addEventListener("click", (event) => {
     item.setAttribute("aria-pressed", String(active));
   });
   render();
+});
+els.dailyVix?.querySelector("a").addEventListener("click", () => {
+  if (document.getElementById("indicator-vix")) return;
+  const category = state.data?.indicators.find((item) => item.id === "vix")?.category;
+  Array.from(els.filters.querySelectorAll("button[data-filter]")).find((button) => button.dataset.filter === category)?.click();
 });
 els.grid.addEventListener("click", (event) => {
   const button = event.target.closest("[data-manual-id]");

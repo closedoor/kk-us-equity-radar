@@ -1,11 +1,10 @@
+import { matchesEquitySession } from "./public/us-equity-session.js";
+
 const SYMBOLS = new Set(["VIX", "VXSMH", "SPX", "RSP", "QQQ", "SMH"]);
 export const MARKET_PULSE_BUDGET_MS = 10_000;
 
 const DAY = 86_400_000;
 const MAX_QUOTE_AGE = 7 * DAY; // Keep a genuine previous close across weekends and holidays.
-const REGULAR_OPEN = 9 * 3600 + 30 * 60;
-const CASH_CLOSE = 16 * 3600;
-const INDEX_CLOSE_END = CASH_CLOSE + 16 * 60;
 const NY = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit",
   hour: "2-digit", minute: "2-digit", second: "2-digit",
@@ -36,11 +35,6 @@ function wireTime(value) {
   const [, date, hour, minute, second, fraction = "", zone] = match;
   const milliseconds = Number(fraction.padEnd(3, "0").slice(0, 3));
   return Date.parse(`${date}T${hour}:${minute}:${second}.${String(milliseconds).padStart(3, "0")}${zone}`);
-}
-
-function weekday(date) {
-  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
-  return day >= 1 && day <= 5;
 }
 
 function requireQuoteTime(instant, nowMs) {
@@ -88,7 +82,7 @@ function licensedQuote(row, nowMs) {
   }
   const instant = wireTime(row.at);
   const { date, seconds } = requireQuoteTime(instant, nowMs);
-  if (row.date !== date || (row.session !== "unconfirmed" && (!weekday(date) || seconds < REGULAR_OPEN || seconds >= INDEX_CLOSE_END))) {
+  if (row.date !== date || (row.session !== "unconfirmed" && !matchesEquitySession(date, seconds / 60, row.session))) {
     throw new Error("Licensed quote date or session is inconsistent");
   }
   const source = licensedUrl(row.source, true);

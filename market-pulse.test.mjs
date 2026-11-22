@@ -175,3 +175,63 @@ test("the payload guard rejects unknown symbols, duplicate rows, unsafe URLs and
   assert.equal(isMarketPulseSnapshot(unknown), true);
   assert.equal(projectMarketPulse(unknown, now).quotes[0].state, "unconfirmed");
 });
+
+const datedPair = (date, time, session, checkedAt) => snapshot(["SPX", "RSP"].map((s) =>
+  quote(s, -4, { date, session, at: date + "T" + time + "Z" })), { mode: "feed", checkedAt });
+
+test("Thanksgiving closure preserves the preceding close until the next session and rejects holiday prints", () => {
+  const wed = datedPair("2026-11-25", "21:00:00", "close", "2026-11-25T21:17:00Z");
+  const holiday = "2026-11-26T18:03:00Z";
+  const view = projectMarketPulse(wed, holiday);
+  assert.equal(view.status, "last-close");
+  assert.match(view.broad.label, /^上次收盘/);
+  assert.equal(projectMarketPulse(wed, "2026-11-27T14:29:59Z").status, "last-close");
+  assert.equal(projectMarketPulse(wed, "2026-11-27T14:30:00Z").status, "stale");
+  const fabricated = datedPair("2026-11-26", "18:00:00", "regular", holiday);
+  assert.equal(projectMarketPulse(fabricated, holiday).broad.level, "unconfirmed");
+});
+
+test("only scheduled half days may close at 13:00, and the session ends without needing a provider close", () => {
+  const normal = "2026-11-25T18:09:00Z", half = "2026-11-27T18:09:00Z";
+  assert.equal(projectMarketPulse(datedPair("2026-11-25", "18:00:00", "close", normal), normal).broad.level, "unconfirmed");
+  assert.equal(projectMarketPulse(datedPair("2026-11-27", "18:00:00", "close", half), half).broad.level, "severe");
+  assert.equal(projectMarketPulse(datedPair("2026-11-27", "17:58:00", "regular", half), half).broad.level, "unconfirmed");
+  const later = "2026-11-27T21:19:00Z";
+  assert.equal(projectMarketPulse(datedPair("2026-11-27", "21:00:00", "close", later), later).broad.level, "unconfirmed");
+});
+
+test("observations later than the collection instant do not turn current as the browser clock advances", () => {
+  const checked = "2026-11-05T20:59:00Z";
+  const data = datedPair("2026-11-05", "21:00:00", "close", checked);
+  const view = projectMarketPulse(data, "2026-11-05T21:10:00Z");
+  assert.equal(view.broad.level, "unconfirmed");
+  assert.ok(view.quotes.every(row => row.state === "unconfirmed"));
+});
+
+test("valid independent sector evidence is not hidden by a later unrelated broad-index timestamp or row order", () => {
+  const checkedAt = "2026-11-05T20:50:00Z";
+  const intraday = (symbol, time, move) => quote(symbol, move, { session: "regular", at: "2026-11-05T" + time + "Z" });
+  const rsp = intraday("RSP", "20:50:00", 0), smh = intraday("SMH", "20:10:00", -6.6);
+  const qq = intraday("QQQ", "20:48:00", 0);
+  for (const rows of [[rsp, smh, qq], [qq, smh, rsp], [smh, qq]]) {
+    const view = projectMarketPulse(snapshot(rows, { checkedAt }), checkedAt);
+    assert.equal(view.broad.level, "unconfirmed");
+    assert.deepEqual(view.sector.flags.map(f => f.symbol), ["SMH"]);
+    assert.equal(view.sector.level, "severe");
+  }
+  const allCalm = [intraday("SMH", "20:10:00", 0), qq, { ...intraday("VXSMH", "20:45:00", 0), value: 30 }];
+  assert.equal(projectMarketPulse(snapshot(allCalm, { checkedAt }), checkedAt).sector.level, "unconfirmed",
+    "widely separated non-alerts cannot be presented as a simultaneous three-leg observation");
+});
+
+test("the published calendar covers later-year boundaries without assuming all federal holidays or unverified weekdays", () => {
+  const sessionAt = (day, time, phase = "close") => {
+    const clock = day + "T23:00:00Z";
+    return projectMarketPulse(datedPair(day, time, phase, clock), clock);
+  };
+  assert.equal(sessionAt("2027-12-31", "21:00:00").broad.level, "severe", "no Friday observance for New Year's Day 2028");
+  assert.equal(sessionAt("2028-07-03", "17:00:00").broad.level, "severe", "scheduled early close in daylight time");
+  assert.equal(sessionAt("2028-07-04", "20:00:00").broad.level, "unconfirmed");
+  assert.equal(sessionAt("2029-01-03", "21:00:00").broad.level, "unconfirmed");
+  assert.match(sessionAt("2029-01-03", "21:00:00").errors.join(), /日历未覆盖/);
+});

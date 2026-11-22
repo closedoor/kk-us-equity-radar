@@ -22,7 +22,8 @@ function secRows(payload, ticker) {
   if (!recent || !SEC_COLUMNS.every((key) => Array.isArray(recent[key]) && recent[key].length === recent.form?.length)) {
     throw new Error("SEC submissions columns are missing or have inconsistent array lengths");
   }
-  return recent.form.map((_, index) => Object.fromEntries(SEC_COLUMNS.map((key) => [key, recent[key][index]])));
+  if (recent.items !== undefined && (!Array.isArray(recent.items) || recent.items.length !== recent.form.length)) throw new Error("SEC submissions item column is inconsistent");
+  return recent.form.map((_, index) => ({ ...Object.fromEntries(SEC_COLUMNS.map((key) => [key, recent[key][index]])), items: recent.items?.[index] }));
 }
 function filingUrl(row, ticker) {
   if (!/^\d{10}-\d{2}-\d{6}$/.test(row.accessionNumber) || typeof row.primaryDocument !== "string"
@@ -105,6 +106,47 @@ export function parseSkEarningsFeed(payload, checkedAt = new Date().toISOString(
   }
   if (!reports.length) throw new Error("SK hynix RSS did not contain verified published quarterly financial results");
   return reports.sort((a, b) => b.periodEnd.localeCompare(a.periodEnd)).slice(0, 6);
+}
+
+async function nvidiaReports(payload, request, checkedAt) {
+  const data = parsePayload(payload);
+  const rows = secRows(data, "NVDA");
+  let periodic;
+  try { periodic = parseSecEarnings(data, "NVDA", checkedAt); }
+  catch (error) {
+    if (error.message !== "SEC did not contain a verified published quarterly or annual report") throw error;
+    periodic = [];
+  }
+  // An earnings release can be furnished on 8-K before the corresponding 10-Q.
+  // The event date is not a reporting-period end; require the actual exhibit.
+  const filing = rows.filter((row) => row.form === "8-K" && typeof row.items === "string" && row.items.split(/[,\s]+/).includes("2.02")
+    && publishedFiling(row, Date.parse(checkedAt)) && (!periodic[0] || row.reportDate > periodic[0].periodEnd))
+    .sort((a, b) => Date.parse(b.acceptanceDateTime) - Date.parse(a.acceptanceDateTime))[0];
+  if (!filing) {
+    if (!periodic.length) throw new Error("NVIDIA did not contain a verified published quarterly report");
+    return periodic;
+  }
+  const primary = filingUrl(filing, "NVDA");
+  const html = await request(primary);
+  const exhibit = [...html.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].map((match) => match[1])
+    .find((row) => /\b99\.1\b/.test(text(row)) && /\bPress Release\b/i.test(text(row)));
+  const titlePattern = /NVIDIA Announces Financial Results for (First|Second|Third|Fourth) Quarter(?: and)? Fiscal (20\d{2})/i;
+  const title = titlePattern.exec(text(exhibit));
+  const filenames = [...new Set([...(exhibit || "").matchAll(/href\s*=\s*["']([^"']+)["']/gi)]
+    .map((match) => match[1]).filter((name) => /^[A-Za-z0-9][A-Za-z0-9_.-]*\.html?$/i.test(name)))];
+  if (!/\bItem\s+2\.02\b/i.test(text(html)) || !title || filenames.length !== 1) throw new Error("NVIDIA earnings 8-K quarterly release exhibit was not verified");
+  const source = new URL(filenames[0], primary).href;
+  if (!officialEarningsUrl("NVDA", source)) throw new Error("NVIDIA earnings exhibit source is invalid");
+  const body = text(await request(source));
+  const bodyTitle = titlePattern.exec(body);
+  const reported = /\bNVIDIA\s*\([^)]*\bNVDA\)\s+today reported (?:record )?revenue for the (first|second|third|fourth) quarter ended ([A-Za-z]+)\s+(\d{1,2}),\s*(20\d{2})\b/i.exec(body);
+  if (!bodyTitle || bodyTitle[0].toLowerCase() !== title[0].toLowerCase() || !reported || reported[1].toLowerCase() !== title[1].toLowerCase()) throw new Error("NVIDIA earnings exhibit does not confirm published quarterly results");
+  const month = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 }[reported[2].slice(0, 3).toLowerCase()];
+  const periodEnd = `${reported[4]}-${String(month).padStart(2, "0")}-${reported[3].padStart(2, "0")}`;
+  const period = `FY${title[2]} Q${QUARTERS.findIndex((quarter) => quarter.toLowerCase() === title[1].toLowerCase()) + 1}`;
+  if (!validEarningsDate(periodEnd) || fiscalPeriod("NVDA", periodEnd) !== period || Date.parse(periodEnd) > Date.parse(filing.acceptanceDateTime)) throw new Error("NVIDIA earnings exhibit reporting period is invalid or conflicting");
+  return mergeReports(periodic, [{ period, periodEnd, publishedAt: new Date(filing.acceptanceDateTime).toISOString(), source,
+    form: "earnings-release", title: title[0] }]);
 }
 
 async function tsmReports(payload, request, checkedAt) {
@@ -190,7 +232,8 @@ export function createEarningsMonitor({ fetchText, aiEarnings = Object.keys(EARN
           const payload = await request(earningsMonitorSources[ticker]);
           const checkedAt = now().toISOString();
           const reports = ticker === "000660.KS" ? parseSkEarningsFeed(payload, checkedAt)
-            : ticker === "TSM" ? await tsmReports(payload, request, checkedAt) : parseSecEarnings(payload, ticker, checkedAt);
+            : ticker === "TSM" ? await tsmReports(payload, request, checkedAt)
+              : ticker === "NVDA" ? await nvidiaReports(payload, request, checkedAt) : parseSecEarnings(payload, ticker, checkedAt);
           const finishedAt = now().toISOString();
           state.sources[ticker] = { checkedAt: finishedAt, attemptedAt: finishedAt, error: null,
             reports: mergeReports(state.sources[ticker].reports, reports) };

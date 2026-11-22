@@ -1,4 +1,5 @@
 import test from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, writeFile, readdir, rm } from "node:fs/promises";
@@ -86,6 +87,16 @@ test("future prices and future capture timestamps cannot fabricate mature outcom
   assert.throws(() => evaluate([capture()], [], { asOf: "2026-11-05T20:00:00.000Z" }), /Future evidence/);
 });
 
+test("an inconsistent score cannot become the first immutable observation", () => {
+  const data = snapshot();
+  assert.ok(Number.isFinite(data.score) && data.score !== 99);
+  for (const score of [99, null, "unavailable"]) assert.throws(() => capture({ ...data, score }), /Inconsistent/);
+  assert.throws(() => capture({ ...data, scoringVersion: "9.0.0" }), /Unsupported/);
+  const { sha256, ...tampered } = capture(data);
+  tampered.score = 99;
+  assert.equal(isEvidence({ ...tampered, sha256: createHash("sha256").update(JSON.stringify(tampered)).digest("hex") }), false);
+});
+
 test("inconsistent coverage cannot be persisted as immutable evidence", () => {
   const data = snapshot();
   data.coverage += 1;
@@ -99,12 +110,14 @@ test("duplicate dates cannot inflate samples and conflicting benchmark values ar
 });
 
 test("model versions are identified and cannot silently be pooled when a version is selected", () => {
-  const data = snapshot();
-  data.scoringVersion = "4.8.0";
-  const result = evaluateEvidence([capture(), capture(data)], prices, { horizons: [1], scoringVersion: "4.7.0" });
+  const { sha256, ...legacy } = capture();
+  delete legacy.scoringContext;
+  legacy.scoringVersion = "4.6.0";
+  const other = { ...legacy, sha256: createHash("sha256").update(JSON.stringify(legacy)).digest("hex") };
+  const result = evaluateEvidence([capture(), other], prices, { horizons: [1], scoringVersion: "4.7.0" });
   assert.deepEqual(result.scoringVersions, ["4.7.0"]);
   assert.equal(result.observedSamples, 1);
-  assert.throws(() => evaluateEvidence([capture(), capture(data)], prices), /Select one/);
+  assert.throws(() => evaluateEvidence([capture(), other], prices), /Select one/);
 });
 
 test("New York dates around UTC midnight and DST determine the observation day", () => {

@@ -1,8 +1,6 @@
+import { EQUITY_OPEN_MINUTE, equityCloseMinute, matchesEquitySession, previousEquitySession } from "./us-equity-session.js";
+
 const MINUTE = 60_000;
-const OPEN_MINUTE = 9 * 60 + 30;
-const CLOSE_MINUTE = 16 * 60;
-const EARLY_CLOSE_MINUTE = 13 * 60;
-const LAST_CLOSE_RECORD_MINUTE = CLOSE_MINUTE + 16;
 const SYMBOLS = new Set(["SPX", "VIX", "VXSMH", "SMH", "QQQ", "RSP"]);
 const SESSIONS = new Set(["regular", "close", "unconfirmed"]);
 const MODES = new Set(["reference", "feed"]);
@@ -35,14 +33,7 @@ function validTime(at) {
 function localTime(time) {
   const parts = Object.fromEntries(nyClock.formatToParts(time).map(({ type, value }) => [type, value]));
   const date = `${parts.year}-${parts.month}-${parts.day}`;
-  const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
-  return { date, weekday, minutes: Number(parts.hour) * 60 + Number(parts.minute) + Number(parts.second) / 60 };
-}
-
-function priorWeekday(date) {
-  const previous = new Date(`${date}T00:00:00Z`);
-  do { previous.setUTCDate(previous.getUTCDate() - 1); } while ([0, 6].includes(previous.getUTCDay()));
-  return previous.toISOString().slice(0, 10);
+  return { date, minutes: Number(parts.hour) * 60 + Number(parts.minute) + Number(parts.second) / 60 };
 }
 
 function validSource(source) {
@@ -72,16 +63,6 @@ export function isMarketPulseSnapshot(snapshot) {
     seen.add(quote.symbol);
   }
   return true;
-}
-
-function isCloseTime(at) {
-  return ![0, 6].includes(at.weekday)
-    && ((at.minutes >= EARLY_CLOSE_MINUTE && at.minutes < EARLY_CLOSE_MINUTE + 16)
-      || (at.minutes >= CLOSE_MINUTE && at.minutes < LAST_CLOSE_RECORD_MINUTE));
-}
-
-function isRegularTime(at) {
-  return ![0, 6].includes(at.weekday) && at.minutes >= OPEN_MINUTE && at.minutes <= CLOSE_MINUTE;
 }
 
 function aligned(left, right) {
@@ -132,9 +113,13 @@ function sectorStatus(quotes, status) {
       flags.push({ symbol: "VXSMH", level: vxsmh.value >= 45 ? "severe" : "pressure", label: `半导体隐含波动升高 ${vxsmh.value.toFixed(2)}`, date: vxsmh.date, session: vxsmh.session });
     }
   }
-  const level = flags.some((flag) => flag.level === "severe") ? "severe" : flags.length ? "pressure" : checked === 3 ? "none" : "unconfirmed";
-  const label = flags.length ? `${prefixFor(status)}行业与成长压力` : checked === 3 ? `${prefixFor(status)}未触发行业压力阈值` : "行业压力待核对";
-  const detail = flags.length ? flags.map((flag) => flag.label).join(" · ") : checked === 3 ? "SMH、QQQ 与 VXSMH 均有可核对数据。" : "仅显示可确认的行业报价；缺失报价不代表平静。";
+  // Each alert concerns one independently usable instrument. A no-alert
+  // summary of all three, however, needs a comparable set of observations.
+  const sectorRows = quotes.filter((row) => ["SMH", "QQQ", "VXSMH"].includes(row.symbol));
+  const complete = checked === 3 && sectorRows.every((row) => sectorRows.every((other) => aligned(row, other)));
+  const level = flags.some((flag) => flag.level === "severe") ? "severe" : flags.length ? "pressure" : complete ? "none" : "unconfirmed";
+  const label = flags.length ? `${prefixFor(status)}行业与成长压力` : complete ? `${prefixFor(status)}未触发行业压力阈值` : "行业压力待核对";
+  const detail = flags.length ? flags.map((flag) => flag.label).join(" · ") : complete ? "SMH、QQQ 与 VXSMH 均有可比较数据。" : "行业报价不齐或时点不一致，暂不能确认整体压力。";
   return { level, label, detail, flags };
 }
 
@@ -156,18 +141,20 @@ export function projectMarketPulse(snapshot, now = Date.now()) {
   const mode = schemaValid ? snapshot.mode ?? null : null;
   const timeValid = nowValid && schemaValid && (snapshot.checkedAt === null || Date.parse(snapshot.checkedAt) <= clock);
   const raw = schemaValid ? snapshot.quotes : [];
-  // A provider-confirmed equity close also handles early closes. We never
-  // infer an exchange holiday/open from the weekday alone.
+  const checked = Date.parse(snapshot?.checkedAt);
+  const todayClose = today && equityCloseMinute(today.date);
+  const prior = today && previousEquitySession(today.date);
+  const beforeNextSession = today && todayClose !== null && (todayClose === 0 || today.minutes < EQUITY_OPEN_MINUTE);
+  const canUseIntraday = today && matchesEquitySession(today.date, today.minutes, "regular");
   const equityCloseToday = timeValid && raw.some((row) => ["SPX", "RSP", "SMH", "QQQ"].includes(row.symbol)
-    && row.session === "close" && row.date === today.date && Date.parse(row.at) <= clock && isCloseTime(localTime(Date.parse(row.at))));
-  const prior = today && priorWeekday(today.date);
-  const beforeNextSession = today && ([0, 6].includes(today.weekday) || today.minutes < OPEN_MINUTE);
+    && row.session === "close" && row.date === today.date && Date.parse(row.at) <= checked
+    && matchesEquitySession(row.date, localTime(Date.parse(row.at)).minutes, "close"));
   const quotes = raw.map((quote) => {
     const timestamp = Date.parse(quote.at);
-    if (!timeValid || quote.session === "unconfirmed" || timestamp > clock) return { ...quote, state: "unconfirmed" };
+    if (!timeValid || quote.session === "unconfirmed" || timestamp > checked) return { ...quote, state: "unconfirmed" };
     const observed = localTime(timestamp);
-    if ((quote.session === "close" && !isCloseTime(observed)) || (quote.session === "regular" && !isRegularTime(observed))) return { ...quote, state: "unconfirmed" };
-    if (quote.date === today.date && (quote.session === "close" || (mode !== "reference" && !equityCloseToday && isRegularTime(today)
+    if (!matchesEquitySession(observed.date, observed.minutes, quote.session)) return { ...quote, state: "unconfirmed" };
+    if (quote.date === today.date && (quote.session === "close" || (mode !== "reference" && !equityCloseToday && canUseIntraday
       && clock - timestamp <= MARKET_PULSE_THRESHOLDS.regularMaxAgeMinutes * MINUTE))) return { ...quote, state: "current" };
     if (quote.session === "close" && quote.date === prior && beforeNextSession) return { ...quote, state: "last-close" };
     return { ...quote, state: "stale" };
@@ -177,13 +164,13 @@ export function projectMarketPulse(snapshot, now = Date.now()) {
   const status = current.length ? "current" : priorClose.length ? "last-close" : quotes.some((row) => row.state === "stale") ? "stale" : "unavailable";
   const usable = current.length ? current : priorClose;
   const anchor = usable.find((row) => row.symbol === "SPX") || usable.find((row) => row.symbol === "RSP") || usable[0];
-  const sectorQuotes = anchor ? usable.filter((row) => aligned(anchor, row)) : [];
   const label = status === "current" ? anchor.session === "close" ? mode === "reference" ? "当日收盘参考" : "当日收盘段行情" : "常规交易时段报价"
     : status === "last-close" ? "最近核实收盘 · 非当前盘中" : status === "stale" ? mode === "reference" ? "历史参考报价 · 今日缺数" : "当前时段报价待更新" : "行情待核对";
   const errors = schemaValid ? [...snapshot.errors] : snapshot == null ? [] : ["行情响应格式异常"];
+  if (today && todayClose === null) errors.push("纽约交易日历未覆盖此日期，当日判断暂停");
   if (schemaValid && nowValid && !timeValid) errors.push("行情核对时间在未来");
   return { status, label, mode, today: today?.date ?? null,
     date: anchor?.date ?? quotes.map((row) => row.date).filter((date) => date && today && date <= today.date).sort().at(-1) ?? null,
     session: anchor?.session ?? null, checkedAt: schemaValid ? snapshot.checkedAt : null, errors, quotes,
-    broad: broadStatus(usable, status), sector: sectorStatus(sectorQuotes, status), volatility: volatilityStatus(usable, status), ruleNote: RULE_NOTE };
+    broad: broadStatus(usable, status), sector: sectorStatus(usable, status), volatility: volatilityStatus(usable, status), ruleNote: RULE_NOTE };
 }

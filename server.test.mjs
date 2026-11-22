@@ -520,7 +520,7 @@ function marketStub({ missingStart = false, staleSectors = false } = {}) {
   return { preload, expectedDate };
 }
 
-function completeSourcesStub({ missing = [], laggedCpi = false, missingCpiMonth = false } = {}) {
+function completeSourcesStub({ missing = [], laggedCpi = false, missingCpiMonth = false, missingAnnualCpiBase = false } = {}) {
   return `
     const now = new Date();
     const end = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
@@ -528,7 +528,7 @@ function completeSourcesStub({ missing = [], laggedCpi = false, missingCpiMonth 
       date: new Date(Date.parse(end) - (count - 1 - index) * step * 86400000).toISOString().slice(0, 10), value
     }));
     const months = (value = null) => Array.from({length: 36}, (_, index) => ({
-      date: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 36 + index, 1)).toISOString().slice(0, 10),
+      date: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 35 + index, 1)).toISOString().slice(0, 10),
       value: value === null ? 100 * 1.003 ** index : value
     }));
     const series = {
@@ -543,6 +543,7 @@ function completeSourcesStub({ missing = [], laggedCpi = false, missingCpiMonth 
       series.CPIAUCSL.at(-1).value = series.CPIAUCSL.at(-2).value * 1.1;
     }
     if (${missingCpiMonth}) series.CPIAUCSL.splice(-2, 1);
+    if (${missingAnnualCpiBase}) for (const id of ["CPIAUCNS", "CPILFENS"]) series[id].splice(-13, 1);
     globalThis.fetch = async (raw) => {
       const url = new URL(raw);
       if (url.pathname.endsWith('/fredgraph.csv')) {
@@ -594,6 +595,24 @@ test("staggered CPI sources use one common month for levels and changes", async 
     assert.equal(row.risk, expected);
     assert.ok(data.errors.some(error => /CPI.*月份.*对齐/.test(error)));
   }, { preload: completeSourcesStub({ laggedCpi: true }) });
+});
+
+test("a missing annual CPI base is explained without substituting another month or scoring monthly moves", async () => {
+  await withOfflineServer({}, async ({ finished }) => {
+    const data = await finished();
+    for (const id of ["inflation", "fed", "unemployment", "payrolls"]) {
+      const row = data.indicators.find(item => item.id === id);
+      assert.equal(row.risk, null, id);
+      assert.equal(row.unavailableReason, "CPI 同比缺基期", id);
+    }
+    const inflation = data.indicators.find(item => item.id === "inflation");
+    const base = String(Number(inflation.date.slice(0, 4)) - 1) + inflation.date.slice(4, 7);
+    assert.ok(inflation.detail.includes(base));
+    assert.equal(inflation.value, "+0.3% 环比");
+    assert.equal(inflation.breakdown[0].value, "--");
+    assert.equal(data.score, null);
+    assert.ok(data.coverage <= 57); // AI eligibility may age out; the four CPI dependencies and EPS cannot score.
+  }, { preload: completeSourcesStub({ missingAnnualCpiBase: true }) });
 });
 
 test("a missing common CPI month pauses scoring instead of selecting an older substitute", async () => {

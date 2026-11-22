@@ -66,7 +66,7 @@
           </div>
           <div class="manual-score-note" id="manualScoreNote" role="status" hidden><span id="manualScoreText"></span><button type="button" id="reviewManualButton">复核人工判断</button></div>
           <div class="score-breakdown">
-            <div><span>12项基础分</span><strong id="baseScoreValue">--</strong><small>按有效权重归一化</small></div>
+            <div><span>12项基础分</span><strong id="baseScoreValue">--</strong><small id="baseScoreNote">按有效权重归一化</small></div>
             <div><span>滞胀 / 政策压力</span><strong id="heatValue">--</strong><small>原油、通胀、美联储与利率</small></div>
             <div><span>衰退 / 信用压力</span><strong id="recessionValue">--</strong><small>就业、信用与盈利</small></div>
             <div><span>市场确认</span><strong id="marketBreakValue">--</strong><small>波动率、宽度与指数</small></div>
@@ -92,6 +92,7 @@
         <p class="pulse-intro">报价为盘中延时或收盘时段记录，观测日与时点均按纽约时间。日变化为相对前一常规收盘的变动。仅观察当日压力，不计入十二项结构风险权重。</p>
         <p class="pulse-official"><a href="https://www.cboe.com/us/indices/dashboard/vix/" target="_blank" rel="noreferrer">查看 VIX 官方报价 ↗</a><a href="https://www.cboe.com/us/indices/dashboard/vxsmh/" target="_blank" rel="noreferrer">查看 VXSMH 官方报价 ↗</a></p>
         <p class="pulse-status" id="pulseStatus">正在读取报价，压力待判断。</p>
+        <p class="pulse-status" id="pulseDailyVix" hidden><span></span> <a href="#indicator-vix">查看 VIX 指标依据</a></p>
         <div class="pulse-judgments" id="pulseJudgments"></div>
         <div class="pulse-quotes" id="pulseQuotes"></div>
         <details class="pulse-errors" id="pulseErrors" hidden><summary>查看报价来源状态</summary><ul></ul></details>
@@ -171,7 +172,7 @@
     </main>
 
     <footer class="footer shell">
-      <span>US EQUITY RISK RADAR · v4.8.1</span>
+      <span>US EQUITY RISK RADAR · v4.8.2</span>
       <span>数据：公司 IR / SEC / BLS / BEA / Federal Reserve / FRED / Cboe / Nasdaq</span>
     </footer>
 

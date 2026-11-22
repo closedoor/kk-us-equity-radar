@@ -88,3 +88,19 @@ test("licensed rows cannot fabricate an observation date, regular phase, or vali
   const oversized = await fetchLicensedMarketPulse({ now, url: licensedUrl, fetchText: async () => JSON.stringify({ quotes: [...rows, rows[0]] }) });
   assert.deepEqual(oversized.quotes, []); assert.match(oversized.errors.join(" "), /批量大小无效/);
 });
+
+test("the quote adapter discards mismatched exchange sessions before they can displace cached valid rows", async () => {
+  for (const [date, phase, at, expected] of [
+    ["2026-11-25", "close", "18:00:00", 0],
+    ["2026-11-25", "regular", "18:00:00", 1],
+    ["2026-11-26", "regular", "17:30:00", 0],
+    ["2026-11-27", "regular", "20:00:00", 0],
+    ["2026-11-27", "close", "18:00:00", 1],
+    ["2026-11-27", "close", "21:00:00", 0],
+  ]) {
+    const row = quote("SPX", 100, -4, { date, session: phase, at: date + "T" + at + "Z" });
+    const result = await fetchLicensedMarketPulse({ url: licensedUrl, now: () => new Date(date + "T23:00:00Z"),
+      fetchText: async () => JSON.stringify({ quotes: [row] }) });
+    assert.equal(result.quotes.length, expected, date + " " + at + " " + phase);
+  }
+});
