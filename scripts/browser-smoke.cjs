@@ -29,6 +29,7 @@ async function main() {
   };
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined });
   let passed = 0;
+  const failed = [];
   async function scenario(name, check, width = 1440, height = 960, options = {}) {
     if (process.env.RADAR_TEST && !name.includes(process.env.RADAR_TEST)) return;
     const context = await browser.newContext({ viewport: { width, height }, ...options });
@@ -48,7 +49,9 @@ async function main() {
         await fs.mkdir(outputDir, { recursive: true });
         await page.screenshot({ path: path.join(outputDir, `failure-${name.replace(/[^a-z0-9]+/gi, "-")}.png`) }).catch(() => {});
       }
-      throw error;
+      console.error(error.stack || error);
+      failed.push(name);
+      if (failed.length >= 6) throw new Error("Stopping after six failed scenarios: "+failed.join("; "));
     } finally {
       await context.close();
     }
@@ -74,10 +77,11 @@ async function main() {
         await page.goto(baseURL);
         await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(12);
         await page.evaluate(() => document.fonts.ready);
-        assert.ok(await page.evaluate(() => ["#pulseTitle", "#pulsePeekStatus", "#pulsePeekVix", "#pulsePeekVxsmh", "#scoreValue", "#verdictLabel"].every((selector) => {
-          const box = document.querySelector(selector).getBoundingClientRect();
-          return box.top >= document.querySelector(".topbar").getBoundingClientRect().bottom && box.bottom <= innerHeight;
-        })), "The pressure summary, structural score and verdict must be readable without scrolling");
+        const outside = await page.evaluate(() => ["#pulseTitle","#pulsePeekStatus","#pulsePeekVix","#pulsePeekVxsmh","#scoreValue","#verdictLabel"].flatMap(selector => {
+          const {top,bottom} = document.querySelector(selector).getBoundingClientRect();
+          return top < document.querySelector(".topbar").getBoundingClientRect().bottom || bottom > innerHeight ? [{selector,top,bottom,height:innerHeight}] : [];
+        }));
+        assert.deepEqual(outside, [], "Pressure summary, score and verdict must be readable without scrolling: "+JSON.stringify(outside));
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
         if (outputDir) {
           await fs.mkdir(outputDir, { recursive: true });
@@ -1196,6 +1200,7 @@ async function main() {
     await require("./calendar-agenda-browser.cjs")({ scenario, baseURL, expect, fresh, mock });
     await require("./score-history-browser.cjs")({ scenario, baseURL, expect });
     console.log(`${passed} browser scenarios passed`);
+    if (failed.length) throw new Error(failed.length+" browser scenarios failed: "+failed.join("; "));
   } finally {
     await browser.close();
   }

@@ -19,7 +19,7 @@ async function waitForRelease(api, sha) {
       if (response.status === 200) data = await response.json();
       last = data ? 'v' + data.productVersion + ' @ ' + data.buildCommit : 'HTTP ' + response.status;
     } catch (error) { last = error.message; }
-    if (data?.buildCommit === sha) {
+    if (data?.buildCommit === sha && !data.refreshing) {
       assert.equal(data.productVersion, version, 'deployed API version must match the checked-out package');
       return;
     }
@@ -109,9 +109,81 @@ function assertEarnings(dash, reviewed, reminders, cards, now) {
   return future.length;
 }
 
+function assertCoverage(dash, gap, minimum) {
+  const miss=dash.indicators.filter(r=>!r.available || !Number.isFinite(r.risk));
+  const missing=miss.reduce((n,r)=>n+r.weight,0), covered=dash.indicators.reduce((n,r)=>n+r.weight,0)-missing;
+  assert.equal(covered,dash.coverage); assert.equal(gap.coverage,covered+'%');
+  assert.equal(gap.hidden,missing===0);
+  if (!missing) return;
+  const shortfall=Math.max(0,minimum-covered);
+  assert.ok(gap.text.includes('有效权重 '+covered+'%，未计分权重 '+missing+'%。综合分门槛为 '+minimum+'%'));
+  assert.ok(gap.heading.includes(shortfall ? '差 '+shortfall+' 个百分点' : '缺少 '+missing+'% 权重'));
+  assert.deepEqual(gap.links.sort(),miss.map(r=>'#indicator-'+r.id).sort());
+}
+
+function assertCloses(dash, visible, review, modelRows, sessionDate, status) {
+  const format=n=>n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const rows = new Map(modelRows.map(r=>[r.symbol,{...r,basis:'model'}]));
+  if (Date.parse(review.checkedAt)<=visible.now) {
+    for (const item of review.readings) {
+      const model=rows.get(item.symbol);
+      if (model && model.date>review.date) continue;
+      rows.set(item.symbol,{symbol:item.symbol,date:review.date,value:item.value,basis:'review',
+        model:model && (model.date!==review.date||model.value!==item.value)?model:null});
+    }
+  }
+  assert.deepEqual(visible.closes.map(r=>r.symbol).sort(),[...rows.keys()].sort());
+  for (const ui of visible.closes) {
+    const r=rows.get(ui.symbol), latest=sessionDate(ui.symbol,visible.now);
+    assert.ok(isoDay(ui.date) && ui.date<=nyDay(visible.now));
+    assert.deepEqual([ui.date,ui.value,ui.basis],[r.date,format(r.value),r.basis]);
+    assert.ok(ui.label.includes(r.date===latest?'最近已结束交易日':latest?'较早收盘':'历史收盘'));
+    const source = r.basis==='review' ? 'https://cdn-api.cboe.com/api/global/us_indices/daily_prices/'+r.symbol+'_History.csv' : r.source;
+    assert.equal(ui.source,source); assert.equal(ui.time,ui.date+' 收盘');
+    if (r.model) assert.ok(ui.model.includes(r.model.date+'，'+format(r.model.value))); else assert.equal(ui.model,null);
+  }
+  const vix=dash.indicators.find(r=>r.id==='vix');
+  if(vix?.date && /^\d+(?:\.\d+)?$/.test(vix.value)) assert.equal(visible.modelVix,vix.value);
+  assert.equal(visible.pulseState,status);
+  if(status!=='current') assert.equal(visible.pulseLevel,'neutral','historical closing values triggered a current warning');
+  if(status==='stale'||status==='unavailable') {
+    assert.match(visible.peekStatus,/当日压力待判断|可看官方报价/);
+    for(const s of ['VIX','VXSMH']) {
+      const r=rows.get(s);
+      assert.equal(visible.peek[s],r && r.date===sessionDate(s,visible.now)
+        ? s+' '+format(r.value)+' · '+r.date.slice(5).replace('-','/')+'收盘' : s+' 官网 ↗');
+    }
+  }
+}
+
+async function checkObservation(page,base) {
+  const endpoint=new URL('/api/score-history',base).href;
+  const [response]=await Promise.all([
+    page.waitForResponse(r=>r.url()===endpoint && r.status()===200),
+    page.locator('a[href="#scoreHistory"]').click()
+  ]);
+  const history=await response.json();
+  assert.ok(Array.isArray(history.observations)); const box=page.locator('#scoreHistoryContent');
+  if (!history.observations.length) {
+    await box.getByText('还没有保存的观察记录。').waitFor(); return 'empty';
+  }
+  const row=history.observations.find(r=>r.referenceDate && r.referenceDate!==r.date) || history.observations[0];
+  assert.ok(isoDay(row.date) && Number.isFinite(Date.parse(row.capturedAt)) && nyDay(Date.parse(row.capturedAt))===row.date);
+  assert.ok(row.referenceDate===null || (isoDay(row.referenceDate) && row.referenceDate<=row.date));
+  const clock=new Intl.DateTimeFormat('en-GB',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(Date.parse(row.capturedAt));
+  await box.locator('select').selectOption(row.date);
+  const article=box.locator('article'), text=await article.innerText();
+  assert.ok(text.includes('纽约 '+clock+' 采集')); assert.ok(text.includes(row.referenceDate ? '标普基准收盘日：'+row.referenceDate : '标普基准收盘日未知'));
+  assert.equal(await article.locator('a').getAttribute('href'),row.sourceUrl);
+  return row.date;
+}
+
 async function main() {
   const { chromium, devices } = require('playwright');
   const { aiEarnings } = await import('../earnings-data.mjs');
+  const {closeReview}=await import('../public/verified-closes.js');
+  const {dailyCloseReferences,latestCompletedCloseDate,projectMarketPulse}=await import('../public/market-pulse.js');
+  const {MIN_SCORE_COVERAGE}=await import('../public/risk-model.js');
   const sha = process.env.RADAR_EXPECTED_SHA || process.env.GITHUB_SHA;
   assert.match(sha || '', /^[a-f0-9]{40}$/, 'RADAR_EXPECTED_SHA must be the full deployed git commit');
   const base = new URL(process.env.RADAR_URL || 'https://kk-us-equity-radar.onrender.com');
@@ -126,27 +198,38 @@ async function main() {
     page.on('pageerror', e => errors.push(e.message));
     await page.route('**/*', route => {
       const req = route.request(), url = new URL(req.url());
-      if (!['GET','HEAD'].includes(req.method()) || url.searchParams.has('refresh') || url.searchParams.has('evidence')) {
+      if (url.origin !== base.origin || !['GET','HEAD'].includes(req.method()) || url.searchParams.has('refresh') || url.searchParams.has('evidence')) {
         errors.push('Unexpected non-read-only request: ' + req.method() + ' ' + url.pathname);
         return route.abort();
       }
       return route.continue();
     });
-    const [response] = await Promise.all([
+    const [response,pulseResponse] = await Promise.all([
       page.waitForResponse(r => r.url() === api && r.status() === 200, {timeout: 60_000}),
+      page.waitForResponse(r=>r.url()===new URL('/api/market-pulse',base).href && r.status()===200,{timeout:60_000}),
       page.goto(base.href, {waitUntil:'domcontentloaded',timeout:60_000})
     ]);
-    const dash = await response.json();
+    const dash = await response.json(), pulse = await pulseResponse.json();
     assert.equal(dash.buildCommit, sha); assert.equal(dash.productVersion, version);
     const footer = await page.locator('footer').innerText();
     assert.equal(footer.match(/\bv(\d+\.\d+\.\d+(?:[-+][\w.-]+)?)/)?.[1], version, 'visible footer version disagrees with API');
     await page.locator('#calendar [data-calendar-id]').first().waitFor();
     await page.locator('#calendar').scrollIntoViewIfNeeded();
+    await page.waitForFunction(state=>document.querySelector('#overview').dataset.state===state,projectMarketPulse(pulse).status);
     const visible = await page.evaluate(() => {
       const all = (s, root = document) => [...root.querySelectorAll(s)];
       const text = (el,s) => el.querySelector(s)?.textContent.trim();
       const url = (el,s) => el.querySelector(s)?.getAttribute('href') || null;
       return {
+        gap:{coverage:text(document,'#coverageValue'), hidden:document.querySelector('#coverageGaps').hidden,
+          text:text(document,'#coverageGapList'),heading:text(document,'#coverageGaps summary'),
+          links:all('#coverageGapList li a').map(a=>a.getAttribute('href'))},
+        closes:all('#closeEvidence [data-close-symbol]').map(r=>({symbol:r.dataset.closeSymbol,
+          basis:r.dataset.basis,date:r.querySelector('time').dateTime,time:text(r,'time'),value:text(r,'strong'),
+          model:text(r,'.close-model') || null,label:text(r,'small'),source:url(r,'.close-source')})),
+        modelVix:text(document,'#indicator-vix .metric-value'),peekStatus:text(document,'#pulsePeekStatus'),
+        pulseState:document.querySelector('#overview').dataset.state,pulseLevel:document.querySelector('#overview').dataset.level,
+        peek:{VIX:text(document,'#pulsePeekVix'),VXSMH:text(document,'#pulsePeekVxsmh')},
         now: Date.now(), overflow: document.documentElement.scrollWidth > innerWidth + 1,
         macro: all('#calendar [data-calendar-id]:not([data-calendar-id="earnings"])').map(el => ({
           id: el.dataset.calendarId, date: el.querySelector('time')?.getAttribute('datetime'), next: el.classList.contains('next-agenda'),
@@ -162,6 +245,10 @@ async function main() {
     });
     assertAgenda(dash, visible.macro, visible.now);
     const confirmed = assertEarnings(dash, aiEarnings, visible.reminders, visible.companies, visible.now);
+    assertCoverage(dash,visible.gap,MIN_SCORE_COVERAGE);
+    assertCloses(dash,visible,closeReview,dailyCloseReferences(dash,visible.now),latestCompletedCloseDate,projectMarketPulse(pulse,visible.now).status);
+    const observed=await checkObservation(page,base);
+    console.log('PASS live actual coverage %d%%, %d dated closes, history %s.',dash.coverage,visible.closes.length,observed);
     assert.equal(visible.overflow, false, 'horizontal overflow on mobile');
     assert.deepEqual(errors, [], 'browser errors');
     console.log('PASS live mobile Chromium: v%s @ %s; %d macro events; %d companies, %d currently confirmed.', version, sha, visible.macro.length, aiEarnings.length, confirmed);
@@ -169,4 +256,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch(e => { console.error(e.message); process.exitCode = 1; });
-module.exports = { assertAgenda, assertEarnings };
+module.exports = { assertAgenda, assertEarnings, assertCoverage, assertCloses };

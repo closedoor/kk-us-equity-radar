@@ -449,3 +449,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, .indicator-card:focu
 .close-reading p { margin:.3rem 0; }
 .close-reading a { color:var(--link); font-size:.8rem; width:fit-content; }
 .close-model { border-left:2px solid var(--line); padding-left:.5rem; }
+
+/* Leave space for both dated closing quotes on short, narrow phones. Keep the score type size. */
+@media (max-width:360px) and (max-height:800px) {
+  .gauge-wrap { width:144px; height:144px; margin-top:8px; }
+  .score-verdict { padding-top:14px; }
+}
