@@ -436,3 +436,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, .indicator-card:focu
   #reminderGrid .reminder-card time { grid-column:1; text-align:left; }
   #reminderGrid .company-reminder-list { grid-column:1; }
 }
+
+.close-evidence { margin:1.2rem 0; padding:.95rem 1rem; border:1px solid var(--line); }
+.close-evidence[hidden] { display:none; }
+.close-evidence h3,.close-reading h4 { margin:0; }
+.close-evidence > p,.close-reading p,.close-reading small { line-height:1.5; font-size:.82rem; }
+.close-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,12rem),1fr)); gap:.85rem; }
+.close-reading { padding-top:.6rem; border-top:1px solid var(--line); min-width:0; }
+.close-reading strong { font:600 1.45rem var(--mono); }
+.close-reading h4 span,.close-reading time,.close-reading small { color:var(--muted); font-size:.78rem; }
+.close-reading time,.close-reading small,.close-source { display:block; }
+.close-reading p { margin:.3rem 0; }
+.close-reading a { color:var(--link); font-size:.8rem; width:fit-content; }
+.close-model { border-left:2px solid var(--line); padding-left:.5rem; }

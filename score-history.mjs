@@ -44,7 +44,8 @@ export async function readScoreHistory(dir = evidenceDir, now = Date.now()) {
     return record;
   }));
   return { version: 1, scoringVersion: SCORING_VERSION, observations: records.slice(0,recentLimit).map((r,i) => ({
-    date: r.observationDate, score: r.score, coverage: r.coverage, baseScore: base(r),
+    date: r.observationDate, capturedAt: new Date(r.capturedAt).toISOString(), referenceDate: r.marketReference?.date ?? null,
+    score: r.score, coverage: r.coverage, baseScore: base(r),
     sourceUrl: sourceBase + names[i], change: compare(r, records[i+1])
   })) };
 }

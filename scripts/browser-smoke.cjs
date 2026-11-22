@@ -190,53 +190,6 @@ async function main() {
       await expect(vxsmh.locator("time")).toHaveText("2026-11-05 16:00");
       assert.equal(calls, 1, "Historical reference snapshots must not advertise feed-like updates");
     });
-    for (const delayed of ["dashboard", "reference"]) {
-      await scenario(`a newer daily model VIX stays separate from stale quotes when ${delayed} arrives last`, async (page) => {
-        const now = new Date("2026-11-22T12:00:00Z");
-        await page.clock.install({ time: now });
-        await page.clock.pauseAt(now);
-        const data = { ...fresh(), generatedAt: now.toISOString() };
-        const vix = data.indicators.find((row) => row.id === "vix");
-        Object.assign(vix, { date: "2026-11-19", value: "28.44" });
-        vix.sparkline.push({ date: vix.date, value: 28.44 });
-        let release;
-        const gate = new Promise((resolve) => { release = resolve; });
-        await page.route("**/api/dashboard*", async (route) => {
-          if (delayed === "dashboard") await gate;
-          await route.fulfill({ json: data });
-        });
-        await page.route("**/api/market-pulse", async (route) => {
-          if (delayed === "reference") await gate;
-          await route.fulfill({ json: marketPulseFixture("reference") });
-        });
-        const note = page.locator("#pulseDailyVix");
-        try {
-          await page.goto(baseURL);
-          if (delayed === "dashboard") await expect(page.locator("#overview")).toHaveAttribute("data-state", "stale");
-          else await expect(page.locator("#indicator-vix")).toContainText("28.44");
-          await expect(note).toBeHidden();
-        } finally { release(); }
-        await expect(note).toContainText("另有日度 VIX 28.44（2026-11-19，模型输入），非当前盘中报价。");
-        await expect(page.locator("#pulsePeekVix")).toHaveText("VIX 官网 ↗");
-        await expect(page.locator("#pulsePeekVxsmh")).toHaveText("VXSMH 官网 ↗");
-        await expect(page.locator('.pulse-quote[data-symbol="VIX"] .pulse-quote-reading strong')).toHaveText("19.30");
-        await expect(page.locator('[data-kind="volatility"]')).toHaveAttribute("data-level", "unconfirmed");
-        await page.locator('[data-filter="信用"]').click();
-        await expect(page.locator("#indicator-vix")).toHaveCount(0);
-        await note.locator("a").focus();
-        await page.keyboard.press("Enter");
-        await expect(page).toHaveURL(/#indicator-vix$/);
-        await expect(page.locator("#indicator-vix")).toContainText("28.44");
-        if (delayed === "reference") {
-          for (const date of ["2026-11-23", "2026-11-05", null]) {
-            vix.date = vix.sparkline.at(-1).date = date;
-            await page.locator("#refreshButton").click();
-            await expect(page.locator("#structureTiming")).toContainText(`VIX ${date || "待核对"}`);
-            await expect(note).toBeHidden();
-          }
-        }
-      }, 320, 740);
-    }
     await scenario("invalid quotes after a reference snapshot retain dated records and allow a quote-only retry", async (page) => {
       const reference = marketPulseFixture("reference");
       const at = new Date(reference.checkedAt);
@@ -1086,7 +1039,7 @@ async function main() {
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
       await expect(page.locator("#actionCallout > span")).toHaveText("当前研究重点");
       await expect(page.locator(".action-note")).toContainText("不能据此校准个人仓位");
-      await expect(page.locator(".footer")).toContainText("v4.8.4");
+      await expect(page.locator(".footer")).toContainText("v4.8.5");
       if (outputDir) await page.locator("#modelValidation").screenshot({ path: path.join(outputDir, "model-history-forward-390.png"), animations: "disabled" });
     }, 390);
     await scenario("a reader keeps the evidence table open and focused across unchanged, failed and corrected reports", async (page) => {
@@ -1238,6 +1191,8 @@ async function main() {
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
       if (outputDir) await page.locator("#sourceRevisions").screenshot({ path: path.join(outputDir, "source-revisions-390.png"), animations: "disabled" });
     }, 390, 844, { hasTouch: true });
+    await require("./coverage-gaps-browser.cjs")({ scenario, baseURL, expect, fresh, mock });
+    await require("./closing-browser.cjs")({scenario,baseURL,expect,fresh,mock,marketPulseFixture});
     await require("./calendar-agenda-browser.cjs")({ scenario, baseURL, expect, fresh, mock });
     await require("./score-history-browser.cjs")({ scenario, baseURL, expect });
     console.log(`${passed} browser scenarios passed`);

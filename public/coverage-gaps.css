@@ -1,0 +1,16 @@
+.coverage-gaps {
+  margin: 0 0 1rem;
+  border-block: 1px solid #535344;
+  color: #eceee4;
+  font-size: .875rem;
+  line-height: 1.55;
+}
+.coverage-gaps summary { padding: .7rem 0; color: #f1f1d7; cursor: pointer; font-weight: 600; }
+.coverage-gaps summary:focus-visible, .coverage-gaps a:focus-visible { outline: 2px solid #ecf586; outline-offset: 2px; }
+.coverage-gaps p { margin: 0 0 .5rem; color: #d7dcce; }
+.coverage-gaps section { margin: .8rem 0; }
+.coverage-gaps h3 { margin: 0 0 .3rem; font-size: .93rem; color: #fff; }
+.coverage-gaps ul { margin: .2rem 0; list-style: none; padding: 0; }
+.coverage-gaps li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 .65rem; padding: .2rem 0; }
+.coverage-gaps a { color: #e6f197; text-decoration: underline; text-underline-offset: .18em; overflow-wrap: anywhere; }
+.coverage-gaps li small { color: #e0e0d5; font-size: .8rem; }

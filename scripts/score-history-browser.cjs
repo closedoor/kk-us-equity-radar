@@ -7,8 +7,9 @@ const change = (previousDate, totalDelta, baseDelta, adjustmentDelta, gained = [
 const records = { version: 1, scoringVersion: version, observations: [
   row('2026-11-11', null, 57, 41.1, change('2026-11-10', null, +0.1, null)),
   row('2026-11-10', null, 57, 41.0, change('2026-11-09', null, -2.0, null, [], ['inflation','fed','unemployment','payrolls'], [{id:'inflation',deltaPoints:-2.5}])),
-  row('2026-11-09', 44.4, 90, 43, change('2026-11-06', +0.1, +0.2, -0.1, [], [], [{id:'vix',deltaPoints:0.2}])),
-  row('2026-11-06', 44.3, 90, 42.8, null),
+  {...row('2026-11-09', 44.4, 90, 43, change('2026-11-06', +0.1, +0.2, -0.1, [], [], [{id:'vix',deltaPoints:0.2}])),capturedAt:'2026-11-10T04:15:00.000Z',referenceDate:'2026-11-05'},
+  row('2026-11-06', 44.3, 90, 42.8, change('2026-11-05',-1.1,+0.3,-1.4)),
+  {...row('2026-11-05',45.4,90,42.5,null),capturedAt:'2026-11-05T13:19:25.286Z',referenceDate:'2026-11-03'},
 ] };
 module.exports = async function checkHistory({scenario, baseURL, expect}) {
   await scenario('score history loads on demand and separates suspended observations from actual score movements', async page => {
@@ -37,6 +38,10 @@ module.exports = async function checkHistory({scenario, baseURL, expect}) {
     await expect(content).toContainText('VIX：+0.20 分');
     await panel.locator('summary').click(); await panel.locator('summary').click();
     await expect(picker).toHaveValue('2026-11-09'); assert.equal(calls,1);
+    await expect(content).toContainText('纽约 23:15 采集（收盘后）。标普基准收盘日：2026-11-05');
+    await expect(content).not.toContainText('两份记录之间有交易日没有观察记录');
+    await picker.selectOption('2026-11-05');
+    await expect(content).toContainText('纽约 08:19 采集（盘前）。标普基准收盘日：2026-11-03。这份快照未覆盖当日收盘。');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth+1));
   },320,740);
   await scenario('score history deep link stays independent on body timeout and retries invalid data without inventing a score', async page => {

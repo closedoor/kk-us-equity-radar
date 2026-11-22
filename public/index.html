@@ -8,6 +8,7 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/score-history.css" />
+    <link rel="stylesheet" href="/coverage-gaps.css" />
   </head>
   <body>
     <div class="noise" aria-hidden="true"></div>
@@ -65,6 +66,10 @@
             <div class="verdict-heading"><strong id="verdictLabel">读取中</strong><a class="driver-shortcut" href="#driversTitle">风险主因</a></div>
             <p id="verdictDescription">正在抓取最新的宏观和市场数据。</p>
           </div>
+          <details class="coverage-gaps" id="coverageGaps" hidden>
+            <summary data-focus-key="coverage-gaps-summary">查看未计分项</summary>
+            <div id="coverageGapList"></div>
+          </details>
           <div class="manual-score-note" id="manualScoreNote" role="status" hidden><span id="manualScoreText"></span><button type="button" id="reviewManualButton">复核人工判断</button></div>
           <div class="score-breakdown">
             <div><span>12项基础分</span><strong id="baseScoreValue">--</strong><small id="baseScoreNote">按有效权重归一化</small></div>
@@ -94,7 +99,11 @@
         <p class="pulse-intro">报价为盘中延时或收盘时段记录，观测日与时点均按纽约时间。日变化为相对前一常规收盘的变动。仅观察当日压力，不计入十二项结构风险权重。</p>
         <p class="pulse-official"><a href="https://www.cboe.com/us/indices/dashboard/vix/" target="_blank" rel="noreferrer">查看 VIX 官方报价 ↗</a><a href="https://www.cboe.com/us/indices/dashboard/vxsmh/" target="_blank" rel="noreferrer">查看 VXSMH 官方报价 ↗</a></p>
         <p class="pulse-status" id="pulseStatus">正在读取报价，压力待判断。</p>
-        <p class="pulse-status" id="pulseDailyVix" hidden><span></span> <a href="#indicator-vix">查看 VIX 指标依据</a></p>
+        <section class="close-evidence" id="closeEvidence" aria-labelledby="closeEvidenceTitle" hidden>
+          <h3 id="closeEvidenceTitle">已核对的日度收盘</h3>
+          <p>日期按纽约交易日。Cboe 单次复核的收盘与模型日线分别列明；这些数值不能单独判断今日是否普跌。</p>
+          <div class="close-list"></div>
+        </section>
         <div class="pulse-judgments" id="pulseJudgments"></div>
         <div class="pulse-quotes" id="pulseQuotes"></div>
         <details class="pulse-errors" id="pulseErrors" hidden><summary>查看报价来源状态</summary><ul></ul></details>
@@ -181,7 +190,7 @@
     </main>
 
     <footer class="footer shell">
-      <span>US EQUITY RISK RADAR · v4.8.4</span>
+      <span>US EQUITY RISK RADAR · v4.8.5</span>
       <span>数据：公司 IR / SEC / BLS / BEA / Federal Reserve / FRED / Cboe / Nasdaq</span>
     </footer>
 

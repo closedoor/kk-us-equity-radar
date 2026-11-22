@@ -159,3 +159,11 @@ test("daily closes never consume a provisional regular-session or early-close pr
   assert.throws(() => select(nonpositive, "2026-11-27T23:00:00Z", "vix"), /非正/);
   assert.throws(() => select([prices[1]], "2026-11-25T16:00:00Z", "cash"), /收盘/);
 });
+
+test("a daily comparison allows closures around the target date but cannot turn a 90-day change into a multi-month change", () => {
+  const latest = { date: "2026-09-30", value: 6 };
+  const remote = { date: "2026-03-31", value: 2 };
+  const holiday = { date: "2026-06-30", value: 4 }; // before July 2 target
+  assert.equal(nearestPrior([remote,latest],90),null);
+  assert.equal(nearestPrior([remote,holiday,latest],90),holiday);
+});

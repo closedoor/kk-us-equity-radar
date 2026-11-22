@@ -1,4 +1,5 @@
 import { INDICATOR_WEIGHTS, MIN_SCORE_COVERAGE } from './risk-model.js';
+import { equityCloseMinute, previousEquitySession, EQUITY_OPEN_MINUTE } from './us-equity-session.js';
 
 const names = { oil: '原油', inflation: '通胀', fed: '美联储政策', rates: '美债利率', vix: 'VIX', unemployment: '失业率', payrolls: '非农就业', aiEarnings: 'AI 财报', credit: '信用利差与信贷', earningsBreadth: '盈利预期', breadth: '市场宽度', sp500: '标普 500' };
 const known = id => typeof id === 'string' && Object.hasOwn(INDICATOR_WEIGHTS, id);
@@ -13,15 +14,44 @@ function sourceFor(row, version) {
     return u.origin === 'https://github.com' && !u.username && !u.password && pieces.length === 8 && pieces.slice(1, 4).join('/') === 'closedoor/kk-us-equity-radar/blob' && /^(main|[a-f0-9]{40})$/.test(pieces[4]) && pieces.slice(5).join('/') === `evidence/forward/${row.date}_model-${version}.json` ? u.origin + u.pathname : null;
   } catch { return null; }
 }
-function valid(report) {
+const nyTime = new Intl.DateTimeFormat('en-GB', {timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+function recordedTime(row) {
+  const t = row.capturedAt;
+  if (typeof t !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(t)
+    || !Number.isFinite(Date.parse(t)) || new Date(t).toISOString() !== t) return null;
+  const v = Object.fromEntries(nyTime.formatToParts(new Date(t)).map(({type,value})=>[type,value]));
+  if ([v.year,v.month,v.day].join('-') !== row.date) return null;
+  const minutes = Number(v.hour)*60 + Number(v.minute), close = equityCloseMinute(row.date);
+  const phase = close === null ? null : close === 0 ? '休市日' : minutes < EQUITY_OPEN_MINUTE ? '盘前' : minutes < close ? '盘中' : '收盘后';
+  return {clock:v.hour+':'+v.minute, phase};
+}
+export function observationTiming(row) {
+  const at=recordedTime(row);
+  if (!at) return null; // A pre-upgrade API did not expose sampling times or benchmark dates.
+  const reference = row.referenceDate == null ? '标普基准收盘日未知。' : '标普基准收盘日：'+row.referenceDate+'。';
+  return '纽约 '+at.clock+' 采集'+(at.phase?'（'+at.phase+'）':'')+'。'+reference+
+    (at.phase==='盘前' || at.phase==='盘中' ? '这份快照未覆盖当日收盘。':'');
+}
+export function hasInterveningSession(from,to) {
+  if (!day(from) || !day(to) || !equityCloseMinute(from) || !equityCloseMinute(to)) return false;
+  const previous = previousEquitySession(to);
+  return previous !== null && from < previous;
+}
+export function isScoreHistory(report) {
   if (report?.version !== 1 || typeof report.scoringVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(report.scoringVersion) || !Array.isArray(report.observations) || report.observations.length > 20) return false;
   return report.observations.every((row, index, rows) => {
     if (!row || !day(row.date) || (index && row.date >= rows[index - 1].date) || !numeric(row.coverage, 0, 100) || !nullableNum(row.baseScore, 0, 100) || !nullableNum(row.score, 0, 100) || (row.score !== null && row.coverage < MIN_SCORE_COVERAGE) || !sourceFor(row, report.scoringVersion)) return false;
+    if (Object.hasOwn(row,'capturedAt') || Object.hasOwn(row,'referenceDate')) {
+      if (!recordedTime(row) || !Object.hasOwn(row,'referenceDate') || !(row.referenceDate === null || (day(row.referenceDate) && row.referenceDate <= row.date))) return false;
+    }
     const c = row.change, prev = rows[index + 1];
     const difference = (a, b) => a === null || b === null ? null : Math.round((a-b)*10) / 10;
     if (c && prev && (c.totalDelta !== difference(row.score, prev.score) || c.baseDelta !== difference(row.baseScore, prev.baseScore))) return false;
     if (c === null) return !prev;
-    return c && day(c.previousDate) && c.previousDate < row.date && (!prev || prev.date === c.previousDate) && nullableNum(c.totalDelta, -100, 100) && (c.totalDelta === null || (row.score !== null && (!prev || prev.score !== null))) && nullableNum(c.baseDelta, -100, 100) && nullableNum(c.adjustmentDelta, -200, 200) && uniqueIds(c.gained) && uniqueIds(c.lost) && Array.isArray(c.drivers) && c.drivers.length <= 12 && c.drivers.every(d => d && known(d.id) && numeric(d.deltaPoints, -100, 100));
+    return c && day(c.previousDate) && c.previousDate < row.date && (!prev || prev.date === c.previousDate) && nullableNum(c.totalDelta, -100, 100) && (c.totalDelta === null || (row.score !== null && (!prev || prev.score !== null))) && nullableNum(c.baseDelta, -100, 100) && nullableNum(c.adjustmentDelta, -200, 200) && c.adjustmentDelta === difference(c.totalDelta, c.baseDelta)
+      && uniqueIds(c.gained) && uniqueIds(c.lost) && !c.gained.some(id=>c.lost.includes(id))
+      && (!prev || row.coverage - prev.coverage === c.gained.reduce((n,id)=>n+INDICATOR_WEIGHTS[id],0) - c.lost.reduce((n,id)=>n+INDICATOR_WEIGHTS[id],0))
+      && Array.isArray(c.drivers) && c.drivers.length <= 12 && c.drivers.every(d => d && known(d.id) && numeric(d.deltaPoints, -100, 100));
   });
 }
 const el = (tag, text, cls) => { const n = document.createElement(tag); if (text != null) n.textContent = text; if (cls) n.className = cls; return n; };
@@ -32,6 +62,8 @@ function observation(row, prev, version) {
   const article = el('article', null, 'history-reading');
   article.append(el('h3', `${row.date} · ${row.score === null ? '暂停评分' : `综合分 ${pts(row.score)}`}`));
   article.append(el('p', `有效权重 ${row.coverage}%${row.baseScore === null ? '' : ` · 基础分 ${pts(row.baseScore)}`}。${row.score === null && row.coverage < MIN_SCORE_COVERAGE ? `有效权重不足 ${MIN_SCORE_COVERAGE}%，这一天没有综合分。` : '基础分按该日有效指标计算。'}`));
+  const timing = observationTiming(row);
+  if (timing) article.append(el('p',timing,'validation-note'));
   const c = row.change;
   if (!c) article.append(el('p', '这是所列最早的记录，没有上一期可比较。'));
   else {
@@ -41,6 +73,7 @@ function observation(row, prev, version) {
     else if (prev && prev.score === null && row.score !== null) compare = `恢复评分至 ${pts(row.score)} 分`;
     else compare = '无法比较综合分';
     article.append(el('p', `与上一期 ${c.previousDate} 相比：${compare}。`));
+    if (hasInterveningSession(c.previousDate,row.date)) article.append(el('p','两份记录之间有交易日没有观察记录；这些变化不是单日变化。','validation-note'));
     if (c.lost.length || c.gained.length) {
       const changes = [c.lost.length ? `不再计分：${namesFor(c.lost)}` : '', c.gained.length ? `恢复计分：${namesFor(c.gained)}` : ''].filter(Boolean);
       article.append(el('p', `${changes.join('；')}。`));
@@ -88,7 +121,7 @@ function init() {
     try {
       const response = await fetch('/api/score-history', { signal: controller.signal, cache: 'no-cache' });
       if (!response.ok) throw new Error();
-      const report = await response.json(); if (!valid(report)) throw new Error();
+      const report = await response.json(); if (!isScoreHistory(report)) throw new Error();
       const key = JSON.stringify(report); const focus = panel.open && (document.activeElement === retry || document.activeElement === picker);
       if (key !== signature) picker = render(box, report, picker?.value);
       lastCheck = Date.now(); signature = key; feedback.textContent = ''; feedback.hidden = true;
@@ -103,4 +136,4 @@ function init() {
   panel.addEventListener('toggle', () => { if (panel.open) load(); }); retry.addEventListener('click', () => load(true));
   window.addEventListener('hashchange', followHash); followHash(); if (panel.open) load();
 }
-init();
+if (typeof document !== 'undefined') init();

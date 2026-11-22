@@ -170,7 +170,63 @@ export function projectMarketPulse(snapshot, now = Date.now()) {
   if (today && todayClose === null) errors.push("纽约交易日历未覆盖此日期，当日判断暂停");
   if (schemaValid && nowValid && !timeValid) errors.push("行情核对时间在未来");
   return { status, label, mode, today: today?.date ?? null,
-    date: anchor?.date ?? quotes.map((row) => row.date).filter((date) => date && today && date <= today.date).sort().at(-1) ?? null,
+    date: anchor?.date ?? quotes.filter(row => row.state === "stale").map(row => row.date).sort().at(-1) ?? null,
     session: anchor?.session ?? null, checkedAt: schemaValid ? snapshot.checkedAt : null, errors, quotes,
     broad: broadStatus(usable, status), sector: sectorStatus(usable, status), volatility: volatilityStatus(usable, status), ruleNote: RULE_NOTE };
+}
+
+// Separately displayed observations already used by the structural dashboard.
+// A daily series supplies a date, not a quote instant, and is never passed into
+// broadStatus/sectorStatus or used as a substitute for the licensed feed.
+const DAILY_SERIES = [
+  { symbol: "VIX", id: "vix", series: "VIXCLS", source: "https://www.cboe.com/tradable_products/vix/" },
+  { symbol: "SPX", id: "sp500", series: "SP500", source: "https://fred.stlouisfed.org/series/SP500" },
+];
+
+function clockTime(now) {
+  return now instanceof Date ? now.getTime() : typeof now === "number" ? now :
+    typeof now === "string" && validTime(now) ? Date.parse(now) : NaN;
+}
+// Cboe methodologies end VIX RTH dissemination at 16:15 ET and VXSMH at 16:00 ET.
+// This calculates the latest scheduled cash-session reference date, not the
+// timestamp of a vendor observation or proof that a closing value was published.
+function closeDelay(symbol) { return symbol === "VIX" ? 15 : 0; }
+function lastCompletedSession(clock, symbol) {
+  const close = equityCloseMinute(clock.date);
+  if (close === null) return null;
+  return close > 0 && clock.minutes >= close + closeDelay(symbol) ? clock.date : previousEquitySession(clock.date);
+}
+export function latestCompletedCloseDate(symbol, now = Date.now()) {
+  const ms = clockTime(now);
+  return SYMBOLS.has(symbol) && Number.isFinite(ms) && Number.isFinite(new Date(ms).getTime()) ? lastCompletedSession(localTime(ms), symbol) : null;
+}
+export function dailyCloseReferences(dashboard, now = Date.now()) {
+  const nowMs = clockTime(now);
+  if (!Number.isFinite(nowMs) || !Number.isFinite(new Date(nowMs).getTime()) || !Array.isArray(dashboard?.indicators) || !validTime(dashboard.generatedAt)) return [];
+  const collectedMs = Date.parse(dashboard.generatedAt);
+  if (collectedMs > nowMs) return [];
+  const observed = localTime(collectedMs), current = localTime(nowMs);
+  return DAILY_SERIES.flatMap(({ symbol, id, series, source }) => {
+    const matches = dashboard.indicators.filter(r => r?.id === id);
+    if (matches.length !== 1) return [];
+    const row = matches[0], { date, sparkline } = row;
+    if (row.source?.url !== source || !validDate(date) || !equityCloseMinute(date) || date > observed.date ||
+        (date === observed.date && observed.minutes < equityCloseMinute(date) + closeDelay(symbol)) || !Array.isArray(sparkline)) return [];
+    const end = sparkline.at(-1);
+    if (end?.date !== date || !Number.isFinite(end.value) || end.value <= 0) return [];
+    // Repeated or descending observation dates cannot identify a unique last price.
+    if (sparkline.some((p,i) => !validDate(p?.date) || (i > 0 && p.date <= sparkline[i-1].date))) return [];
+    const value = end.value;
+    if (symbol === "SPX") {
+      const ref = dashboard.validationReference;
+      if (ref?.series !== series || ref.date !== date || ref.close !== value) return [];
+    } else if (typeof row.value !== "string" || !/^\d+(?:\.\d+)?$/.test(row.value) || Number(row.value) !== value) return [];
+    const prior = sparkline.at(-2);
+    const comparable = prior && prior.date === previousEquitySession(date) && Number.isFinite(prior.value) && prior.value > 0;
+    const percent = comparable ? (value / prior.value - 1) * 100 : null;
+    const hasChange = Number.isFinite(percent) && percent > -100;
+    const expectedDate = lastCompletedSession(current, symbol);
+    return [{ symbol, date, value, previousDate: hasChange ? prior.date : null,
+      changePercent: hasChange ? percent : null, expectedDate, isLatest: expectedDate === date, source: "https://fred.stlouisfed.org/series/" + series }];
+  });
 }

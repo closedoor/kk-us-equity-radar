@@ -4,7 +4,9 @@ import { requestDashboard } from "./dashboard-client.js";
 import { applyManualIndicator, manualReviewInfo, mergeManualOverrides } from "./manual-state.js";
 import { isMarketPulseSnapshot, projectMarketPulse } from "./market-pulse.js";
 
+import { verifiedCloses } from "./verified-closes.js";
 import { calendarAgenda } from "./calendar-agenda.js";
+import { explainCoverage } from "./coverage-gaps.js";
 
 const manualConfig = [
   { id: "aiEarnings", label: "AI 产业链财报风险", help: "当云资本开支、芯片指引或库存出现新变化时，可调整风险值。" },
@@ -85,7 +87,6 @@ const els = {
   pulsePeekVix: document.querySelector("#pulsePeekVix"),
   pulsePeekVxsmh: document.querySelector("#pulsePeekVxsmh"),
   pulseStatus: document.querySelector("#pulseStatus"),
-  dailyVix: document.querySelector("#pulseDailyVix"),
   pulseHeading: document.querySelector("#marketPulseTitle"),
   pulseQuotes: document.querySelector("#pulseQuotes"),
   pulseJudgments: document.querySelector("#pulseJudgments"),
@@ -202,7 +203,42 @@ function scoreColor(score) {
   return riskMeta(score).color;
 }
 
+const gapPanel = document.querySelector("#coverageGaps");
+const gapList = document.querySelector("#coverageGapList");
+
+function renderCoverageGaps(data) {
+  const gap = explainCoverage(data.indicators);
+  const summary = gapPanel.querySelector("summary");
+  const active = document.activeElement;
+  if (gap.missing === 0 && gapPanel.contains(active)) {
+    const target = document.querySelector(".driver-shortcut");
+    target?.focus({ preventScroll: true });
+  }
+  gapPanel.hidden = gap.missing === 0;
+  if (!gap.missing) { gapPanel.open = false; gapList.replaceChildren(); gapList._lastMarkup = null; return; }
+  const heading = gap.shortfall ? `为什么暂停评分？距门槛还差 ${gap.shortfall} 个百分点` : `查看未计分项 · 缺少 ${gap.missing}% 权重`;
+  if (summary.textContent !== heading) summary.textContent = heading;
+  const markup = `<p>有效权重 ${gap.covered}%，未计分权重 ${gap.missing}%。综合分门槛为 ${gap.threshold}%。</p>` + gap.groups.map(group => {
+    const rows = group.items.map(item => `<li><a data-focus-key="coverage-gap-${escapeHtml(item.id)}" href="#indicator-${escapeHtml(item.id)}">${escapeHtml(item.title)} · ${item.weight}%</a>
+      <small>${item.reading ? `已记录 ${escapeHtml(item.reading.value)} · 数据期 ${escapeHtml(item.reading.date)}` : "暂无可核对的读数"}</small></li>`).join("");
+    return `<section><h3>${escapeHtml(group.reason)} · ${group.weight}%</h3>${group.explanation ? `<p>${escapeHtml(group.explanation)}${group.source ? ` <a data-focus-key="coverage-gap-source-cpi" href="${safeExternalUrl(group.source)}" target="_blank" rel="noreferrer">BLS 官方说明 ↗</a>` : ""}</p>` : ""}<ul>${rows}</ul></section>`;
+  }).join("");
+  if (gapList._lastMarkup !== markup) {
+    const focusKey = gapList.contains(active) && active.dataset.focusKey;
+    gapList.innerHTML = markup;
+    gapList._lastMarkup = markup;
+    if (focusKey) (gapList.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`) || summary).focus({ preventScroll: true });
+  }
+}
+
+// Re-selecting the same fragment must reveal its card even when another filter now hides it.
+gapList.addEventListener("click", event => {
+  const anchor = event.target.closest('a[href^="#indicator-"]');
+  if (anchor && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && location.hash === anchor.hash) revealSignalHash();
+});
+
 function renderSummary(data) {
+  renderCoverageGaps(data);
   const score = Number.isFinite(data.score) ? Math.round(data.score * 10) / 10 : null;
   const meta = score === null
     ? { label: "数据不足", color: "#777a74", description: `当前有效数据覆盖率为 ${data.coverage}%，低于 ${MIN_SCORE_COVERAGE}% 评分门槛。` }
@@ -329,24 +365,45 @@ function safeExternalUrl(value) {
   }
 }
 
-function renderDailyVixReference(pulse) {
-  if (!els.dailyVix) return;
-  const reference = pulse.quotes.find((row) => row.symbol === "VIX");
-  const row = state.data?.indicators.find((item) => item.id === "vix");
-  const date = row?.date;
-  const value = Number(row?.value);
-  const point = row?.sparkline?.at(-1);
-  const show = pulse.mode === "reference" && pulse.status === "stale" && reference?.state === "stale"
-    && row?.available && !cacheExpired(state.data)
-    && /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0, 10) === date
-    && date > reference.date && date <= pulse.today && date <= dateInTimeZone(new Date(state.data.generatedAt))
-    && Number.isFinite(value) && value > 0 && point?.date === date && Number.isFinite(point.value) && Number(point.value.toFixed(2)) === value;
-  els.dailyVix.hidden = !show;
-  els.dailyVix.querySelector("span").textContent = show ? `另有日度 VIX ${value.toFixed(2)}（${date}，模型输入），非当前盘中报价。` : "";
+function closeValue(row) {
+  return row.value.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function renderClosingEvidence(pulse) {
+  const rows = verifiedCloses(state.data);
+  const section = document.querySelector("#closeEvidence");
+  const list = section.querySelector(".close-list");
+  const cards = rows.map(row => {
+    const sourceLabel = row.basis === "review" ? "Cboe 历史日表" : "FRED 日表";
+    const when = row.isLatest ? "最近已结束交易日" : row.expectedDate ? "较早收盘 · 尚缺 " + row.expectedDate : "历史收盘 · 交易日历待核对";
+    const move = Number.isFinite(row.changePercent) ? '较 '+row.previousDate+' 收盘 '+pulsePercent(row.changePercent) : "无相邻前收，不计算日涨跌";
+    const model = row.model ? `<p class="close-model">结构模型输入：${escapeHtml(row.model.date)}，${closeValue(row.model)}。<a data-focus-key="close-model-vix" href="#indicator-vix">查看 VIX 指标依据</a></p>` : "";
+    return `<article class="close-reading" data-close-symbol="${row.symbol}" data-date="${row.date}" data-basis="${row.basis}"><h4>${row.symbol} <span>${row.symbol === "VXSMH" ? "半导体波动率" : row.symbol === "VIX" ? "标普波动率" : "标普 500"}</span></h4><strong>${closeValue(row)}</strong> <time datetime="${row.date}">${row.date} 收盘</time><p>${escapeHtml(move)}</p><small>${escapeHtml(when)} · ${row.basis === "review" ? "单次核对" : "模型日线"}</small><a class="close-source" data-focus-key="close-source-${row.symbol}" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">${sourceLabel} ↗</a>${model}</article>`;
+  }).join("");
+  if (cards !== list._lastCards) {
+    const key = list.contains(document.activeElement) ? document.activeElement.dataset.focusKey : null;
+    list.innerHTML = cards; list._lastCards = cards;
+    if (key) list.querySelector(`[data-focus-key="${CSS.escape(key)}"]`)?.focus({preventScroll:true});
+  }
+  section.hidden = !rows.length;
+  const usable = navigator.onLine !== false && !pulseState.error && (pulse.status === "current" || pulse.status === "last-close");
+  for (const [symbol,target] of [["VIX",els.pulsePeekVix],["VXSMH",els.pulsePeekVxsmh]]) {
+    const live = pulse.quotes.find(row=>row.symbol===symbol);
+    const close = rows.find(row=>row.symbol===symbol);
+    const active = usable && live?.state === pulse.status && (!close || live.date >= close.date);
+    if (active) {
+      target.textContent = `${symbol} ${live.value.toFixed(2)}${Number.isFinite(live.changePercent) ? " "+pulsePercent(live.changePercent,1) : ""}`;
+    } else if (close?.isLatest) {
+      target.textContent = `${symbol} ${closeValue(close)} · ${close.date.slice(5).replace("-","/")}收盘`;
+    } else {
+      const sourceOnly = pulse.status === "stale" || (pulseState.snapshot && !pulseState.controller);
+      target.textContent = sourceOnly ? symbol+" 官网 ↗" : symbol+" —";
+    }
+    target.title = active ? symbol+" 官方报价" : close?.isLatest ? close.date+" 纽约收盘；查看 "+symbol+" 官方报价" : "查看 "+symbol+" 官方报价";
+  }
 }
 
 function renderStructureTiming(pulse = projectMarketPulse(pulseState.snapshot)) {
-  renderDailyVixReference(pulse);
+  renderClosingEvidence(pulse);
   if (!els.structureTiming) return;
   const rows = [["vix", "VIX"], ["breadth", "宽度"], ["sp500", "SPX"]].map(([id, label]) => ({
     label, date: state.data?.indicators.find((item) => item.id === id)?.date || null,
@@ -383,22 +440,17 @@ function renderMarketPulse() {
   const shortDate = pulse.date?.split("-").slice(1).map(Number).join("/");
   const scope = pulse.session === "close" ? (reference ? "收盘参考" : "收盘段") : "盘中延时";
   const datedScope = shortDate ? `${shortDate} ${scope}` : scope;
+  const newerClose = verifiedCloses(state.data).some(row => row.isLatest && (!pulse.date || row.date > pulse.date));
   const datedHistory = pulse.date ? `${pulse.date} 历史报价` : "历史报价";
   const shortStatus = navigator.onLine === false ? "离线 · 当日压力待判断"
     : pulseState.error ? `${pulseState.error === "报价资料格式异常。" ? "报价格式异常" : "报价连接异常"} · 当日压力待判断`
       : current ? `${datedScope} · ${broad} · ${sector}`
         : usable ? `${shortDate ? `${shortDate} ` : ""}最近收盘 · 当日压力待判断`
-          : pulse.status === "stale" ? `${datedHistory} · 当日压力待判断`
+          : pulse.status === "stale" ? (newerClose ? "盘中未核实 · 当日压力待判断" : `${datedHistory} · 当日压力待判断`)
             : loading ? "正在读取当日报价 · 压力待判断" : "独立行情待同步 · 可看官方报价";
   if (els.pulsePeekStatus.textContent !== shortStatus) els.pulsePeekStatus.textContent = shortStatus;
   els.pulsePeek.dataset.state = blocked ? "unavailable" : pulse.status;
   els.pulsePeek.dataset.level = current && (pulse.broad.level === "severe" || pulse.sector.level === "severe") ? "severe" : "neutral";
-  for (const [symbol, target] of [["VIX", els.pulsePeekVix], ["VXSMH", els.pulsePeekVxsmh]]) {
-    const row = bySymbol.get(symbol);
-    const valid = usable && row?.state === pulse.status;
-    const sourceOnly = !valid && (pulse.status === "stale" || (pulseState.snapshot && !loading));
-    target.textContent = valid ? `${symbol} ${row.value.toFixed(2)}${Number.isFinite(row.changePercent) ? ` ${pulsePercent(row.changePercent, 1)}` : ""}` : sourceOnly ? `${symbol} 官网 ↗` : `${symbol} —`;
-  }
   els.pulseHeading.textContent = blocked && pulse.quotes.length ? "上次报价记录" : pulse.status === "stale" ? "历史报价与来源" : pulse.status === "last-close" ? "最近收盘与来源" : "当日报价与判读";
   const checkedAt = pulse.checkedAt ? new Date(pulse.checkedAt) : null;
   const timeNote = checkedAt ? ` · 核对于 ${dateInTimeZone(checkedAt)} ${nyQuoteTime.format(checkedAt)}（纽约）` : "";
@@ -1088,8 +1140,8 @@ els.filters.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-filter]");
   if (button) setSignalFilter(button.dataset.filter);
 });
-els.dailyVix?.querySelector("a").addEventListener("click", (event) => {
-  if (!event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && location.hash === "#indicator-vix") revealSignalHash();
+document.querySelector("#closeEvidence").addEventListener("click", (event) => {
+  if (event.target.closest('a[href="#indicator-vix"]') && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && location.hash === "#indicator-vix") revealSignalHash();
 });
 els.grid.addEventListener("click", (event) => {
   const button = event.target.closest("[data-manual-id]");

@@ -235,3 +235,73 @@ test("the published calendar covers later-year boundaries without assuming all f
   assert.equal(sessionAt("2029-01-03", "21:00:00").broad.level, "unconfirmed");
   assert.match(sessionAt("2029-01-03", "21:00:00").errors.join(), /日历未覆盖/);
 });
+
+import { dailyCloseReferences, latestCompletedCloseDate } from "./public/market-pulse.js";
+
+function dailyBoard(vixDate = "2026-11-19", spDate = vixDate, generatedAt = "2026-11-22T02:00:00Z") {
+  return { generatedAt, indicators: [
+    { id: "vix", date: vixDate, value: "28.44", sparkline: [{ date: "2026-11-18", value: 24.56 }, { date: vixDate, value: 28.44 }],
+      source: {url: "https://www.cboe.com/tradable_products/vix/"} },
+    { id: "sp500", date: spDate, value: "-8.2%", sparkline: [{ date: "2026-11-18", value: 7323.63 }, { date: spDate, value: 7175.83 }],
+      source: {url: "https://fred.stlouisfed.org/series/SP500"} },
+  ], validationReference: { series: "SP500", date: spDate, close: 7175.83 } };
+}
+test("daily references show verified VIX and SPX with their own dates, isolated from any intraday assessment", () => {
+  const d = dailyBoard(), at = "2026-11-22T03:00:00Z", copy = structuredClone(d);
+  const rows = dailyCloseReferences(d, at);
+  assert.deepEqual(rows.map(r=>[r.symbol,r.value,r.date,r.previousDate,r.expectedDate,r.isLatest,r.source]), [
+    ["VIX",28.44,"2026-11-19","2026-11-18","2026-11-20",false,"https://fred.stlouisfed.org/series/VIXCLS"],
+    ["SPX",7175.83,"2026-11-19","2026-11-18","2026-11-20",false,"https://fred.stlouisfed.org/series/SP500"],
+  ]);
+  assert.equal(rows[0].changePercent.toFixed(2),"15.80"); assert.equal(rows[1].changePercent.toFixed(2),"-2.02");
+  assert.deepEqual(d,copy);
+  const differing=dailyCloseReferences(dailyBoard("2026-11-19","2026-11-20"),at);
+  assert.deepEqual(differing.map(r=>r.isLatest),[false,true]);
+  assert.equal(differing[1].previousDate,null); assert.equal(differing[1].changePercent,null);
+  const old = dailyCloseReferences(d,"2026-12-01T19:00:00Z"); assert.equal(old[0].date,"2026-11-19");assert.equal(old[0].isLatest,false);
+  assert.equal(dailyCloseReferences(null,at).length,0);
+});
+test("a dated daily close must already have existed when the snapshot was made, including early closes and VIX delay",()=>{
+  for(const [check,counted] of [["2026-11-27T17:59:59Z",[]],["2026-11-27T18:00:00Z",["SPX"]],["2026-11-27T18:14:59Z",["SPX"]],["2026-11-27T18:15:00Z",["VIX","SPX"]]]) {
+    const d=dailyBoard("2026-11-27","2026-11-27",check);
+    assert.deepEqual(dailyCloseReferences(d,"2026-11-28T17:00:00Z").map(x=>x.symbol),counted);
+  }
+  const d=dailyBoard("2026-11-25","2026-11-25","2026-11-25T22:00:00Z");
+  assert.ok(dailyCloseReferences(d,"2026-11-26T22:00:00Z").every(x=>x.expectedDate==="2026-11-25" && x.isLatest));
+  assert.ok(dailyCloseReferences(d,"2026-11-27T18:02:00Z").find(x=>x.symbol==="VIX").isLatest);
+  assert.equal(dailyCloseReferences(d,"2026-11-27T18:02:00Z").find(x=>x.symbol==="SPX").isLatest,false);
+  const unknown=dailyCloseReferences(d,"2029-01-03T12:00:00Z");assert.equal(unknown.length,2);assert.ok(unknown.every(x=>x.expectedDate===null&&!x.isLatest));
+  for(const day of ["2026-11-26","2026-11-28","2029-01-03"]) assert.deepEqual(dailyCloseReferences(dailyBoard(day,day,day+"T22:00:00Z"),day+"T23:00:00Z"),[]);
+});
+test("bad identities, contradictory levels, ambiguous observations and future snapshots cannot become daily reference prices",()=>{
+  const at="2026-11-22T03:00:00Z";
+  for(const damage of [
+    d=>d.validationReference.series="VIXCLS", d=>d.validationReference.close+=1, d=>d.validationReference.date="2026-11-20",
+    d=>d.indicators[1].source.url="https://fred.stlouisfed.org/series/VIXCLS",
+    d=>d.indicators[1].sparkline.push({date:"2026-11-19",value:7150}), d=>d.indicators[1].sparkline.reverse(),
+    d=>d.indicators[1].sparkline[1].value=0, d=>d.indicators[1].date="2026-11-20", d=>d.indicators.push(structuredClone(d.indicators[1]))
+  ]){const d=dailyBoard();damage(d);assert.deepEqual(dailyCloseReferences(d,at).map(x=>x.symbol),["VIX"]);}
+  const issue=dailyBoard();issue.indicators[0].value="";assert.deepEqual(dailyCloseReferences(issue,at).map(x=>x.symbol),["SPX"]);
+  for(const stamp of ["bad","2026-11-22T04:00:00Z","2026-11-22T03:00:00"]) assert.deepEqual(dailyCloseReferences({...dailyBoard(),generatedAt:stamp},at),[]);
+});
+
+test("VIX and VXSMH use separate settlement windows; being past the window alone supplies no price", () => {
+  const rightAfterClose = "2026-11-20T21:00:00Z", summer = "2026-07-07T20:14:59Z";
+  assert.equal(latestCompletedCloseDate("VXSMH", rightAfterClose), "2026-11-20");
+  assert.equal(latestCompletedCloseDate("VIX", rightAfterClose), "2026-11-19");
+  assert.equal(latestCompletedCloseDate("VXSMH", summer), "2026-07-07");
+  assert.equal(latestCompletedCloseDate("VIX", summer), "2026-07-06");
+  assert.equal(latestCompletedCloseDate("VIX", "2026-07-07T20:15:00Z"), "2026-07-07");
+  for(const [symbol,clock] of [["OTHER",summer],["VIX","junk"],["VIX","2029-01-01T12:00:00Z"],["VIX",Infinity]]) assert.equal(latestCompletedCloseDate(symbol,clock),null);
+});
+test("a missing or rejected quote cannot redate a historical reference in the market summary", () => {
+  const holiday = quote("VXSMH", null, {value:65.89, date:"2026-11-07", at:"2026-11-07T16:00:00Z"});
+  const unknown = quote("VIX",null,{value:null,date:"2026-11-08",at:null,session:"unconfirmed"});
+  const historical = quote("SPX",-4.2), checkedAt="2026-11-09T18:00:00Z";
+  for(const quotes of [[holiday, historical, unknown],[unknown, historical, holiday]]) {
+    const view=projectMarketPulse(snapshot(quotes,{mode:"reference",checkedAt}),checkedAt);
+    assert.equal(view.status,"stale"); assert.equal(view.date,historical.date);
+    assert.deepEqual(view.quotes.filter(r=>r.state==="stale").map(r=>r.symbol),["SPX"]);
+  }
+  assert.equal(projectMarketPulse(snapshot([holiday,unknown],{mode:"reference",checkedAt}),checkedAt).date,null);
+});

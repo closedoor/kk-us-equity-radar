@@ -166,12 +166,14 @@ export function monthlyDifference(series, months = 1) {
 }
 
 export function nearestPrior(series, daysAgo) {
-  if (!series?.length) return null;
+  if (!series?.length || !Number.isInteger(daysAgo) || daysAgo < 1) return null;
   const target = Date.parse(series.at(-1).date) - daysAgo * DAY_MS;
   let best = null;
   for (const point of series) {
     if (Date.parse(point.date) <= target) best = point;
     else break;
   }
-  return best;
+  // Daily rate and spread series may skip non-business days. Allow one calendar
+  // week before the intended baseline, but no substitution from an older month.
+  return best && target - Date.parse(best.date) <= 7 * DAY_MS ? best : null;
 }

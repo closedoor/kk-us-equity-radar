@@ -28,6 +28,8 @@
 - `calendar.mjs`
 - `calendar.test.mjs`
 - `calendar-agenda.test.mjs`
+- `coverage-gaps.test.mjs`
+- `verified-closes.test.mjs`
 - `market-data.mjs`
 - `market-data.test.mjs`
 - `market-pulse-source.mjs`
@@ -43,6 +45,8 @@
 - `fixtures/earnings-data.json`
 - `scripts/browser-smoke.cjs`
 - `scripts/calendar-agenda-browser.cjs`
+- `scripts/closing-browser.cjs`
+- `scripts/coverage-gaps-browser.cjs`
 - `scripts/live-release.cjs`
 - `scripts/score-history-browser.cjs`
 - `scripts/product-audit.cjs`

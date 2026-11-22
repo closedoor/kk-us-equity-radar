@@ -708,3 +708,79 @@ test("a daily-close request started before the bell cannot become final while it
     assert.deepEqual((await finished()).validationReference, { series: "SP500", date: "2026-11-24", close: 5000 });
   }, { preload });
 });
+
+// Keep the market data under test deterministic even when the actual calendar changes.
+const macroPairClock = publicationClockPreload.replaceAll(publicationClock, "2026-09-19T16:00:00Z");
+const alterSeries = changes => macroPairClock + completeSourcesStub() + `
+  const unmodified = globalThis.fetch;
+  globalThis.fetch = async raw => {
+    const url = new URL(raw);
+    const response = await unmodified(raw);
+    if (!url.pathname.endsWith('/fredgraph.csv')) return response;
+    const id = url.searchParams.get('id'), lines = (await response.text()).split('\\n');
+    ${changes}
+    return new Response(lines.join('\\n'));
+  };
+`;
+
+test("a two-year quote from before a policy move must not reprice the new target; a weekend with unchanged targets remains valid", async () => {
+  for (const changed of [true, false]) {
+    const preload = alterSeries(`
+      if (id === 'DGS2') lines.pop(); // Last market data September 17.
+      if (${changed} && id === 'DFEDTARU') lines[lines.length - 1] = '2026-09-18,6';
+      if (${changed} && id === 'DFEDTARL') lines[lines.length - 1] = '2026-09-18,5.75';
+    `);
+    await withOfflineServer({}, async ({finished}) => {
+      const fed = (await finished()).indicators.find(r => r.id === "fed");
+      assert.equal(fed.available, !changed);
+      assert.equal(fed.value, changed ? "5.75%–6%" : "3.75%–4%");
+      if (changed) {
+        assert.equal(fed.judgment,null); assert.equal(fed.risk,null);
+        assert.match(fed.unavailableReason,/政策.*变动/);
+      } else {
+        assert.match(fed.judgment.text,/2026-09-17/);
+        assert.match(fed.judgment.text,/高 1 个百分点/);
+      }
+    }, {preload});
+  }
+});
+
+test("Treasury level, real yield and curve use the same observation day or suspend when that day is missing", async () => {
+  for (const removeCommon of [false,true]) {
+    const preload = alterSeries(`
+      if (id === 'DFII10') lines.pop();
+      if (id === 'DGS10') {
+        if (${removeCommon}) lines.splice(-2,1); // September 17 absent, even though the 16th is available.
+        lines[lines.length-1] = '2026-09-18,7.2';
+      }
+      if (id === 'T10Y3M') lines[lines.length-1] = '2026-09-18,2.1';
+    `);
+    await withOfflineServer({}, async ({finished}) => {
+      const rates = (await finished()).indicators.find(r => r.id === "rates");
+      if (removeCommon) {
+        assert.equal(rates.risk,null); assert.match(rates.unavailableReason,/共同观测日/);
+      } else {
+        assert.equal(rates.available,true); assert.equal(rates.date,"2026-09-17"); assert.equal(rates.value,"4.2%");
+        assert.deepEqual(rates.breakdown.map(x => x.detail),Array(3).fill("2026-09-17"));
+        assert.match(rates.detail,/共同观测日/);
+        assert.equal(rates.sparkline.at(-1).date,"2026-09-17");
+      }
+    }, {preload});
+  }
+});
+
+test("flat inflation is not labeled divergence and CPI acceleration alone does not identify an energy shock", async () => {
+  for (const accelerated of [false,true]) {
+    const preload = alterSeries(`
+      if (${accelerated} && ['CPIAUCNS','CPILFENS'].includes(id)) {
+        const [d,v] = lines.at(-1).split(',');
+        lines[lines.length-1] = d+','+(Number(v)*1.02);
+      }
+    `);
+    await withOfflineServer({}, async ({finished}) => {
+      const row=(await finished()).indicators.find(r=>r.id==="inflation");
+      assert.match(row.judgment.label,accelerated ? /恶化/ : /平稳/);
+      assert.doesNotMatch(row.judgment.text,/能源冲击|方向不一致/);
+    }, {preload});
+  }
+});

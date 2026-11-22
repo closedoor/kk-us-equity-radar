@@ -360,17 +360,23 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
   const coreAcceleration = Number.isFinite(coreCpiYoy) && Number.isFinite(priorCoreCpiYoy)
     ? coreCpiYoy - priorCoreCpiYoy
     : null;
-  const inflationTrend = Number.isFinite(headlineAcceleration) && Number.isFinite(coreAcceleration)
-    ? headlineAcceleration >= 0.15 && coreAcceleration >= -0.05
-      ? {
-        tone: "bad",
-        label: "总体判断：恶化",
-        text: `整体 CPI 同比比上月上升 ${round(headlineAcceleration, 1)} 个百分点，核心 CPI 同比${coreAcceleration >= 0 ? "也上升" : "仅小幅回落"}；能源冲击正在重新抬高通胀，而核心压力改善不足。`,
-      }
-      : headlineAcceleration <= -0.15 && coreAcceleration <= 0
-        ? { tone: "good", label: "总体判断：改善", text: "整体与核心通胀同比同步回落，短期方向改善；仍需连续数月确认。" }
-        : { tone: "mixed", label: "总体判断：分化", text: "整体与核心通胀方向不一致，暂时不能确认持续改善或全面恶化。" }
-    : null;
+  // Compare the two changes in year-over-year rates. The inputs identify direction,
+  // not the component (such as energy) responsible for a change in headline CPI.
+  let inflationTrend = null;
+  if (Number.isFinite(headlineAcceleration) && Number.isFinite(coreAcceleration)) {
+    const movement = (delta) => Math.abs(delta) < 0.05 ? "基本持平" : `${delta > 0 ? "上升" : "回落"} ${round(Math.abs(delta), 1)} 个百分点`;
+    const text = `相对上月，整体 CPI 同比${movement(headlineAcceleration)}，核心 CPI 同比${movement(coreAcceleration)}。`;
+    if (headlineAcceleration >= 0.15 && coreAcceleration >= -0.05) {
+      inflationTrend = { tone: "bad", label: "总体判断：恶化", text };
+    } else if (headlineAcceleration <= -0.15 && coreAcceleration <= 0) {
+      inflationTrend = { tone: "good", label: "总体判断：改善", text };
+    } else if (Math.abs(headlineAcceleration) < 0.05 && Math.abs(coreAcceleration) < 0.05) {
+      inflationTrend = { tone: "mixed", label: "总体判断：平稳", text };
+    } else {
+      const diverging = Math.min(headlineAcceleration, coreAcceleration) <= -0.05 && Math.max(headlineAcceleration, coreAcceleration) >= 0.05;
+      inflationTrend = { tone: "mixed", label: diverging ? "总体判断：分化" : "总体判断：观察", text };
+    }
+  }
 
   const fedRate = getFred("DFEDTARU");
   const fedRateLower = getFred("DFEDTARL");
@@ -383,7 +389,17 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
   const twoYearLast = latest(twoYear);
   const twoYearPrior = nearestPrior(twoYear, 90);
   const twoYearChange = twoYearLast && twoYearPrior ? twoYearLast.value - twoYearPrior.value : null;
-  const policyGap = fedBounds.valid && twoYearLast ? twoYearLast.value - fedLast.value : null;
+  // The daily target range can advance through a weekend before another Treasury quote.
+  // Only compare a quote to the actual range on its own date, still in effect today.
+  const yieldDay = twoYearLast?.date;
+  const quoteUpper = yieldDay && fedRate.find(p => p.date === yieldDay);
+  const quoteLower = yieldDay && fedRateLower.find(p => p.date === yieldDay);
+  const quoteBounds = checkPolicyBounds(quoteLower, quoteUpper);
+  const policyMoved = quoteBounds.valid && [fedRate, fedRateLower].some((series, index) =>
+    series.some(p => p.date > yieldDay && p.value !== (index === 0 ? quoteUpper.value : quoteLower.value)));
+  const policyComparisonReason = fedBounds.valid && yieldDay
+    ? !quoteBounds.valid ? "缺少报价日政策区间" : policyMoved ? "政策变动后待两年期报价" : null : null;
+  const policyGap = fedBounds.valid && quoteBounds.valid && !policyMoved ? twoYearLast.value - quoteUpper.value : null;
 
   const unemployment = getFred("UNRATE");
   const unemploymentLast = latest(unemployment);
@@ -409,15 +425,21 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
     ? Math.max(actualHikeRisk, clamp(marketHawkishness * 0.55 + macroConstraint * 0.45))
     : null;
 
-  const realYield = getFred("DFII10");
-  const nominal10y = getFred("DGS10");
+  // These three daily Treasury measures are one same-day input. If a feed
+  // publishes later, stop all levels and curve history at the oldest latest date.
+  const treasuryInputs = ["DFII10", "DGS10", "T10Y3M"].map(getFred);
+  const treasuryDates = treasuryInputs.map(series => latest(series)?.date);
+  const treasuryDate = treasuryDates.every(Boolean) ? [...treasuryDates].sort()[0] : null;
+  const treasuryAligned = Boolean(treasuryDate && treasuryInputs.every(series => series.some(p => p.date === treasuryDate)));
+  const treasuryLagged = treasuryAligned && new Set(treasuryDates).size > 1;
+  const [realYield, nominal10y, yieldCurve] = treasuryInputs.map(series => treasuryAligned
+    ? series.filter(p => p.date <= treasuryDate) : series);
   const realLast = latest(realYield);
   const nominalLast = latest(nominal10y);
   const realYieldRisk = realLast && nominalLast
     ? clamp(scale(realLast.value, 1.3, 2.7) * 0.7 + scale(nominalLast.value, 4.2, 5.2) * 0.3)
     : null;
 
-  const yieldCurve = getFred("T10Y3M");
   const yieldCurveLast = latest(yieldCurve);
   const curveWindowStart = yieldCurveLast ? Date.parse(yieldCurveLast.date) - 730 * 86_400_000 : null;
   const recentCurve = yieldCurveLast ? yieldCurve.filter((point) => Date.parse(point.date) >= curveWindowStart) : [];
@@ -435,7 +457,7 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
   const yieldCurveRisk = Number.isFinite(curveMin) && yieldCurveLast
     ? Math.min(0.85, clamp(scale(-curveMin, 0.25, 1.5) * 0.65 + curveWindowRisk * 0.35))
     : null;
-  const ratesRisk = Number.isFinite(realYieldRisk) && Number.isFinite(yieldCurveRisk)
+  const ratesRisk = treasuryAligned && Number.isFinite(realYieldRisk) && Number.isFinite(yieldCurveRisk)
     ? clamp(realYieldRisk * 0.72 + yieldCurveRisk * 0.28)
     : null;
 
@@ -559,9 +581,9 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
     }),
     indicator({
       id: "fed", title: "美联储政策周期", category: "通胀与政策", weight: weights.fed, risk: fedRisk,
-      value: fedBounds.valid ? `${round(fedLowerLast.value, 2)}%–${round(fedLast.value, 2)}%` : fedBounds.reason || "暂无数据", detail: `${fedBounds.reason || "当前联邦基金目标区间"}；下次会议 ${nextFomcDate}；2 年期 ${twoYearLast ? round(twoYearLast.value, 2) : "--"}%`,
+      value: fedBounds.valid ? `${round(fedLowerLast.value, 2)}%–${round(fedLast.value, 2)}%` : fedBounds.reason || "暂无数据", detail: `${fedBounds.reason || "当前联邦基金目标区间"}；下次会议 ${nextFomcDate}；2 年期 ${twoYearLast ? round(twoYearLast.value, 2) + "%" : "--"}`,
       date: fedLast?.date, description: "用联邦基金目标区间、2 年期美债和宏观约束判断市场是否在重新定价政策路径。", why: "政策收紧会压制估值和融资；2 年期利率比未经自动核验的概率快照更适合持续监测。",
-      source: { label: "Federal Reserve / FRED · 政策利率", url: sourceUrl("DFEDTARU") }, cadence: "交易日 / 会议", confidence: Number.isFinite(fedRisk) ? "high" : "unavailable", unavailableReason: fedBounds.reason || cpiDependencyReason, sparkline: spark(twoYear, 90), methodology: "市场利率重定价、实际政策变化、通胀和就业约束共同评分；子数据不足时不计分。",
+      source: { label: "Federal Reserve / FRED · 政策利率", url: sourceUrl("DFEDTARU") }, cadence: "交易日 / 会议", confidence: Number.isFinite(fedRisk) ? "high" : "unavailable", unavailableReason: fedBounds.reason || policyComparisonReason || cpiDependencyReason, sparkline: spark(twoYear, 90), methodology: "市场利率重定价、实际政策变化、通胀和就业约束共同评分；子数据不足时不计分。",
       breakdown: [
         { label: "政策目标下限", value: fedLowerLast ? `${round(fedLowerLast.value, 2)}%` : "--", detail: fedLowerLast?.date || "" },
         { label: "政策目标上限", value: fedLast ? `${round(fedLast.value, 2)}%` : "--", detail: fedLast?.date || "" },
@@ -570,18 +592,18 @@ async function buildDashboard({ fetchBudgetMs = MARKET_FETCH_BUDGET_MS } = {}) {
       judgment: Number.isFinite(policyGap) ? {
         tone: policyGap > 0.25 ? "bad" : policyGap < -0.25 ? "good" : "mixed",
         label: "市场定价",
-        text: `2 年期美债相对政策上限${policyGap >= 0 ? "高" : "低"} ${Math.abs(round(policyGap, 2))} 个百分点，${policyGap > 0.25 ? "市场仍在计入偏紧政策风险。" : policyGap < -0.25 ? "市场正在计入未来宽松空间。" : "市场利率与当前政策区间较为接近。"}`,
+        text: `${yieldDay} 的 2 年期美债相对当日政策上限${policyGap >= 0 ? "高" : "低"} ${Math.abs(round(policyGap, 2))} 个百分点，${policyGap > 0.25 ? "市场仍在计入偏紧政策风险。" : policyGap < -0.25 ? "市场正在计入未来宽松空间。" : "市场利率与当前政策区间较为接近。"}`,
       } : null,
     }),
     indicator({
       id: "rates", title: "10年期美债与实际利率", category: "通胀与政策", weight: weights.rates, risk: ratesRisk,
-      value: nominalLast ? `${round(nominalLast.value, 2)}%` : "暂无数据", detail: `10 年期名义收益率；实际利率 ${realLast ? round(realLast.value, 2) : "--"}%；10Y-3M ${yieldCurveLast ? `${yieldCurveLast.value >= 0 ? "+" : ""}${round(yieldCurveLast.value, 2)}%` : "--"}`,
+      value: nominalLast ? `${round(nominalLast.value, 2)}%` : "暂无数据", detail: `10 年期名义收益率；实际利率 ${realLast ? round(realLast.value, 2) : "--"}%；10Y-3M ${yieldCurveLast ? `${yieldCurveLast.value >= 0 ? "+" : ""}${round(yieldCurveLast.value, 2)} 个百分点` : "--"}${treasuryLagged ? "；共同观测日 " + treasuryDate : !treasuryAligned && treasuryDate ? "；缺少共同观测日，暂停计分" : ""}`,
       date: nominalLast?.date, description: "观察 10 年期名义与实际利率水平，以及期限曲线倒挂和重新转正的周期信号；当前评分未纳入利率上涨速度。", why: "实际利率决定股票折现压力，期限结构则反映融资与衰退风险。",
-      source: { label: "U.S. Treasury / FRED · 10Y", url: "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve" }, cadence: "交易日", confidence: Number.isFinite(ratesRisk) ? "high" : "unavailable", unavailableReason: "子数据不足", sparkline: spark(nominal10y, 90), methodology: "实际与名义收益率压力占 72%，期限曲线周期风险占 28%；两组输入齐全才计分。",
+      source: { label: "U.S. Treasury / FRED · 10Y", url: "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve" }, cadence: "交易日", confidence: Number.isFinite(ratesRisk) ? "high" : "unavailable", unavailableReason: treasuryDate && !treasuryAligned ? "缺少共同观测日" : "子数据不足", sparkline: spark(nominal10y, 90), methodology: "实际与名义收益率压力占 72%，期限曲线周期风险占 28%；三条日度序列须在共同观测日齐全。",
       breakdown: [
         { label: "10年期名义", value: nominalLast ? `${round(nominalLast.value, 2)}%` : "--", detail: nominalLast?.date || "" },
         { label: "10年期实际", value: realLast ? `${round(realLast.value, 2)}%` : "--", detail: realLast?.date || "" },
-        { label: "10Y-3M", value: yieldCurveLast ? `${yieldCurveLast.value >= 0 ? "+" : ""}${round(yieldCurveLast.value, 2)}%` : "--", detail: "期限利差" },
+        { label: "10Y-3M", value: yieldCurveLast ? `${yieldCurveLast.value >= 0 ? "+" : ""}${round(yieldCurveLast.value, 2)} 个百分点` : "--", detail: yieldCurveLast?.date || "" },
       ],
     }),
     indicator({
