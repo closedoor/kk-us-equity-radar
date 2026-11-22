@@ -1,4 +1,4 @@
-// NVIDIA verified on 2026-11-22; other official snapshots verified on 2026-11-05. Assessment/tone fields are research judgments.
+// NVIDIA results and AVGO/MU upcoming schedules verified on 2026-11-22; other results verified on 2026-11-05. Assessment/tone fields are research judgments.
 export const aiEarnings = [
   {
     "company": "NVIDIA",
@@ -40,9 +40,10 @@ export const aiEarnings = [
     "resultTone": "positive",
     "guidanceAssessment": "明显利好：AI 收入预计继续加速，定制芯片与网络需求明确；高预期下仍需跟踪订单兑现。",
     "guidanceTone": "positive",
-    "nextReportDate": null,
-    "nextReportLabel": "预计 12 月上旬 · 待官宣",
-    "nextReportStatus": "estimated",
+    "nextReportDate": "2026-12-09",
+    "nextReportLabel": "2026-12-09 · 美股盘后公布；电话会 17:00 ET",
+    "nextReportStatus": "confirmed",
+    "nextReportSource": "https://investors.broadcom.com/news-releases/news-release-details/broadcom-inc-announce-fourth-quarter-and-fiscal-year-2026",
     "note": "GAAP 毛利率按公司财报毛利 $20.456B / 营收 $29.591B 计算。",
     "source": "https://investors.broadcom.com/news-releases/news-release-details/broadcom-inc-announces-third-quarter-fiscal-year-2026-financial"
   },
@@ -155,12 +156,12 @@ export const aiEarnings = [
     "resultTone": "positive",
     "guidanceAssessment": "偏利好：下一季营收和 EPS 指引继续增长，但毛利率中值较本季略降；需跟踪新增供给和价格持续性。",
     "guidanceTone": "positive",
-    "nextReportDate": null,
-    "nextReportLabel": "待官宣下一期日期",
-    "nextReportStatus": "pending",
+    "nextReportDate": "2026-12-17",
+    "nextReportLabel": "2026-12-17 · 电话会 16:30 ET",
+    "nextReportStatus": "confirmed",
     "note": "本卡收入、净利润、毛利率及 EPS 均使用 GAAP 口径；非 GAAP 毛利率与 EPS 不混入。",
     "source": "https://investors.micron.com/news/press-release/2026/Micron-Technology-Inc--Reports-Record-Fiscal-Fourth-Quarter-and-Full-Year-2026-Results/default.aspx",
-    "nextReportSource": null
+    "nextReportSource": "https://investors.micron.com/news/press-release/2026/Micron-Technology-to-Report-Fiscal-First-Quarter-Results-on-December-17-2026/default.aspx"
   },
   {
     "company": "SK hynix",

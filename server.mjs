@@ -10,7 +10,7 @@ import { projectDashboard, resolveAiIndicator, shouldReplaceDashboard, isDashboa
 import { aiEarnings, aiChainLayers } from "./earnings-data.mjs";
 import { createPublicationService } from "./publication.mjs";
 import { createEarningsMonitor } from "./earnings-monitor.mjs";
-import { hydrateSourceLedger, updateSourceLedger } from "./source-revisions.mjs";
+import { hydrateSourceLedger, restoreSourceLedgers, updateSourceLedger } from "./source-revisions.mjs";
 import { fetchLicensedMarketPulse } from "./market-pulse-source.mjs";
 import { marketPulseReference } from "./market-pulse-reference.mjs";
 
@@ -198,8 +198,13 @@ async function fetchFred(id, deadline = Infinity) {
   start.setUTCFullYear(start.getUTCFullYear() - 3);
   const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${encodeURIComponent(id)}&cosd=${start.toISOString().slice(0, 10)}`;
   const series = parseFredCsv(await fetchText(url, {}, deadline), id);
-  return requireFreshSeries(series, { name: fredMeta[id]?.[0] || id, now: requestedAt, maxAgeDays: fredMaxAgeDays[id] || 120,
+  const rows = requireFreshSeries(series, { name: fredMeta[id]?.[0] || id, now: requestedAt, maxAgeDays: fredMaxAgeDays[id] || 120,
     dailyClose: id === "VIXCLS" ? "vix" : id === "SP500" ? "cash" : undefined });
+  // A recent HTTP 200 can still be a truncated copy of an older publication.
+  const verified = sourceLedger.sources[id]?.points.at(-1)?.date;
+  const reported = rows.at(-1).date;
+  if (verified && reported < verified) throw new Error(`${id} 最新观测日 ${reported} 早于已核验的 ${verified}`);
+  return rows;
 }
 
 async function fetchNasdaq(symbol, assetClass, deadline = Infinity) {
@@ -896,7 +901,7 @@ try {
 // Repository checkpoints survive host rebuilds; service hydration never rolls proof backward.
 try {
   const checkpoint = JSON.parse(await readFile(path.join(__dirname, "evidence/source-ledger.json"), "utf8"));
-  if (!Object.keys(sourceLedger.sources).length) sourceLedger = hydrateSourceLedger(checkpoint);
+  sourceLedger = restoreSourceLedgers(sourceLedger, checkpoint);
   publicationService.hydrate(checkpoint.publicationSchedule);
   earningsMonitor.hydrate(checkpoint.earningsSchedule);
 } catch { /* First deployment can legitimately have no recorded baseline. */ }

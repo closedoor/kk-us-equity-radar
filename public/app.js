@@ -1,8 +1,10 @@
 import { computeScores, actionFor, MIN_SCORE_COVERAGE, normalizeIndicator } from "./risk-model.js";
 import { projectDashboard, cacheExpired } from "./dashboard-state.js";
 import { requestDashboard } from "./dashboard-client.js";
-import { mergeManualOverrides } from "./manual-state.js";
+import { applyManualIndicator, manualReviewInfo, mergeManualOverrides } from "./manual-state.js";
 import { isMarketPulseSnapshot, projectMarketPulse } from "./market-pulse.js";
+
+import { calendarAgenda } from "./calendar-agenda.js";
 
 const manualConfig = [
   { id: "aiEarnings", label: "AI 产业链财报风险", help: "当云资本开支、芯片指引或库存出现新变化时，可调整风险值。" },
@@ -97,12 +99,14 @@ function setLiveStatus(text, status = "updating") {
   els.liveText.parentElement.dataset.state = status;
 }
 
-function showStorageResult(saved, clearing = false) {
+function showStorageResult(saved, clearing = false, conflicts = []) {
+  const conflictLabels = manualConfig.filter(row => conflicts.includes(row.id)).map(row => row.label);
   for (const notice of els.storageNotices) {
-    notice.hidden = saved;
-    notice.textContent = saved ? "" : clearing
+    notice.hidden = saved && !conflictLabels.length;
+    const storageMessage = saved ? "" : clearing
       ? "浏览器未能保存清除操作，当前页面已清除，但重新打开可能恢复旧的人工数据。"
       : "浏览器未能保存人工数据，本次重算仍然有效，刷新页面后可能恢复原值。";
+    notice.textContent = [storageMessage, conflictLabels.length ? `${conflictLabels.join("、")}已在其他页面修改或清除，本次备注未保存，请重新查看。` : ""].filter(Boolean).join(" ");
   }
 }
 
@@ -138,11 +142,6 @@ function clamp(value, min = 0, max = 100) {
   return Math.min(max, Math.max(min, value));
 }
 
-function manualReviewInfo(override) {
-  const ageDays = override?.updatedAt ? Math.floor((Date.now() - Date.parse(override.updatedAt)) / 86_400_000) : null;
-  return { ageDays, unknownDate: !Number.isFinite(ageDays), needsReview: !Number.isFinite(ageDays) || ageDays >= 30 };
-}
-
 function dateInTimeZone(date = new Date(), timeZone = "America/New_York") {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -171,23 +170,9 @@ function riskMeta(score) {
 }
 
 function applyOverrides(data) {
-  const indicators = data.indicators.map((item) => {
-    const override = state.overrides[item.id];
-    if (!override || !Number.isFinite(override.risk)) return { ...item };
-    const risk = clamp(override.risk);
-    return {
-      ...item,
-      risk,
-      points: Math.round((risk / 100) * item.weight * 100) / 100,
-      value: `${risk}/100`,
-      detail: `${override.note || "人工风险判断"}${override.updatedAt ? " · 录入于" : " · 录入日期未记录"}`,
-      date: override.updatedAt ? dateInTimeZone(new Date(override.updatedAt)) : null,
-      status: risk >= 80 ? "critical" : risk >= 55 ? "high" : risk >= 30 ? "watch" : "low",
-      confidence: "manual",
-      available: true,
-      overridden: true,
-    };
-  }).map(normalizeIndicator);
+  const nowMs = Date.now();
+  const indicators = data.indicators.map(item => normalizeIndicator(applyManualIndicator(item, state.overrides[item.id], dateInTimeZone, nowMs)));
+  state.manualValidUntil = Math.min(...Object.values(state.overrides).map(row => manualReviewInfo(row, nowMs).validUntil));
   const model = computeScores(indicators, data.scoringContext);
   const categories = data.categories.map((category) => {
     const items = model.available.filter((item) => item.category === category.name);
@@ -195,7 +180,7 @@ function applyOverrides(data) {
     const points = items.reduce((sum, item) => sum + item.points, 0);
     return { ...category, weight, score: weight ? (points / weight) * 100 : null };
   });
-  return { ...data, indicators, ...model, coverage: model.availableWeight, categories, heatScore: model.stagflationScore, action: actionFor(model.score, model.coverage) };
+  return { ...data, autoScore: data.score, autoCoverage: data.coverage, indicators, ...model, coverage: model.availableWeight, categories, heatScore: model.stagflationScore, action: actionFor(model.score, model.coverage) };
 }
 
 function formatDate(date) {
@@ -246,14 +231,18 @@ function renderSummary(data) {
   renderStructureTiming();
   const availableCount = data.indicators.filter((item) => item.available).length;
   const manual = data.indicators.filter((item) => item.overridden);
-  const reviews = manual.map((item) => manualReviewInfo(state.overrides[item.id]));
+  const reviews = Object.values(state.overrides).map(row => manualReviewInfo(row));
   const unknownDates = reviews.filter((row) => row.unknownDate).length;
   const oldDates = reviews.filter((row) => row.needsReview && !row.unknownDate).length;
-  const reviewReasons = [unknownDates ? `${unknownDates} 项确认日期未知` : "", oldDates ? `${oldDates} 项超过 30 天未复核` : ""].filter(Boolean);
+  const reviewReasons = [unknownDates ? `${unknownDates} 项确认日期未知` : "", oldDates ? `${oldDates} 项已满 30 天未复核` : ""].filter(Boolean);
   els.scoreDelta.textContent = `${availableCount} 项有效 · 权重 ${data.coverage}%${manual.length ? ` · ${manual.length} 项人工` : ""}`;
-  els.manualScoreNote.hidden = manual.length === 0;
+  els.manualScoreNote.hidden = reviews.length === 0;
   els.manualScoreNote.dataset.review = String(reviewReasons.length > 0);
-  els.manualScoreText.textContent = `评分含 ${manual.length} 项人工判断${reviewReasons.length ? `，${reviewReasons.join("、")}，建议复核。` : "。"}`;
+  const baseline = Number.isFinite(data.autoScore) ? `${data.autoScore.toFixed(1)} 分` : "未出总分";
+  els.manualScoreText.textContent = [
+    manual.length ? `本机重算含 ${manual.length} 项人工判断。纯自动覆盖 ${data.autoCoverage}%，${baseline}；人工判断不写入公开历史。` : "",
+    reviewReasons.length ? `${reviewReasons.join("、")}，已暂停计分，建议复核。` : "",
+  ].join(" ");
   els.baseScore.textContent = Number.isFinite(data.baseScore) ? data.baseScore.toFixed(1) : "--";
   els.baseScoreNote.textContent = Number.isFinite(data.baseScore) && data.coverage < MIN_SCORE_COVERAGE
     ? `仅按${data.coverage}%有效权重计算，不是总分` : "按有效权重归一化";
@@ -592,25 +581,25 @@ function renderEarningsChecks(rows = [], checks = []) {
   }).join("");
 }
 
-function renderReminders(rows = []) {
-  const todayParts = dateInTimeZone().split("-").map(Number);
-  const todayUtc = Date.UTC(todayParts[0], todayParts[1] - 1, todayParts[2]);
-  els.reminderGrid.innerHTML = rows.map((row, index) => {
-    const dateParts = row.date?.split("-").map(Number);
-    const days = dateParts?.length === 3
-      ? Math.round((Date.UTC(dateParts[0], dateParts[1] - 1, dateParts[2]) - todayUtc) / 86_400_000)
-      : null;
-    const companyList = row.companies?.length ? `<div class="company-reminder-list">${row.companies.map((company) => `<div class="company-reminder-item"><b>${escapeHtml(company.ticker)}</b><em>上期 ${escapeHtml(company.released)}</em><em>下期 ${escapeHtml(company.next)}</em><i class="${company.status === "confirmed" ? "confirmed" : "estimated"}">${scheduleLabel(company.status, company.basis)}</i>${company.source ? `<a data-focus-key="company-date-${escapeHtml(company.ticker)}" aria-label="核对日期：${escapeHtml(company.ticker)} 下次财报" href="${safeExternalUrl(company.source)}" target="_blank" rel="noreferrer">核对日期</a>` : ""}</div>`).join("")}</div>` : "";
-    const sourceLink = !row.companies?.length && row.linkLabel ? `<a class="reminder-source" data-focus-key="calendar-${escapeHtml(row.indicatorId)}" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">${escapeHtml(row.linkLabel)} <span aria-hidden="true">↗</span></a>` : "";
-    const relativeLabel = days === null ? "" : days < 0 ? "日期已过" : days === 0 ? "今天" : `${days} 天后`;
-    const dateLabel = row.date ? escapeHtml(row.date) : row.companies ? "逐家公司" : "待核对";
-    return `<article class="reminder-card${row.companies?.length ? " company-card" : ""}">
-      <span class="reminder-index">${String(index + 1).padStart(2, "0")}</span><div class="reminder-copy"><small>${escapeHtml(row.label)}</small><strong>${escapeHtml(row.event)}</strong>${sourceLink}</div>
-      <time>${dateLabel}${relativeLabel ? `<b>${relativeLabel}</b>` : ""}</time>${companyList}
-    </article>`;
-  }).join("");
+let nextAgendaBoundary = Infinity;
+function renderReminders(rows = [], sync) {
+  const { macro, companies, nextBoundary } = calendarAgenda(rows, sync);
+  nextAgendaBoundary = nextBoundary;
+  const cards = macro.map(row => {
+    const source = row.source && row.linkLabel ? `<a class="reminder-source" data-focus-key="calendar-${escapeHtml(row.indicatorId)}" href="${safeExternalUrl(row.source)}" target="_blank" rel="noreferrer">查看日程来源 ↗</a>` : "";
+    const timing = row.date ? `<time datetime="${escapeHtml(row.date)}">纽约 ${escapeHtml(row.date)}${row.nyTime ? " " + row.nyTime : ""}<b>${escapeHtml(row.relative)}</b></time>` : "<time>待核对</time>";
+    return `<article class="reminder-card${row.next ? " next-agenda" : ""}" data-calendar-id="${escapeHtml(row.indicatorId)}">
+      <div class="reminder-copy"><small>${row.next ? '最近宏观日程 · ' : ''}${escapeHtml(row.grade)}</small><h3>${escapeHtml(row.label)}</h3><p>${escapeHtml(row.title)}</p>
+      ${row.beijing ? `<strong class="beijing-time">北京时间 ${escapeHtml(row.beijing)}</strong>` : row.date ? '<p>仅列纽约日期，具体时刻待核对。</p>' : ''}
+      ${row.elapsed ? '<p>已到计划时刻，实际发布仍需核对。</p>' : ''}${source}</div>${timing}</article>`;
+  });
+  for(const row of companies) {
+    const companyList = row.companies.map(company => `<div class="company-reminder-item"><b>${escapeHtml(company.ticker)}</b><em>上期 ${escapeHtml(company.released)}</em><em>下期 ${escapeHtml(company.next)}</em><i class="${company.status==="confirmed"?"confirmed":"estimated"}">${scheduleLabel(company.status, company.basis)}</i>${company.source ? `<a data-focus-key="company-date-${escapeHtml(company.ticker)}" aria-label="核对日期：${escapeHtml(company.ticker)} 下次财报" href="${safeExternalUrl(company.source)}" target="_blank" rel="noreferrer">核对日期</a>`:""}</div>`).join("");
+    cards.push(`<article class="reminder-card company-card" data-calendar-id="earnings"><div class="reminder-copy"><small>公司日程</small><h3>${escapeHtml(row.label)}</h3><p>${escapeHtml(row.event)}</p></div><div class="company-reminder-list">${companyList}</div></article>`);
+  }
+  const markup=cards.join("");
+  if (els.reminderGrid._lastAgenda !== markup) { els.reminderGrid.innerHTML=markup; els.reminderGrid._lastAgenda=markup; }
 }
-
 function renderCalendarSync(sync) {
   if (!els.calendarSyncStatus) return;
   if (!sync?.updatedAt) {
@@ -670,7 +659,7 @@ function renderIndicators(data) {
       ${item.judgment ? `<div class="indicator-judgment ${safeTone(item.judgment.tone)}"><strong>${escapeHtml(item.judgment.label)}</strong><span>${escapeHtml(item.judgment.text)}</span></div>` : ""}
       <div class="score-row"><span>风险强度 ${risk === null ? "--" : Math.round(risk)}</span><div class="risk-bar"><i style="width:${risk ?? 0}%;background:${color}"></i></div><strong class="score-points">${item.points === null ? "--" : item.points.toFixed(1)} / ${item.weight}</strong></div>
       <p class="card-copy">${escapeHtml(item.description)}<br /><strong>为什么重要：</strong>${escapeHtml(item.why)}</p>
-      ${manualCapable ? `<button class="manual-edit" data-focus-key="manual-${escapeHtml(item.id)}" data-manual-id="${escapeHtml(item.id)}" type="button">${item.overridden ? "修改人工数据" : "录入更准确的数据"}</button>` : ""}
+      ${manualCapable ? `<button class="manual-edit" data-focus-key="manual-${escapeHtml(item.id)}" data-manual-id="${escapeHtml(item.id)}" type="button">${item.overridden ? "修改人工数据" : state.overrides[item.id] ? "复核已暂停的人工判断" : "录入人工判断"}</button>` : ""}
       <div class="card-foot"><a class="source-link" data-focus-key="source-${escapeHtml(item.id)}" href="${safeExternalUrl(item.source?.url)}" target="_blank" rel="noreferrer">${item.overridden ? "公开参考资料（非人工判断来源）" : "查看官方数据"} · ${escapeHtml(item.source?.label)}</a><span class="cadence">${escapeHtml(item.cadence)}<span class="confidence">${escapeHtml(confidenceLabel(item.confidence))}</span></span></div>
     </article>`;
   }).join("");
@@ -739,7 +728,7 @@ function render() {
   renderDrivers(data);
   renderIndicators(data);
   renderAiEarnings(data.aiEarnings, data.aiChainLayers, data.earningsChecks);
-  renderReminders(data.reminders);
+  renderReminders(data.reminders, data.calendarSync);
   renderCalendarSync(data.calendarSync);
   renderPublicationChecks(data.publicationChecks);
   const calendarErrors = Object.entries(data.calendarSync?.sources || {}).filter(([, source]) => source?.error)
@@ -1029,7 +1018,8 @@ function buildManualFields(focusId = null) {
     note.value = state.overrides[config.id]?.note ?? "";
     const override = state.overrides[config.id];
     const review = manualReviewInfo(override);
-    fragment.querySelector(".manual-reviewed-at").textContent = !override ? "尚未录入" : review.unknownDate ? "确认日期未知" : `上次确认 ${dateInTimeZone(new Date(override.updatedAt), Intl.DateTimeFormat().resolvedOptions().timeZone)} · ${review.ageDays} 天前`;
+    const lastConfirmed = review.unknownDate ? "确认日期未知" : `上次确认 ${dateInTimeZone(new Date(override.updatedAt), Intl.DateTimeFormat().resolvedOptions().timeZone)} · ${review.ageDays} 天前`;
+    fragment.querySelector(".manual-reviewed-at").textContent = !override ? "尚未录入 · 判断自确认起 30 天内有效" : `${lastConfirmed}${review.needsReview ? " · 已暂停计分" : ""}。仅修改备注不会更新确认时间。`;
     fragment.querySelector(".manual-reconfirm").hidden = !override;
     fragment.querySelector(".manual-reconfirm-input").setAttribute("aria-label", `重新确认${config.label}仍有效`);
     if (focusId === config.id) field.dataset.focus = "true";
@@ -1129,12 +1119,14 @@ els.manualForm.addEventListener("submit", (event) => {
   // Read again at submit time: another tab's storage event may still be queued.
   // The helper also preserves this page's changes from failed storage writes.
   const persisted = loadOverrides();
-  state.overrides = mergeManualOverrides({ current: state.overrides, draft: manualDraft, fields, persisted, lastPersisted: lastPersistedOverrides });
+  const conflicts = [];
+  state.overrides = mergeManualOverrides({ current: state.overrides, draft: manualDraft, fields, persisted, lastPersisted: lastPersistedOverrides,
+    onNoteConflict: id => conflicts.push(id) });
   if (persisted !== undefined) lastPersistedOverrides = persisted;
   const saved = saveOverrides();
   els.manualDialog.close();
   render();
-  showStorageResult(saved);
+  showStorageResult(saved, false, conflicts);
 });
 els.clearManual.addEventListener("click", () => {
   state.overrides = {};
@@ -1157,7 +1149,8 @@ function crossedMarketDay() {
 }
 
 function revalidateDisplay() {
-  if (state.data && state.displayValidity !== `${dateInTimeZone()}:${cacheExpired(state.data)}`) render();
+  if (state.data && Date.now() >= nextAgendaBoundary) { render(); return; }
+  if (state.data && (state.displayValidity !== `${dateInTimeZone()}:${cacheExpired(state.data)}` || Date.now() >= state.manualValidUntil)) render();
 }
 
 document.addEventListener("visibilitychange", () => {
@@ -1188,14 +1181,16 @@ window.addEventListener("storage", (event) => {
   if ((event.key !== null && event.key !== "bearRadarOverrides") || event.storageArea !== localStorage) return;
   const persisted = loadOverrides();
   if (persisted === undefined) return;
-  state.overrides = mergeManualOverrides({ current: state.overrides, draft: state.overrides, fields: [], persisted, lastPersisted: lastPersistedOverrides });
+  const conflicts = [];
+  state.overrides = mergeManualOverrides({ current: state.overrides, draft: state.overrides, fields: [], persisted, lastPersisted: lastPersistedOverrides,
+    onNoteConflict: id => conflicts.push(id) });
   lastPersistedOverrides = persisted;
   const synchronized = manualConfig.every(({ id }) => {
     const current = state.overrides[id];
     const saved = persisted[id];
     return current === saved || (current && saved && current.risk === saved.risk && current.note === saved.note && current.updatedAt === saved.updatedAt);
   });
-  if (synchronized) showStorageResult(true);
+  if (synchronized || conflicts.length) showStorageResult(synchronized, false, conflicts);
   render();
 });
 

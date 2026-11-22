@@ -423,3 +423,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, .indicator-card:focu
   .pulse-quotes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pulse-quote, .pulse-judgment { padding: 10px; }
 }
+
+/* A dated macro release has one entry even when it affects two indicators. */
+#reminderGrid .reminder-card { grid-template-columns: minmax(0,1fr) auto; align-items:start; }
+#reminderGrid .next-agenda { border-left:3px solid var(--orange); background:rgba(228,110,49,.055); }
+#reminderGrid .reminder-copy h3 { font-size:1.04rem; margin:.2rem 0; }
+#reminderGrid .reminder-copy p { margin:.35rem 0; font-size:.9rem; }
+#reminderGrid .beijing-time { display:block; margin-top:.45rem; font-size:.92rem; }
+#reminderGrid .company-reminder-list { grid-column:1/-1; }
+@media(max-width:680px) {
+  #reminderGrid .reminder-card { grid-template-columns:minmax(0,1fr); gap:.3rem; padding:.9rem; }
+  #reminderGrid .reminder-card time { grid-column:1; text-align:left; }
+  #reminderGrid .company-reminder-list { grid-column:1; }
+}

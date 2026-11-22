@@ -40,7 +40,7 @@ async function main() {
         await page.goto(baseURL);
         await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(12);
         await expect(page.locator("#aiCompanyGrid .ai-company-card")).toHaveCount(8);
-        await expect(page.locator("#reminderGrid .reminder-card")).toHaveCount(5);
+        await expect(page.locator("#reminderGrid .reminder-card")).toHaveCount(4);
         await expect(page.locator("#refreshButton")).toBeEnabled();
         await expect(page.locator("#pulseStatus")).toContainText("已核对记录");
         await page.evaluate(() => document.fonts.ready);

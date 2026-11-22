@@ -90,6 +90,35 @@ export function hydrateSourceLedger(saved, nowMs = Date.now()) {
   return isSourceLedger(saved, nowMs) ? cloneLedger(saved) : emptyLedger();
 }
 
+// Independent deployments may have different evidence for each series. Restore a
+// whole baseline with its own verified chain: comparing the two archives as if
+// they were consecutive upstream responses would invent revisions at startup.
+export function restoreSourceLedgers(disk, checkpoint, nowMs = Date.now()) {
+  const local = hydrateSourceLedger(disk, nowMs);
+  const seed = hydrateSourceLedger(checkpoint, nowMs);
+  const result = emptyLedger();
+  const fromSeed = new Set();
+  for (const id of FRED_SERIES_IDS) {
+    const existing = local.sources[id];
+    const candidate = seed.sources[id];
+    if (!existing && !candidate) continue;
+    const lastLocal = existing?.points.at(-1).date;
+    const lastSeed = candidate?.points.at(-1).date;
+    if (candidate && (!existing || lastSeed > lastLocal ||
+        (lastSeed === lastLocal && candidate.checkedAt > existing.checkedAt))) {
+      result.sources[id] = candidate;
+      fromSeed.add(id);
+    } else {
+      result.sources[id] = existing;
+    }
+  }
+  result.revisions = [
+    ...local.revisions.filter(({ series }) => !fromSeed.has(series)),
+    ...seed.revisions.filter(({ series }) => fromSeed.has(series)),
+  ].sort((a, b) => a.firstDetectedAt.localeCompare(b.firstDetectedAt)).slice(-MAX_REVISIONS);
+  return result;
+}
+
 function candidatePoints(rows, today) {
   if (!Array.isArray(rows) || !rows.length) return null;
   const points = new Map();

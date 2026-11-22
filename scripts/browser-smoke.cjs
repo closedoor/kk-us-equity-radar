@@ -262,41 +262,69 @@ async function main() {
       await expect(page.locator("#pulseRefresh")).toBeHidden();
       assert.equal(dashboardCalls.length, calls);
     });
-    await scenario("product audit: stale manual judgments are disclosed and explicitly reconfirmed", async (page) => {
-      await freeze(page);
-      const updatedAt = new Date(Date.now() - 60 * 86_400_000).toISOString();
+    await scenario("product audit: stale manual judgments cannot publish a score until explicitly reconfirmed", async (page) => {
+      const time = new Date(fixture.generatedAt);
+      await page.clock.install({ time });
+      await page.clock.pauseAt(time);
+      const updatedAt = new Date(time.getTime() - 60 * 86_400_000).toISOString();
       await page.addInitScript((value) => {
         if (!localStorage.getItem("bearRadarOverrides")) localStorage.setItem("bearRadarOverrides", JSON.stringify({ earningsBreadth: { risk: 0, note: "old manual judgment", updatedAt: value } }));
       }, updatedAt);
-      await mock(page, () => ({ body: fresh() }));
+      const snapshot = { ...fresh(), generatedAt: fixture.generatedAt };
+      for (const row of snapshot.indicators) if (["inflation", "fed", "unemployment", "payrolls"].includes(row.id)) Object.assign(row, { available: false, risk: null, points: null });
+      await mock(page, () => ({ body: snapshot }));
       await page.goto(baseURL);
-      await expect(page.locator("#scoreDelta")).toContainText("1 项人工");
-      await expect(page.locator("#manualScoreNote")).toContainText("建议复核");
-      const before = await page.locator("#scoreValue").textContent();
+      await expect(page.locator("#coverageValue")).toHaveText("57%");
+      await expect(page.locator("#scoreValue")).toHaveText("--");
+      await expect(page.locator("#scoreDelta")).not.toContainText("1 项人工");
+      await expect(page.locator("#manualScoreNote")).toContainText("已暂停计分");
       await page.locator("#reviewManualButton").click();
       const field = page.locator('[data-id="earningsBreadth"]');
       await expect(field.locator(".manual-risk")).toHaveValue("0");
+      await field.locator(".manual-note").fill("corrected note; risk not rechecked");
       await page.locator("#manualForm .primary-button").click();
       assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("bearRadarOverrides")).earningsBreadth.updatedAt), updatedAt);
+      await expect(page.locator("#scoreValue")).toHaveText("--");
       await expect(page.locator("#manualScoreNote")).toContainText("建议复核");
       await page.locator("#reviewManualButton").click();
       await field.locator(".manual-reconfirm-input").check();
       await page.locator("#manualForm .primary-button").click();
+      await expect(page.locator("#manualScoreNote")).toContainText("纯自动覆盖 57%，未出总分");
       await expect(page.locator("#manualScoreNote")).not.toContainText("建议复核");
-      await expect(page.locator("#scoreValue")).toHaveText(before);
+      await expect(page.locator("#scoreDelta")).toContainText("1 项人工");
+      await expect(page.locator("#coverageValue")).toHaveText("67%");
+      await expect(page.locator("#scoreValue")).toHaveText(/^\d+\.\d$/);
       const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("bearRadarOverrides")).earningsBreadth);
       assert.equal(stored.risk, 0);
       assert.ok(Date.parse(stored.updatedAt) > Date.parse(updatedAt));
       await page.reload();
+      await expect(page.locator("#coverageValue")).toHaveText("67%");
       await expect(page.locator("#manualScoreNote")).not.toContainText("建议复核");
     });
-    await scenario("product audit: manual values with unknown dates stay visible for review", async (page) => {
+    await scenario("an open page removes a manual judgment at its thirty-day limit", async (page) => {
+      const time = new Date(fixture.generatedAt);
+      await page.clock.install({ time });
+      await page.clock.pauseAt(time);
+      const updatedAt = new Date(time.getTime() - 30 * 86_400_000 + 30_000).toISOString();
+      await page.addInitScript((value) => localStorage.setItem("bearRadarOverrides", JSON.stringify({ earningsBreadth: { risk: 0, note: "expiring", updatedAt: value } })), updatedAt);
+      await mock(page, () => ({ body: { ...fresh(), generatedAt: fixture.generatedAt } }));
+      await page.goto(baseURL);
+      await expect(page.locator("#scoreDelta")).toContainText("1 项人工");
+      const before = parseInt(await page.locator("#coverageValue").innerText(), 10);
+      await page.clock.fastForward(60_001);
+      await expect(page.locator("#manualScoreNote")).toContainText("已暂停计分");
+      await expect(page.locator("#coverageValue")).toHaveText(`${before - 10}%`);
+      assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("bearRadarOverrides")).earningsBreadth.updatedAt), updatedAt);
+    });
+    await scenario("product audit: manual values with unknown dates cannot hide official data", async (page) => {
       await page.addInitScript(() => localStorage.setItem("bearRadarOverrides", JSON.stringify({ aiEarnings: { risk: 0, note: "legacy value" } })));
       await mock(page, () => ({ body: fresh() }));
       await page.goto(baseURL);
       await expect(page.locator("#manualScoreNote")).toContainText("确认日期未知");
-      await expect(page.locator("#indicator-aiEarnings .metric-value")).toHaveText("0/100");
+      await expect(page.locator("#indicator-aiEarnings .metric-value")).toContainText("家");
+      await expect(page.locator("#indicator-aiEarnings .risk-chip")).not.toHaveText("人工覆盖");
       await page.locator("#reviewManualButton").click();
+      await expect(page.locator('[data-id="aiEarnings"] .manual-risk')).toHaveValue("0");
       await expect(page.locator('[data-id="aiEarnings"] .manual-reviewed-at')).toContainText("日期未知");
       await page.locator("#clearManual").click();
       await page.locator("#closeManual").click();
@@ -330,7 +358,7 @@ async function main() {
         await page.goto(baseURL);
         await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(12);
         await expect(page.locator("#aiCompanyGrid .ai-company-card")).toHaveCount(8);
-        await expect(page.locator("#reminderGrid .reminder-card")).toHaveCount(5);
+        await expect(page.locator("#reminderGrid .reminder-card")).toHaveCount(4);
         await expect(page.locator("#liveText")).toBeVisible();
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
         await page.locator('[data-filter="信用"]').click();
@@ -719,6 +747,17 @@ async function main() {
         return { ai: saved.aiEarnings.risk, earnings: saved.earningsBreadth.risk };
       }), { ai: 80, earnings: 90 });
       await expect(other.locator("#indicator-aiEarnings .source-link")).toContainText("非人工判断来源");
+      // Both tabs opened 80; the second tab writes only a note after the first changes the risk.
+      await other.locator("#manualButton").click();
+      await other.locator('[data-id="aiEarnings"] .manual-note').fill("note about 80");
+      await page.locator("#manualButton").click();
+      await page.locator('[data-id="aiEarnings"] .manual-risk').fill("95");
+      await page.locator('#manualForm button[value="default"]').click();
+      await other.locator('#manualForm button[value="default"]').click();
+      await expect(other.locator("#indicator-aiEarnings .metric-value")).toHaveText("95/100");
+      await expect(other.locator("#storageNotice")).toContainText("本次备注未保存");
+      const finalAI = await other.evaluate(() => JSON.parse(localStorage.getItem("bearRadarOverrides")).aiEarnings);
+      assert.equal(finalAI.note, "AI");
       assert.deepEqual(otherErrors, []);
     });
     await scenario("a later successful manual save retains earlier changes that storage could not save", async (page) => {
@@ -812,8 +851,8 @@ async function main() {
         data.aiEarnings[0] = { ...data.aiEarnings[0], nextReportDate: "2026-09-30", nextReportLabel: "2026-09-30", nextReportStatus: "confirmed", snapshotValidThrough: "2026-09-30" };
         const calls = await mock(page, (count) => ({ body: count === 1 ? data : { ...data, generatedAt: "2026-10-01T04:00:30Z", reminders: [{ ...data.reminders[0], date: "2026-10-14" }, ...data.reminders.slice(1)] } }));
         await page.goto(baseURL);
-        await expect(page.locator("#reminderGrid .reminder-card").nth(0).locator("time")).toContainText("今天");
-        await expect(page.locator("#reminderGrid .reminder-card").nth(1).locator("time")).toHaveText("待核对");
+        await expect(page.locator('#reminderGrid [data-calendar-id="inflation"]').locator("time")).toContainText("今天");
+        await expect(page.locator('#reminderGrid [data-calendar-id="fed"]').locator("time")).toHaveText("待核对");
         if (mode === "hidden") await page.evaluate(() => { window.testHidden = true; document.dispatchEvent(new Event("visibilitychange")); });
         if (mode === "offline") {
           await context.setOffline(true);
@@ -823,14 +862,14 @@ async function main() {
         await page.clock.runFor(60000);
         if (mode !== "visible") {
           assert.equal(calls.length, 1);
-          await expect(page.locator("#reminderGrid .reminder-card").nth(0).locator("time")).toHaveText("待核对");
+          await expect(page.locator('#reminderGrid [data-calendar-id="inflation"]').locator("time")).toHaveText("待核对");
           await expect(page.locator("#aiCompanyGrid .ai-company-card").first().locator(".ai-next-report strong")).toHaveText("待核对下一期日程");
           await expect(page.locator("#reminderGrid .company-reminder-item").first()).toContainText("待核对下一期日程");
           if (mode === "hidden") await page.evaluate(() => { window.testHidden = false; document.dispatchEvent(new Event("visibilitychange")); });
           else await context.setOffline(false);
         }
         await expect.poll(() => calls.length).toBe(2);
-        await expect(page.locator("#reminderGrid .reminder-card").nth(0).locator("time")).toContainText("2026-10-14");
+        await expect(page.locator('#reminderGrid [data-calendar-id="inflation"]').locator("time")).toContainText("2026-10-14");
         await expect(page.locator("#liveText")).toHaveText("已连接 · 数据已更新");
       });
     }
@@ -1047,7 +1086,7 @@ async function main() {
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
       await expect(page.locator("#actionCallout > span")).toHaveText("当前研究重点");
       await expect(page.locator(".action-note")).toContainText("不能据此校准个人仓位");
-      await expect(page.locator(".footer")).toContainText("v4.8.3");
+      await expect(page.locator(".footer")).toContainText("v4.8.4");
       if (outputDir) await page.locator("#modelValidation").screenshot({ path: path.join(outputDir, "model-history-forward-390.png"), animations: "disabled" });
     }, 390);
     await scenario("a reader keeps the evidence table open and focused across unchanged, failed and corrected reports", async (page) => {
@@ -1199,6 +1238,7 @@ async function main() {
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
       if (outputDir) await page.locator("#sourceRevisions").screenshot({ path: path.join(outputDir, "source-revisions-390.png"), animations: "disabled" });
     }, 390, 844, { hasTouch: true });
+    await require("./calendar-agenda-browser.cjs")({ scenario, baseURL, expect, fresh, mock });
     await require("./score-history-browser.cjs")({ scenario, baseURL, expect });
     console.log(`${passed} browser scenarios passed`);
   } finally {

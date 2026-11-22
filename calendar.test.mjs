@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   createCalendarService,
   parseBlsIcs,
+  parseBlsReleasePage,
   parseFomcCalendar,
   parseFredReleaseCalendar,
   parseNasdaqEarningsDate,
@@ -20,8 +21,8 @@ SUMMARY:Consumer Price Index for July 2026
 END:VEVENT
 END:VCALENDAR`);
 
-  assert.deepEqual(parsed.employment, [{ date: "2026-08-07", period: "7 月" }]);
-  assert.deepEqual(parsed.cpi, [{ date: "2026-08-12", period: "7 月" }]);
+  assert.deepEqual(parsed.employment, [{ date: "2026-08-07", period: "7 月", eventAt: "2026-08-07T12:30:00.000Z" }]);
+  assert.deepEqual(parsed.cpi, [{ date: "2026-08-12", period: "7 月", eventAt: "2026-08-12T12:30:00.000Z" }]);
 });
 
 test("parses FRED release calendar fallback", () => {
@@ -31,8 +32,8 @@ test("parses FRED release calendar fallback", () => {
     <span style="font-weight: bold;">Friday September 11, 2026</span>`;
 
   assert.deepEqual(parseFredReleaseCalendar(html), [
-    { date: "2026-08-12", period: "7 月" },
-    { date: "2026-09-11", period: "8 月" },
+    { date: "2026-08-12", period: null },
+    { date: "2026-09-11", period: null },
   ]);
 });
 
@@ -60,12 +61,12 @@ test("parses current and future FOMC panels", () => {
   ]);
 });
 
-test("fallback reporting months do not overflow at month-end or year-end", () => {
+test("FRED dates alone cannot establish a reporting month, even at month-end or year-end", () => {
   const rows = parseFredReleaseCalendar(`
     <span style="font-weight: bold;">January 31, 2026</span>
     <span style="font-weight: bold;">March 31, 2026</span>
     <span style="font-weight: bold;">May 31, 2026</span>`);
-  assert.deepEqual(rows.map(({ period }) => period), ["12 月", "2 月", "4 月"]);
+  assert.deepEqual(rows.map(({ period }) => period), [null, null, null]);
 });
 
 test("parses Nasdaq earnings date and timing", () => {
@@ -254,7 +255,7 @@ test("calendar service uses automatic dates and keeps confirmed company dates", 
   assert.equal(reminders[0].date, "2026-08-12");
   assert.equal(reminders[1].date, "2026-07-29");
   assert.equal(reminders[2].date, "2026-08-07");
-  assert.equal(reminders[4].companies[0].next, "2026-07-29 · 盘后");
+  assert.equal(reminders[4].companies[0].next, "2026-07-29"); // IR confirmed only a date.
   assert.equal(reminders[4].companies[0].status, "confirmed");
 });
 
@@ -827,4 +828,104 @@ test("all malformed earnings bodies retain the last successful source timestamp"
   await service.refresh();
   assert.equal(service.syncStatus().sources.earnings.lastSuccessAt, "2026-10-02T12:00:00Z");
   assert.equal(service.syncStatus().sources.earnings.error, "财报日程暂不可用：FAIL");
+});
+
+test("monthly release identity excludes veterans studies, regional CPI, and cancelled events", () => {
+  const release = (summary, date, extra = "") => ["BEGIN:VEVENT", "SUMMARY:" + summary, "DTSTART;VALUE=DATE:" + date, extra, "END:VEVENT"].join("\r\n");
+  const data = parseBlsIcs([
+    release("The Employment Situation for Sept. 2025", "20251120"),
+    release("Employment Situation of Veterans for Annual 2025", "20260428"),
+    release("Consumer Price Index for All Urban Consumers in the Northeast Region", "20260429"),
+    release("Consumer Price Index for October 2025", "20251125", "STATUS:CANCELLED"),
+    release("Unrelated release", "20251126", "DESCRIPTION:See also the Employment Situation"),
+    release("Consumer Price Index", "20261210", "DESCRIPTION:November 2026"),
+  ].join("\r\n"));
+  assert.deepEqual(data.employment, [{date:"2025-11-20", period:"9 月"}]);
+  assert.deepEqual(data.cpi, [{date:"2026-12-10", period:"11 月"}]);
+});
+
+test("exact BLS times advance at the release instant; date-only sources stay on the New York day", async () => {
+  const now = () => new Date("2026-12-04T13:29:59Z");
+  const service = createCalendarService({aiEarnings: [], now, logger:{warn() {}}, fetchText: async (url) => {
+    if (url.includes("bls.ics")) return [
+      ["Consumer Price Index for November 2026", "DTSTART;VALUE=DATE:20261204"],
+      ["Employment Situation for November 2026", "DTSTART;TZID=America/New_York:20261204T083000"],
+      ["Employment Situation for December 2026", "DTSTART:20270108T133000Z"],
+    ].map(([title, start]) => ["BEGIN:VEVENT", start, "SUMMARY:" + title, "END:VEVENT"].join("\n")).join("\n");
+    throw new Error("unavailable");
+  }});
+  await service.refresh();
+  const reminders = service.buildReminders();
+  assert.equal(reminders[0].eventAt, null);
+  assert.doesNotMatch(reminders[0].event, /08:30/);
+  for (const row of reminders.slice(2,4)) assert.equal(row.eventAt, "2026-12-04T13:30:00.000Z");
+  const after = service.buildReminders(new Date("2026-12-04T13:30:00Z"));
+  assert.equal(after[2].eventAt, "2027-01-08T13:30:00.000Z");
+  assert.equal(after[0].date, "2026-12-04");
+  assert.equal(service.buildReminders(new Date("2026-12-05T05:00:00Z"))[0].date, null);
+});
+
+test("confirmation retains company timing even when the provider predicts a different session on the same date", () => {
+  const service = createCalendarService({fetchText: async () => "", now: () => new Date("2026-11-22T12:00:00Z"),
+    aiEarnings: [{ticker:"TEST", released:"2026-09-09", nextReportDate:"2026-12-09", nextReportLabel:"2026-12-09 · 盘后", nextReportStatus:"confirmed", nextReportSource:"https://example.com/ir"}]});
+  service.hydrate({earnings:{TEST:{date:"2026-12-09", timing:"盘前"}}});
+  assert.equal(service.resolvedAiEarnings()[0].nextReportLabel, "2026-12-09 · 盘后");
+  assert.equal(service.buildReminders()[4].companies[0].basis, "company");
+});
+
+test("official release-table rows preserve a delayed reference month and independently supplied ET clock", () => {
+  // Values from the official November 2025 BLS calendar and the 2026 Employment Situation table.
+  const rows = '<title>Schedule of Releases for the Employment Situation</title><table>' +
+    '<tr><th>Reference Month</th><th>Release Date</th><th>Release Time</th></tr>' +
+    '<tr><td>September 2025</td><td>Nov. 20, 2025</td><td>08:30 AM</td></tr>' +
+    '<tr><td>November 2026</td><td>Dec. 04, 2026</td><td>08:30 AM</td></tr>' +
+    '<tr><td>December 2026</td><td>Jan. 08, 2027</td><td></td></tr></table>';
+  assert.deepEqual(parseBlsReleasePage(rows, "Employment Situation"), [
+    {date: "2025-11-20", period: "9 月", eventAt: "2025-11-20T13:30:00.000Z"},
+    {date: "2026-12-04", period: "11 月", eventAt: "2026-12-04T13:30:00.000Z"},
+    {date: "2027-01-08", period: "12 月"},
+  ]);
+  assert.deepEqual(parseBlsReleasePage(rows, "Consumer Price Index"), []);
+});
+
+test("a Fed strategy-only meeting or strategy notation vote is not a scheduled rate decision", () => {
+  const row = (month, date, detail) => '<div class="row fomc-meeting"><div class="fomc-meeting__month"><strong>' + month + '</strong></div><div class="fomc-meeting__date">' + date + '</div><div>' + detail + '</div></div>';
+  const input = '<h4><a>2025 FOMC Meetings</a></h4>' +
+    row("August", "22 (notation vote)", "Statement on Longer-Run Goals and Monetary Policy Strategy") +
+    row("September", "16-17*", "Statement: Press Conference") +
+    '<h4><a>2027 FOMC Meetings</a></h4>' +
+    row("October", "26-27", "Monetary Policy Strategy Meeting") +
+    row("November", "16-17", "");
+  assert.deepEqual(parseFomcCalendar(input).map(e => e.date), ["2025-09-17","2027-11-17"]);
+});
+
+test("unknown time zones or ambiguous local hours are not presented as exact releases", () => {
+  const input = [
+    ["20260308T023000", "America/New_York"], // local clock does not exist
+    ["20261101T013000", "America/New_York"], // local clock occurs twice
+    ["20261210T100000", "Invented/Timezone"],
+  ].map(([when, tz]) => ["BEGIN:VEVENT", "DTSTART;TZID=" + tz + ":" + when, "SUMMARY:Consumer Price Index", "END:VEVENT"].join("\n")).join("\n");
+  const rows = parseBlsIcs(input).cpi;
+  assert.equal(rows.length, 3);
+  assert.ok(rows.every(row => row.eventAt === undefined && row.period === null));
+});
+
+test("a restart cannot replay calendar identifications made by the old combined-feed parser", () => {
+  const service = createCalendarService({fetchText: async () => "", aiEarnings: [], now: () => new Date("2026-11-22T12:00:00Z")});
+  service.hydrate({
+    cpi: [{date:"2026-12-10",period:"11 月"}],
+    employment: [{date:"2026-04-28",period:"3 月"},{date:"2026-12-04",period:"11 月"}],
+    fomc:[{startDate:"2027-10-26",date:"2027-10-27"}],
+    sources: {bls: {mode:"bls-live",url:"https://www.bls.gov/schedule/news_release/bls.ics"}, fomc: {mode:"fed-live"}},
+  });
+  assert.equal(service.snapshot().employment.some(row => row.date === "2026-04-28"), false);
+  assert.equal(service.snapshot().fomc.some(row => row.date === "2027-10-27"), false);
+  assert.equal(service.buildReminders()[2].eventAt, "2026-12-04T13:30:00.000Z");
+  assert.equal(service.syncStatus().sources.bls.mode, "built-in");
+  service.hydrate({macroCalendarVersion:2, cpi:[{date:"2027-01-13",period:"12 月",eventAt:"2027-02-13T13:30:00.000Z"}],
+    sources:{bls:{mode:"bls-live"}}});
+  assert.equal(service.buildReminders()[0].eventAt, null);
+  service.hydrate({cpi:[{date:"2025-11-20",period:"10 月",eventAt:"2025-11-20T13:30:00.000Z"}],
+    sources:{bls:{mode:"fred-fallback"}}});
+  assert.deepEqual(service.snapshot().cpi,[{date:"2025-11-20",period:null}]);
 });

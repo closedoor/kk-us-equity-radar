@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { FRED_SERIES_IDS, hydrateSourceLedger, isSourceLedger, updateSourceLedger } from "./source-revisions.mjs";
+import { FRED_SERIES_IDS, hydrateSourceLedger, isSourceLedger, restoreSourceLedgers, updateSourceLedger } from "./source-revisions.mjs";
 
 const time = "2026-11-05T12:00:00.000Z";
 const later = "2026-11-05T12:01:00.000Z";
@@ -141,4 +141,34 @@ test("dates follow the US source calendar and invalid check times never enter a 
   assert.deepEqual(result.ledger.sources, {});
   for (const checkedAt of [null, "invalid", "2026-02-30T12:00:00.000Z", "2026-11-05"])
     assert.throws(() => updateSourceLedger(initial(), {}, checkedAt), /time/i);
+});
+
+test("restore chooses the later check for the same period, retaining only its complete chain; exact ties keep disk", () => {
+  const candidate = (n) => ({ CPIAUCSL: [{ date: "2026-09-01", value: n }] });
+  const disk = updateSourceLedger(initial(), candidate(337), later).ledger;
+  const forkBase = updateSourceLedger(null, candidate(333), time).ledger;
+  const tied = updateSourceLedger(forkBase, candidate(340), later).ledger;
+  assert.deepEqual(restoreSourceLedgers(disk, tied, asOf), disk);
+  const newestTime = "2026-11-05T12:03:00.000Z";
+  const newest = updateSourceLedger(tied, candidate(343), newestTime).ledger;
+  assert.deepEqual(restoreSourceLedgers(disk, newest, Date.parse(newestTime)), newest);
+  assert.deepEqual(restoreSourceLedgers(newest, disk, Date.parse(newestTime)), newest);
+  assert.deepEqual(restoreSourceLedgers(disk, newest, asOf), disk, "A future evidence archive is ineligible");
+});
+
+test("restore retains the newest 100 evidenced revisions across disjoint archives without breaking either chain", () => {
+  const chain = (series, offset) => {
+    const candidate = (value) => ({ [series]: [{ date: "2026-11-03", value }] });
+    let ledger = updateSourceLedger(null, candidate(0), time).ledger;
+    for (let n = 1; n <= 55; n++) {
+      const check = new Date(Date.parse(time) + n * 1000 + offset).toISOString();
+      ledger = updateSourceLedger(ledger, candidate(n), check).ledger;
+    }
+    return ledger;
+  };
+  const merged = restoreSourceLedgers(chain("SP500", 0), chain("VIXCLS", 200), asOf);
+  assert.equal(isSourceLedger(merged, asOf), true);
+  assert.equal(merged.revisions.length, 100);
+  assert.deepEqual(merged.revisions.slice(0, 2).map(r => [r.series, r.before, r.after]),
+    [["SP500", 5, 6], ["VIXCLS", 5, 6]]);
 });

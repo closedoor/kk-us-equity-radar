@@ -693,3 +693,51 @@ test("expired deadlines skip network calls and retry backoff cannot exceed the r
   await assert.rejects(retry(task, 2, 1000), /Market fetch budget exhausted/);
   assert.equal(attempts, 1);
 });
+
+test("a successful HTTP refresh cannot regress a verified FRED observation date", async () => {
+  await isolatedServer(null, async ({ start }) => {
+    const server = await start(listeningPreload + healthySources + `
+      const provider = globalThis.fetch;
+      let tail = "full";
+      process.on("message", message => { if (message.type === "source-tail") tail = message.value; });
+      globalThis.fetch = async (value, options) => {
+        const response = await provider(value, options);
+        const id = new URL(value).searchParams.get("id");
+        if (!["VIXCLS", "SP500"].includes(id) || tail === "full") return response;
+        const lines = (await response.text()).trim().split("\\n");
+        if (tail === "truncated") lines.pop();
+        if (tail === "corrected" && id === "VIXCLS") lines[lines.length - 1] = lines.at(-1).split(",")[0] + ",33.5";
+        return new Response(lines.join("\\n"));
+      };
+    `);
+    const vix = snapshot => snapshot.indicators.find(row => row.id === "vix");
+    const refresh = async (tail, advance = 61_000) => {
+      await server.send({ type: "advance", ms: advance });
+      await server.send({ type: "source-tail", value: tail });
+      await server.read("?refresh=1");
+      return server.finished();
+    };
+    const initial = await server.finished();
+    assert.equal(vix(initial).date, "2026-10-02");
+    assert.equal(initial.validationReference.date, "2026-10-02");
+    const { body: baseline } = await server.read("?evidence=1");
+    const retained = await refresh("truncated");
+    assert.equal(vix(retained).date, "2026-10-02", "HTTP 200 with a truncated VIX response replaced a verified close");
+    assert.deepEqual(retained.validationReference, initial.validationReference);
+    assert.equal(retained.generatedAt, initial.generatedAt);
+    assert.ok(retained.errors.some(row => row.includes("VIXCLS") && row.includes("2026-10-01") && row.includes("2026-10-02")));
+    const { body: evidence } = await server.read("?evidence=1");
+    for (const id of ["VIXCLS", "SP500"]) assert.deepEqual(evidence.sourceLedger.sources[id], baseline.sourceLedger.sources[id]);
+
+    const corrected = await refresh("corrected");
+    assert.equal(vix(corrected).date, "2026-10-02");
+    assert.equal(vix(corrected).value, "33.5");
+    assert.ok(corrected.sourceRevisions.some(row => row.series === "VIXCLS" && row.date === "2026-10-02" && row.before === 18 && row.after === 33.5));
+
+    const expired = await refresh("truncated", 24 * 60 * 60 * 1000 + 1);
+    assert.equal(vix(expired).available, false);
+    assert.equal(vix(expired).risk, null);
+    assert.equal(expired.validationReference, null);
+    assert.ok(expired.coverage < corrected.coverage);
+  });
+});

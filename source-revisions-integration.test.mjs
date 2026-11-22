@@ -149,3 +149,29 @@ test("a deployment restores publication proof even from an empty raw ledger and 
     assert.equal(cache.coverage, 90);
   } });
 });
+
+test("restart combines disk and repository series without rolling back observations or inventing revisions", async () => {
+  let disk = updateSourceLedger(null, {
+    PAYEMS: [{ date: "2026-08-01", value: 150000 }],
+    VIXCLS: [{ date: "2026-11-03", value: 18 }],
+    DGS10: [{ date: "2026-11-03", value: 3.9 }],
+  }, "2026-11-04T14:00:00.000Z").ledger;
+  disk = updateSourceLedger(disk, {
+    VIXCLS: [{ date: "2026-11-04", value: 20 }],
+    DGS10: [{ date: "2026-11-03", value: 4 }],
+  }, "2026-11-05T15:40:00.000Z").ledger;
+  const repository = updateSourceLedger(seed, {
+    VIXCLS: [{ date: "2026-11-03", value: 99 }],
+    SP500: [{ date: "2026-11-04", value: 5000 }],
+  }, "2026-11-05T15:50:00.000Z").ledger;
+  await withSeed(repository, async (read) => {
+    const exported = (await read("?evidence=1")).sourceLedger;
+    assert.deepEqual(exported.sources.PAYEMS, repository.sources.PAYEMS);
+    assert.deepEqual(exported.sources.VIXCLS, disk.sources.VIXCLS);
+    assert.deepEqual(exported.sources.DGS10, disk.sources.DGS10);
+    assert.deepEqual(exported.sources.SP500, repository.sources.SP500);
+    assert.deepEqual(exported.revisions, [...repository.revisions, ...disk.revisions]);
+    const publicRevisions = (await read()).sourceRevisions.map(({ label, ...revision }) => revision);
+    assert.deepEqual(publicRevisions, exported.revisions);
+  }, { editCache(cache) { cache.sourceLedger = disk; } });
+});

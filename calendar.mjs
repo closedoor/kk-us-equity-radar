@@ -15,12 +15,14 @@ const monthNumbers = {
   oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12,
 };
 
+// December/January instants verified against the two BLS release tables on 2026-11-22.
 const fallbackCpiCalendar = [
   { date: "2026-08-12", period: "7 月" },
   { date: "2026-09-11", period: "8 月" },
   { date: "2026-10-14", period: "9 月" },
   { date: "2026-11-10", period: "10 月" },
-  { date: "2026-12-10", period: "11 月" },
+  { date: "2026-12-10", period: "11 月", eventAt: "2026-12-10T13:30:00.000Z" },
+  { date: "2027-01-13", period: "12 月", eventAt: "2027-01-13T13:30:00.000Z" },
 ];
 
 const fallbackEmploymentCalendar = [
@@ -28,7 +30,8 @@ const fallbackEmploymentCalendar = [
   { date: "2026-09-04", period: "8 月" },
   { date: "2026-10-02", period: "9 月" },
   { date: "2026-11-06", period: "10 月" },
-  { date: "2026-12-04", period: "11 月" },
+  { date: "2026-12-04", period: "11 月", eventAt: "2026-12-04T13:30:00.000Z" },
+  { date: "2027-01-08", period: "12 月", eventAt: "2027-01-08T13:30:00.000Z" },
 ];
 
 const fallbackFomcCalendar = [
@@ -83,17 +86,10 @@ function parseEnglishDate(value) {
   return isoDate(Number(match[3]), monthNumbers[match[1].toLowerCase()], Number(match[2]));
 }
 
-function previousMonthLabel(date) {
-  const parsed = new Date(`${date}T12:00:00Z`);
-  parsed.setUTCDate(1);
-  parsed.setUTCMonth(parsed.getUTCMonth() - 1);
-  return `${parsed.getUTCMonth() + 1} 月`;
-}
-
-function periodLabel(value, fallbackDate) {
-  const text = decodeHtml(value);
-  const match = text.match(/(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}/i);
-  return match ? `${monthNumbers[match[1].toLowerCase()]} 月` : previousMonthLabel(fallbackDate);
+function periodLabel(value) {
+  const match = decodeHtml(value).match(/\b([A-Za-z]+)\.?[,\s]+(\d{4})\b/i);
+  const month = match && monthNumbers[match[1].toLowerCase()];
+  return month ? `${month} 月` : null;
 }
 
 function dateInTimeZone(date, timeZone = "America/New_York") {
@@ -107,36 +103,74 @@ function dateInTimeZone(date, timeZone = "America/New_York") {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+const nyClock = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+});
+
+function nyEventAt(date, clock) {
+  // U.S. Eastern has two offsets. Round-trip candidates so nonexistent or ambiguous local times remain date-only.
+  const nominal = Date.parse(date + "T" + clock + "Z");
+  if (!Number.isFinite(nominal)) return null;
+  const hits = [4, 5].map((hours) => new Date(nominal + hours * 3_600_000))
+    .filter((instant) => nyClock.format(instant) === clock);
+  return hits.length === 1 ? hits[0].toISOString() : null;
+}
+
+function parseBlsStart(block) {
+  const startLine = block.match(/^DTSTART((?:;[^\r\n:]*)?):([^\r\n]+)$/mi);
+  const start = startLine?.[2].trim().match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/i);
+  if (!start) return null;
+  const date = isoDate(Number(start[1]), Number(start[2]), Number(start[3]));
+  if (!date) return null;
+  if (!start[4] || +start[4] > 23 || +start[5] > 59 || +start[6] > 59) return { date };
+  const clock = [start[4], start[5], start[6]].join(":");
+  const tzid = startLine[1].match(/;TZID="?([^";]+)"?/i)?.[1];
+  if (start[7] || /^(?:UTC|Etc\/UTC|GMT)$/i.test(tzid)) {
+    const instant = new Date(date + "T" + clock + "Z");
+    return { date: dateInTimeZone(instant), eventAt: instant.toISOString() };
+  }
+  // BLS publishes its release calendar in U.S. Eastern time, including floating DTSTART values.
+  const eventAt = !tzid || /^(?:America\/New_York|US\/Eastern|Eastern Standard Time)$/i.test(tzid) ? nyEventAt(date, clock) : null;
+  return eventAt ? { date, eventAt } : { date };
+}
+
+function icsText(block, name) {
+  const field = block.match(new RegExp("^" + name + "(?:;[^:\\r\\n]+)?:([^\\r\\n]*)", "mi"))?.[1] || "";
+  return field.replace(/\\[nN]/g, " ").replace(/\\([,;])/g, "$1").trim();
+}
+
 export function parseBlsIcs(ics) {
   const unfolded = String(ics || "").replace(/\r?\n[ \t]/g, "");
-  const blocks = [...unfolded.matchAll(/BEGIN:VEVENT([\s\S]*?)END:VEVENT/gi)].map((match) => match[1]);
   const cpi = [];
   const employment = [];
-
-  for (const block of blocks) {
-    const dateRaw = block.match(/^DTSTART[^:]*:(\d{8})/mi)?.[1];
-    if (!dateRaw) continue;
-    const date = isoDate(Number(dateRaw.slice(0, 4)), Number(dateRaw.slice(4, 6)), Number(dateRaw.slice(6, 8)));
-    if (!date) continue;
-    const summary = block.match(/^SUMMARY:(.*)$/mi)?.[1] || "";
-    const description = block.match(/^DESCRIPTION:(.*)$/mi)?.[1] || "";
-    const text = `${summary} ${description}`.replace(/\\[nN]/g, " ").replace(/\\([,;])/g, "$1");
-    const event = { date, period: periodLabel(text, date) };
-    if (/Consumer Price Index/i.test(text)) cpi.push(event);
-    if (/Employment Situation/i.test(text)) employment.push(event);
+  for (const [, block] of unfolded.matchAll(/BEGIN:VEVENT([\s\S]*?)END:VEVENT/gi)) {
+    const start = parseBlsStart(block);
+    if (!start || /^STATUS:CANCELLED\s*$/mi.test(block)) continue;
+    const summary = icsText(block, "SUMMARY");
+    const description = icsText(block, "DESCRIPTION");
+    // A related publication ("Employment Situation of Veterans", regional CPI...) is not the national monthly release.
+    const title = summary.match(/^(?:The\s+)?(Employment Situation|Consumer Price Index)(?:\s+for\s+([A-Za-z]+\.?)[,\s]+\d{4})?[.\s]*$/i);
+    if (!title || (title[2] && !monthNumbers[title[2].replace(/\.$/, "").toLowerCase()])) continue;
+    const events = /^Employment/i.test(title[1]) ? employment : cpi;
+    events.push({ ...start, period: periodLabel(summary) || periodLabel(description) });
   }
-
   return { cpi: uniqueSortedEvents(cpi), employment: uniqueSortedEvents(employment) };
 }
 
-export function parseBlsReleasePage(html) {
+export function parseBlsReleasePage(html, expectedRelease) {
+  const title = decodeHtml(String(html || "").match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1]);
+  if (expectedRelease && title && !title.toLowerCase().includes(expectedRelease.toLowerCase())) return [];
   const events = [];
   for (const row of String(html || "").matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)) {
     const cells = [...row[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((match) => decodeHtml(match[1]));
     if (cells.length < 2) continue;
     const date = parseEnglishDate(cells[1]);
     if (!date) continue;
-    events.push({ date, period: periodLabel(cells[0], date) });
+    const clock = cells[2]?.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    const hour = clock ? Number(clock[1]) : 0;
+    const eventAt = clock && hour >= 1 && hour <= 12 && Number(clock[2]) <= 59
+      ? nyEventAt(date, pad(hour % 12 + (/pm/i.test(clock[3]) ? 12 : 0)) + ":" + clock[2] + ":00") : null;
+    events.push({ date, period: periodLabel(cells[0]), ...(eventAt ? { eventAt } : {}) });
   }
   return uniqueSortedEvents(events);
 }
@@ -146,7 +180,7 @@ export function parseFredReleaseCalendar(html) {
   const regex = /<span[^>]*font-weight:\s*bold;?[^>]*>([^<]+)<\/span>/gi;
   for (const match of String(html || "").matchAll(regex)) {
     const date = parseEnglishDate(match[1]);
-    if (date) events.push({ date, period: previousMonthLabel(date) });
+    if (date) events.push({ date, period: null });
   }
   return uniqueSortedEvents(events);
 }
@@ -166,11 +200,16 @@ export function parseFomcCalendar(html) {
     const start = headings[index].index + headings[index][0].length;
     const end = headings[index + 1]?.index ?? source.length;
     const block = source.slice(start, end);
-    const meetingRegex = /fomc-meeting__month[^>]*>\s*<strong>([^<]+)<\/strong>\s*<\/div>[\s\S]*?fomc-meeting__date[^>]*>\s*([^<]+?)\s*<\/div>/gi;
+    const meetingRegex = /fomc-meeting__month[^>]*>\s*<strong>([^<]+)<\/strong>\s*<\/div>[\s\S]*?fomc-meeting__date[^>]*>([\s\S]*?)<\/div>/gi;
 
-    for (const match of block.matchAll(meetingRegex)) {
+    const meetings = [...block.matchAll(meetingRegex)];
+    for (const [position, match] of meetings.entries()) {
       const monthParts = match[1].trim().split("/").map((part) => monthNumbers[part.trim().toLowerCase()]);
-      const dateText = match[2].trim();
+      const dateText = decodeHtml(match[2]);
+      const details = decodeHtml(block.slice(match.index + match[0].length, meetings[position + 1]?.index));
+      // The Fed also lists strategy-only meetings and recorded votes on non-rate matters in these same panels.
+      if (/Monetary Policy Strategy Meeting/i.test(details) ||
+          (/notation vote/i.test(dateText) && !/^(?:Statement:|.*FOMC (?:statement|policy decision))/i.test(details))) continue;
       const dayParts = dateText.replace(/\*/g, "").match(/\d{1,2}/g)?.map(Number) || [];
       if (!monthParts[0] || !dayParts[0]) continue;
       let startMonth = monthParts[0];
@@ -267,6 +306,7 @@ export function parseNasdaqEarningsDate(payload) {
 function formatFomcMeeting(event) {
   const start = new Date(`${event.startDate}T12:00:00Z`);
   const end = new Date(`${event.date}T12:00:00Z`);
+  if (event.startDate === event.date) return `${end.getUTCMonth() + 1} 月 ${end.getUTCDate()} 日会议`;
   if (start.getUTCMonth() === end.getUTCMonth()) {
     return `${start.getUTCMonth() + 1} 月 ${start.getUTCDate()}–${end.getUTCDate()} 日会议`;
   }
@@ -275,7 +315,8 @@ function formatFomcMeeting(event) {
 
 function nextEvent(events, now) {
   const today = dateInTimeZone(now);
-  return (events || []).find((event) => event.date >= today) || null;
+  return (events || []).find((event) => validIsoDate(event?.date) && (event.date > today ||
+    (event.date === today && (!event.eventAt || Date.parse(event.eventAt) > now.getTime())))) || null;
 }
 
 function estimatedQuarterDate(released) {
@@ -291,8 +332,7 @@ function validCalendar(value) {
 }
 
 function hasUpcomingEvent(value, at) {
-  const today = dateInTimeZone(at);
-  return validCalendar(value) && value.some((event) => validIsoDate(event?.date) && event.date >= today);
+  return Array.isArray(value) && Boolean(nextEvent(value, at));
 }
 
 function nasdaqSymbol(company) {
@@ -310,6 +350,7 @@ export function createCalendarService({
   let lastAttemptAt = 0;
   let refreshPromise = null;
   let state = {
+    macroCalendarVersion: 2,
     cpi: fallbackCpiCalendar,
     employment: fallbackEmploymentCalendar,
     fomc: fallbackFomcCalendar,
@@ -325,15 +366,28 @@ export function createCalendarService({
 
   function hydrate(snapshot) {
     if (!snapshot || typeof snapshot !== "object") return;
+    // Older combined-feed snapshots did not record title identity; their dates cannot be reclassified on restart.
+    const legacy = snapshot.macroCalendarVersion !== 2;
+    const oldBls = legacy && snapshot.sources?.bls?.url === BLS_ICS_URL;
+    const oldFed = legacy && snapshot.sources?.fomc?.mode === "fed-live";
+    const normalizeBls = (events) => uniqueSortedEvents(events).map((event) => {
+      const dateOnly = snapshot.sources?.bls?.mode === "fred-fallback";
+      const period = !dateOnly && typeof event.period === "string" ? event.period : null;
+      const verifiedInstant = !dateOnly && typeof event.eventAt === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(event.eventAt)
+        && Number.isFinite(Date.parse(event.eventAt)) && new Date(event.eventAt).toISOString() === event.eventAt
+        && dateInTimeZone(new Date(event.eventAt)) === event.date;
+      return { date: event.date, period, ...(verifiedInstant ? { eventAt: event.eventAt } : {}) };
+    });
     state = {
       ...state,
-      cpi: validCalendar(snapshot.cpi) ? uniqueSortedEvents(snapshot.cpi) : state.cpi,
-      employment: validCalendar(snapshot.employment) ? uniqueSortedEvents(snapshot.employment) : state.employment,
-      fomc: validCalendar(snapshot.fomc) ? uniqueSortedEvents(snapshot.fomc) : state.fomc,
+      cpi: !oldBls && validCalendar(snapshot.cpi) ? normalizeBls(snapshot.cpi) : state.cpi,
+      employment: !oldBls && validCalendar(snapshot.employment) ? normalizeBls(snapshot.employment) : state.employment,
+      fomc: !oldFed && validCalendar(snapshot.fomc) ? uniqueSortedEvents(snapshot.fomc) : state.fomc,
       earnings: snapshot.earnings && typeof snapshot.earnings === "object" ? snapshot.earnings : state.earnings,
       pastEarnings: Object.fromEntries(Object.entries(snapshot.pastEarnings || {}).filter(([, date]) => validIsoDate(date))),
       updatedAt: snapshot.updatedAt || state.updatedAt,
-      sources: { ...state.sources, ...(snapshot.sources || {}) },
+      sources: { ...state.sources, ...(snapshot.sources || {}),
+        ...(oldBls ? { bls: state.sources.bls } : {}), ...(oldFed ? { fomc: state.sources.fomc } : {}) },
     };
     rememberPastEarnings();
   }
@@ -349,22 +403,18 @@ export function createCalendarService({
 
   async function fetchBlsCalendars() {
     try {
-      const parsed = parseBlsIcs(await fetchText(BLS_ICS_URL, { accept: "text/calendar,text/plain,*/*" }));
-      if (hasUpcomingEvent(parsed.cpi, now()) && hasUpcomingEvent(parsed.employment, now())) {
-        return { ...parsed, mode: "bls-live", url: BLS_ICS_URL, cpiUrl: BLS_ICS_URL, employmentUrl: BLS_ICS_URL };
-      }
-      throw new Error("BLS calendar did not contain future CPI and Employment Situation dates");
-    } catch (icsError) {
+      // The two dedicated release tables identify the report, reference month, and exact time without title inference.
+      const [cpiHtml, employmentHtml] = await Promise.all([fetchText(BLS_CPI_URL), fetchText(BLS_EMPLOYMENT_URL)]);
+      const cpi = parseBlsReleasePage(cpiHtml, "Consumer Price Index");
+      const employment = parseBlsReleasePage(employmentHtml, "Employment Situation");
+      if (!hasUpcomingEvent(cpi, now()) || !hasUpcomingEvent(employment, now())) throw new Error("BLS release pages did not contain future dates");
+      return { cpi, employment, mode: "bls-live", url: BLS_CPI_URL, cpiUrl: BLS_CPI_URL, employmentUrl: BLS_EMPLOYMENT_URL };
+    } catch (pageError) {
       try {
-        const [cpiHtml, employmentHtml] = await Promise.all([
-          fetchText(BLS_CPI_URL),
-          fetchText(BLS_EMPLOYMENT_URL),
-        ]);
-        const cpi = parseBlsReleasePage(cpiHtml);
-        const employment = parseBlsReleasePage(employmentHtml);
-        if (!hasUpcomingEvent(cpi, now()) || !hasUpcomingEvent(employment, now())) throw new Error("BLS release pages did not contain future dates");
-        return { cpi, employment, mode: "bls-live", url: BLS_CPI_URL, cpiUrl: BLS_CPI_URL, employmentUrl: BLS_EMPLOYMENT_URL };
-      } catch (pageError) {
+        const parsed = parseBlsIcs(await fetchText(BLS_ICS_URL, { accept: "text/calendar,text/plain,*/*" }));
+        if (!hasUpcomingEvent(parsed.cpi, now()) || !hasUpcomingEvent(parsed.employment, now())) throw new Error("BLS calendar did not contain future CPI and Employment Situation dates");
+        return { ...parsed, mode: "bls-live", url: BLS_ICS_URL, cpiUrl: BLS_CPI_URL, employmentUrl: BLS_EMPLOYMENT_URL };
+      } catch (icsError) {
         const currentYear = Number(dateInTimeZone(now()).slice(0, 4));
         const years = [currentYear, currentYear + 1];
         const [cpiResults, employmentResults] = await Promise.all([
@@ -510,28 +560,22 @@ export function createCalendarService({
         snapshotLabel: Number.isFinite(snapshotAgeDays) && snapshotAgeDays >= 0 ? `资料截至 ${company.released}` : "资料日期待核对",
       };
       const automaticIsFuture = validIsoDate(automatic?.date) && automatic.date >= today;
-      const confirmedFallback = company.nextReportStatus === "confirmed"
-        && validIsoDate(company.nextReportDate)
-        && company.nextReportDate >= today;
+      if (confirmedSchedule && company.nextReportDate >= today) return {
+        ...company, ...snapshot, nextReportLabel: company.nextReportLabel || company.nextReportDate, nextReportBasis: "company",
+      };
 
-      if (confirmedFallback && (!automaticIsFuture || automatic.date !== company.nextReportDate)) return { ...company, ...snapshot, nextReportBasis: "company" };
-
-      if (automaticIsFuture) {
-        const confirmed = confirmedFallback && company.nextReportDate === automatic.date;
+      if (automaticIsFuture && (!validIsoDate(company.released) || isLaterQuarter(automatic.date))) {
         return {
           ...company,
           ...snapshot,
           nextReportDate: automatic.date,
-          nextReportLabel: `${automatic.date}${automatic.timing ? ` · ${automatic.timing}` : ""}`,
-          nextReportStatus: confirmed ? "confirmed" : "estimated",
-          nextReportBasis: confirmed ? "company" : "nasdaq",
-          nextReportSource: confirmed
-            ? company.nextReportSource
-            : `https://www.nasdaq.com/market-activity/stocks/${nasdaqSymbol(company).toLowerCase()}/earnings`,
+          nextReportLabel: automatic.date + (automatic.timing ? " · " + automatic.timing : ""),
+          nextReportStatus: "estimated",
+          nextReportBasis: "nasdaq",
+          nextReportSource: "https://www.nasdaq.com/market-activity/stocks/" + nasdaqSymbol(company).toLowerCase() + "/earnings",
         };
       }
 
-      if (confirmedFallback) return { ...company, ...snapshot, nextReportBasis: "company" };
       if (snapshotStale || !estimate || estimate < today) {
         return { ...company, ...snapshot, nextReportDate: null, nextReportEstimatedDate: null, nextReportStatus: "pending", nextReportBasis: null, nextReportLabel: "待核对下一期日程", nextReportSource: null };
       }
@@ -563,23 +607,23 @@ export function createCalendarService({
 
     return [
       {
-        indicatorId: "inflation", label: "CPI 公布", date: cpi?.date || null,
-        event: cpi ? `美国 ${cpi.period} CPI / 核心 CPI，08:30 ET` : "正在等待官方发布下一期日程",
+        indicatorId: "inflation", label: "CPI 公布", date: cpi?.date || null, eventAt: cpi?.eventAt || null,
+        event: cpi ? `美国${cpi.period ? " " + cpi.period + " " : " "}CPI / 核心 CPI${cpi.period ? "" : "（统计期待核对）"}` : "正在等待官方发布下一期日程",
         source: cpiSource, linkLabel: "查看自动同步日程", scheduleStatus: cpi ? "confirmed" : "pending",
       },
       {
-        indicatorId: "fed", label: "FOMC 利率决议", date: fomc?.date || null,
+        indicatorId: "fed", label: "FOMC 利率决议", date: fomc?.date || null, eventAt: null,
         event: fomc ? `${formatFomcMeeting(fomc)}：利率决议与主席发布会${fomc.projections ? "，同时公布经济预测" : ""}` : "正在等待美联储发布下一期日程",
         source: FOMC_URL, linkLabel: "查看美联储会议日程", scheduleStatus: fomc ? "confirmed" : "pending",
       },
       {
-        indicatorId: "unemployment", label: "失业率", date: employment?.date || null,
-        event: employment ? `${employment.period}就业报告·失业率，08:30 ET` : "正在等待官方发布下一期日程",
+        indicatorId: "unemployment", label: "失业率", date: employment?.date || null, eventAt: employment?.eventAt || null,
+        event: employment ? `${employment.period ? employment.period + "就业报告" : "就业报告（统计期待核对）"}·失业率` : "正在等待官方发布下一期日程",
         source: employmentSource, linkLabel: "查看自动同步日程", scheduleStatus: employment ? "confirmed" : "pending",
       },
       {
-        indicatorId: "payrolls", label: "非农就业", date: employment?.date || null,
-        event: employment ? `${employment.period}就业报告·非农就业，08:30 ET` : "正在等待官方发布下一期日程",
+        indicatorId: "payrolls", label: "非农就业", date: employment?.date || null, eventAt: employment?.eventAt || null,
+        event: employment ? `${employment.period ? employment.period + "就业报告" : "就业报告（统计期待核对）"}·非农就业` : "正在等待官方发布下一期日程",
         source: employmentSource, linkLabel: "查看自动同步日程", scheduleStatus: employment ? "confirmed" : "pending",
       },
       {
