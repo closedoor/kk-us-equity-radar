@@ -1,4 +1,5 @@
 import http from "node:http";
+import { readScoreHistory } from "../score-history.mjs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,6 +49,12 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const url = new URL(req.url, `http://${host}`);
+    if (url.pathname === "/api/score-history") {
+      const history = await readScoreHistory();
+      res.writeHead(200, { ...headers, "content-type": "application/json; charset=utf-8" });
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify(history));
+      return;
+    }
     if (url.pathname === "/api/market-pulse") {
       res.writeHead(200, { ...headers, "content-type": "application/json; charset=utf-8" });
       res.end(req.method === "HEAD" ? undefined : JSON.stringify(marketPulseReference));

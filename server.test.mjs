@@ -10,6 +10,7 @@ import { spawn } from "node:child_process";
 import { isDashboardSnapshot } from "./public/dashboard-state.js";
 import { isMarketPulseSnapshot, projectMarketPulse } from "./public/market-pulse.js";
 import { marketPulseReference } from "./market-pulse-reference.mjs";
+import { equityCloseMinute } from "./public/us-equity-session.js";
 
 const fixture = JSON.parse(await readFile(new URL("./dashboard-cache.json", import.meta.url), "utf8"));
 const earningsFixture = JSON.parse(await readFile(new URL("./fixtures/earnings-data.json", import.meta.url), "utf8"));
@@ -40,7 +41,7 @@ async function withOfflineServer(cache, check, { stalled = false, preload = null
   await new Promise((resolve) => reservation.close(resolve));
   let child;
   try {
-    for (const name of ["server.mjs", "calendar.mjs", "publication.mjs", "earnings-monitor.mjs", "source-revisions.mjs", "market-data.mjs", "market-pulse-source.mjs", "market-pulse-reference.mjs", "package.json", "public"]) {
+    for (const name of ["server.mjs", "score-history.mjs", "validation-evidence.mjs", "calendar.mjs", "publication.mjs", "earnings-monitor.mjs", "source-revisions.mjs", "market-data.mjs", "market-pulse-source.mjs", "market-pulse-reference.mjs", "package.json", "public"]) {
       await cp(new URL(name, import.meta.url), path.join(dir, name), { recursive: true });
     }
     // Keep historical scenario dates independent of the current production quarter.
@@ -498,12 +499,14 @@ test("read-only routes reject writes and HEAD returns headers without a body", a
 
 function marketStub({ missingStart = false, staleSectors = false } = {}) {
   const dates = [];
-  const day = new Date();
+  const asOf = "2026-11-20T22:00:00.000Z";
+  const day = new Date(asOf);
   for (; dates.length < 260; day.setUTCDate(day.getUTCDate() - 1)) {
-    if (day.getUTCDay() !== 0 && day.getUTCDay() !== 6) dates.unshift(day.toISOString().slice(0, 10));
+    const date = day.toISOString().slice(0, 10);
+    if (day.getUTCDay() !== 0 && day.getUTCDay() !== 6 && equityCloseMinute(date) !== 0) dates.unshift(date);
   }
   const expectedDate = dates.at(-2);
-  const preload = `
+  const preload = publicationClockPreload.replaceAll(publicationClock, asOf) + `
     const dates = ${JSON.stringify(dates)};
     globalThis.fetch = async (url) => {
       const symbol = String(url).match(/\\/quote\\/([^/]+)\\/historical/)?.[1];
@@ -651,5 +654,57 @@ test("breadth requires at least eight sectors on the comparison date, not stale 
     const breadth = (await finished()).indicators.find((row) => row.id === "breadth");
     assert.equal(breadth.available, false);
     assert.match(breadth.detail, /7\/11/);
+  }, { preload });
+});
+
+test("an intraday upstream row cannot change the daily market model or forward benchmark, and another FRED series cannot stand in for VIX", async () => {
+  const at = "2026-11-25T18:00:00.000Z"; // 13:00 New York on a full trading day.
+  const preload = publicationClockPreload.replaceAll(publicationClock, at) + completeSourcesStub() + `
+    const baseFetch = globalThis.fetch;
+    globalThis.fetch = async raw => {
+      const url = new URL(raw);
+      const result = await baseFetch(raw);
+      const id = url.searchParams.get('id');
+      if (id === 'VIXCLS') return new Response((await result.text()).replace('DATE,VIXCLS','DATE,SP500'));
+      if (id === 'SP500') return new Response(await result.text() + '\\n2026-11-25,3000');
+      if (url.pathname.includes('/quote/') && url.pathname.endsWith('/historical')) {
+        const data = await result.json();
+        data.data.tradesTable.rows.unshift({date:'11/25/2026', close: '20'});
+        return Response.json(data);
+      }
+      return result;
+    };
+  `;
+  await withOfflineServer({}, async ({ finished }) => {
+    const data = await finished();
+    assert.deepEqual(data.validationReference, { series: "SP500", date: "2026-11-24", close: 5000 });
+    for (const id of ["sp500", "breadth"]) {
+      const row = data.indicators.find(item => item.id === id);
+      assert.equal(row.available, true, id);
+      assert.equal(row.date, "2026-11-24", id);
+    }
+    const vix = data.indicators.find(item => item.id === "vix");
+    assert.equal(vix.available, false);
+    assert.equal(vix.risk, null);
+    assert.ok(data.errors.some(message => message.includes("VIXCLS") && message.includes("列名")));
+  }, { preload });
+});
+
+test("a daily-close request started before the bell cannot become final while its response is in flight", async () => {
+  const preload = `
+    const RealDate = Date;
+    let clock = RealDate.parse("2026-11-25T20:59:55Z");
+    globalThis.Date = class extends RealDate {
+      constructor(...args) { super(...(args.length ? args : [clock])); }
+      static now() { return clock; }
+    };
+    globalThis.fetch = async raw => {
+      if (new URL(raw).searchParams.get("id") !== "SP500") throw new Error("fixture source unavailable");
+      clock = RealDate.parse("2026-11-25T21:00:10Z");
+      return new Response("observation_date,SP500\\n2026-11-24,5000\\n2026-11-25,3500");
+    };
+  `;
+  await withOfflineServer({}, async ({ finished }) => {
+    assert.deepEqual((await finished()).validationReference, { series: "SP500", date: "2026-11-24", close: 5000 });
   }, { preload });
 });

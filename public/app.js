@@ -21,6 +21,7 @@ const state = {
   displayValidity: null,
 };
 let manualDraft = {};
+let pendingSignalHash = location.hash.startsWith("#indicator-") ? location.hash : null;
 const PULSE_INTERVAL_MS = 2 * 60_000;
 const pulseState = { snapshot: null, controller: null, error: null, lastAttemptAt: 0 };
 const pulseSymbols = [["VIX", "标普隐含波动"], ["VXSMH", "半导体隐含波动"], ["SPX", "标普 500"], ["RSP", "标普等权 ETF"], ["QQQ", "纳指 100 ETF"], ["SMH", "半导体 ETF"]];
@@ -812,7 +813,8 @@ function validForwardReport(data) {
     && data.outcomes.every((row) => validationObject(row) && [21, 63].includes(row.tradingDays)
       && validationCount(row.samples) && validationCount(row.immatureSamples)
       && (row.unavailableScoreSamples === undefined || validationCount(row.unavailableScoreSamples))
-      && row.samples + row.immatureSamples + (row.unavailableScoreSamples || 0) <= data.observedSamples
+      && (row.incompleteBenchmarkSamples === undefined || validationCount(row.incompleteBenchmarkSamples))
+      && row.samples + row.immatureSamples + (row.unavailableScoreSamples || 0) + (row.incompleteBenchmarkSamples || 0) <= data.observedSamples
       && ["meanReturnPercent", "meanDrawdownPercent", "worstDrawdownPercent"].every((key) => row[key] === null || Number.isFinite(row[key])));
 }
 
@@ -841,21 +843,66 @@ function renderForwardReport(data) {
   const benchmarkError = data.benchmark?.error;
   const pending = data.outcomes.some((row) => row.immatureSamples > 0);
   const unavailable = data.outcomes.some((row) => row.unavailableScoreSamples > 0);
+  const incomplete = data.outcomes.some((row) => row.incompleteBenchmarkSamples > 0);
   const noMature = data.outcomes.every((row) => row.samples === 0);
   const caution = data.observedSamples === 0
     ? "尚未积累前瞻观察样本，未来的可评分记录需等待结果成熟；这不表示收益或回撤为 0。"
     : pending ? "尚有样本等待对应期限的价格观察成熟；这不表示收益或回撤为 0。"
       : noMature && unavailable ? "当前没有可计算的成熟样本；无有效评分的记录不会因继续等待而自动纳入。这不表示收益或回撤为 0。"
-        : noMature ? "当前没有可计算的成熟样本，结果状态仍待核对；这不表示收益或回撤为 0。"
+        : noMature && incomplete ? "观察期限已过，需补全该区间的基准收盘才能计算；这不表示收益或回撤为 0。"
+          : noMature ? "当前没有可计算的成熟样本，结果状态仍待核对；这不表示收益或回撤为 0。"
           : "已成熟样本仅用于描述性观察，尚不能据此校准模型或仓位。";
-  els.forwardValidation.innerHTML = `<h3>前瞻记录：${benchmarkError ? "基准价格待核验" : data.status === "awaiting-outcomes" ? "等待结果成熟" : "描述性观察"}</h3>
+  const headline = benchmarkError ? "基准价格待核验" : noMature && !pending && incomplete ? "到期基准待补全"
+    : noMature && !pending && unavailable ? "暂无可评估结果" : data.status === "awaiting-outcomes" ? "等待结果成熟" : "描述性观察";
+  els.forwardValidation.innerHTML = `<h3>前瞻记录：${headline}</h3>
     <p>已记录 <strong>${data.observedSamples}</strong> 个观察样本${data.observedSamples && data.firstObservationDate && data.lastObservationDate ? ` · ${escapeHtml(data.firstObservationDate)} 至 ${escapeHtml(data.lastObservationDate)}` : ""}。</p>
     ${benchmarkError ? `<p class="validation-caution">基准价格暂不可用，结果计数待核验；不将本次计数作为正常成熟进度或零收益。${escapeHtml(benchmarkError)}</p>` : `<ul class="validation-outcomes">${data.outcomes.map((row) => {
       const excluded = row.unavailableScoreSamples || 0;
-      const unknown = data.observedSamples - row.samples - row.immatureSamples - excluded;
-      return `<li><strong>后续 ${row.tradingDays} 交易日</strong><span>${row.samples} 个已成熟 · ${row.immatureSamples} 个等待观察${excluded ? ` · ${excluded} 个无有效评分，不纳入` : ""}${unknown ? ` · ${unknown} 个结果状态待核对` : ""}</span></li>`;
+      const missing = row.incompleteBenchmarkSamples || 0;
+      const unknown = data.observedSamples - row.samples - row.immatureSamples - excluded - missing;
+      return `<li><strong>后续 ${row.tradingDays} 交易日</strong><span>${row.samples} 个已成熟 · ${row.immatureSamples} 个等待观察${excluded ? ` · ${excluded} 个无有效评分，不纳入` : ""}${missing ? ` · ${missing} 个已到期但基准收盘不全，不计收益` : ""}${unknown ? ` · ${unknown} 个结果状态待核对` : ""}</span></li>`;
     }).join("")}</ul><p class="validation-caution">${caution}</p>`}
     <ul class="validation-limitations">${data.limitations.map((text) => `<li>${escapeHtml(text)}</li>`).join("")}</ul><p class="validation-note">${data.generatedAt ? `记录生成 ${escapeHtml(data.generatedAt.slice(0, 10))}` : "尚无前瞻记录生成时间"} · <a href="/forward-validation.json">查看前瞻汇总数据</a> · <a href="https://github.com/closedoor/kk-us-equity-radar/tree/main/evidence/forward" target="_blank" rel="noreferrer">查看完整前瞻记录</a></p>`;
+}
+
+const lastValidation = new WeakMap();
+
+function updateValidationView(target, data, renderReport) {
+  const before = lastValidation.get(target);
+  const signature = JSON.stringify(data);
+  target.querySelector("[data-validation-stale]")?.remove();
+  if (!before || before.signature !== signature) {
+    const bandsOpen = target.querySelector(".validation-bands")?.open;
+    const position = new Map(Array.from(target.querySelectorAll(".validation-table-wrap"), node => [node.getAttribute("aria-label"), node.scrollLeft]));
+    const key = node => node.matches("a[href]") ? node.getAttribute("href") : node.matches("summary") ? "bands-summary" : node.getAttribute("aria-label");
+    const focusKey = target.contains(document.activeElement) ? key(document.activeElement) : null;
+    renderReport(data);
+    const bands = target.querySelector(".validation-bands");
+    if (bands && bandsOpen) bands.open = true;
+    for (const node of target.querySelectorAll(".validation-table-wrap")) node.scrollLeft = position.get(node.getAttribute("aria-label")) || 0;
+    if (focusKey && document.activeElement === document.body) {
+      const replacement = Array.from(target.querySelectorAll("a[href], summary, .validation-table-wrap")).find(node => key(node) === focusKey);
+      (replacement || target.closest("details")?.querySelector("summary"))?.focus({ preventScroll: true });
+    }
+  }
+  lastValidation.set(target, { signature, checkedAt: Date.now() });
+  target.dataset.state = "available";
+}
+
+function markValidationFailed(target, label) {
+  const before = lastValidation.get(target);
+  if (!before) {
+    target.dataset.state = "unavailable";
+    target.textContent = `${label}资料待核验：暂时无法读取或格式异常。行情和评分仍独立展示。`;
+    return;
+  }
+  target.dataset.state = "stale";
+  if (target.querySelector("[data-validation-stale]")) return;
+  const notice = document.createElement("p");
+  notice.className = "validation-caution";
+  notice.dataset.validationStale = "";
+  notice.textContent = `${label}更新失败，保留上次成功读取的报告（${formatDate(before.checkedAt)}）。`;
+  target.prepend(notice);
 }
 
 async function loadValidationReport(url, target, validate, renderReport, label) {
@@ -867,11 +914,9 @@ async function loadValidationReport(url, target, validate, renderReport, label) 
     if (!response.ok) throw new Error("report unavailable");
     const data = await response.json();
     if (!validate(data)) throw new Error("invalid report");
-    renderReport(data);
-    target.dataset.state = "available";
+    updateValidationView(target, data, renderReport);
   } catch {
-    target.dataset.state = "unavailable";
-    target.textContent = `${label}资料待核验：暂时无法读取或格式异常。行情和评分仍独立展示。`;
+    markValidationFailed(target, label);
   } finally {
     clearTimeout(timer);
     controller.abort();
@@ -942,6 +987,7 @@ function loadData(force = false) {
         els.loading.hidden = true;
         els.loading.replaceChildren();
         render();
+        if (pendingSignalHash) revealSignalHash();
       }
       if (state.syncPending) retryDelay = [2500, 5000, 10000, 15000][Math.min(pollAttempts++, 3)];
       else pollAttempts = 0;
@@ -1019,21 +1065,41 @@ els.manualDialog.addEventListener("close", () => {
   else els.manualButton.focus({ preventScroll: true });
   manualReturnFocus = null;
 });
-els.filters.addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-filter]");
-  if (!button) return;
-  state.filter = button.dataset.filter;
+function setSignalFilter(category) {
+  state.filter = category;
   els.filters.querySelectorAll("button").forEach((item) => {
-    const active = item === button;
+    const active = item.dataset.filter === category;
     item.classList.toggle("active", active);
     item.setAttribute("aria-pressed", String(active));
   });
   render();
+}
+
+function revealSignalHash() {
+  const hash = location.hash;
+  if (!hash.startsWith("#indicator-") || !state.data) {
+    pendingSignalHash = hash.startsWith("#indicator-") ? hash : null;
+    return;
+  }
+  pendingSignalHash = null;
+  const item = state.data.indicators.find(row => hash === `#indicator-${row.id}`);
+  if (!item) return;
+  if (!document.getElementById(hash.slice(1))) setSignalFilter(item.category);
+  const card = document.getElementById(hash.slice(1));
+  if (!card) return;
+  card.focus({ preventScroll: true });
+  card.scrollIntoView({ block: "start", behavior: "instant" });
+}
+
+// The browser may finish native fragment navigation before the dashboard arrives.
+window.addEventListener("hashchange", revealSignalHash);
+for (const type of ["pointerdown", "wheel", "keydown"]) window.addEventListener(type, () => { pendingSignalHash = null; }, { passive: true });
+els.filters.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-filter]");
+  if (button) setSignalFilter(button.dataset.filter);
 });
-els.dailyVix?.querySelector("a").addEventListener("click", () => {
-  if (document.getElementById("indicator-vix")) return;
-  const category = state.data?.indicators.find((item) => item.id === "vix")?.category;
-  Array.from(els.filters.querySelectorAll("button[data-filter]")).find((button) => button.dataset.filter === category)?.click();
+els.dailyVix?.querySelector("a").addEventListener("click", (event) => {
+  if (!event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && location.hash === "#indicator-vix") revealSignalHash();
 });
 els.grid.addEventListener("click", (event) => {
   const button = event.target.closest("[data-manual-id]");
@@ -1042,13 +1108,7 @@ els.grid.addEventListener("click", (event) => {
 els.drivers.addEventListener("click", (event) => {
   const button = event.target.closest("[data-driver-id]");
   if (!button) return;
-  state.filter = button.dataset.driverCategory;
-  els.filters.querySelectorAll("button").forEach((item) => {
-    const active = item.dataset.filter === state.filter;
-    item.classList.toggle("active", active);
-    item.setAttribute("aria-pressed", String(active));
-  });
-  render();
+  setSignalFilter(button.dataset.driverCategory);
   requestAnimationFrame(() => {
     const signal = document.getElementById(`indicator-${button.dataset.driverId}`);
     if (!signal) return;

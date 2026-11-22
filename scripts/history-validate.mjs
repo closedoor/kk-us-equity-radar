@@ -192,7 +192,7 @@ try {
   });
   const priceSource = await fetchSource("https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500&cosd=2016-01-01&coed=2026-11-05");
   if (priceSource.status !== 200 || !/^observation_date,SP500\r?\n/.test(priceSource.body)) throw new Error("S&P price outcome source unavailable or malformed");
-  const prices = parseFredCsv(priceSource.body);
+  const prices = parseFredCsv(priceSource.body, "SP500");
   if (!prices.length) throw new Error("No S&P price observations");
 
   async function replay(input) {

@@ -7,6 +7,7 @@
     <title>kk的美股雷达</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/score-history.css" />
   </head>
   <body>
     <div class="noise" aria-hidden="true"></div>
@@ -78,6 +79,7 @@
             <strong id="actionLabel">等待数据</strong>
             <p id="actionDetail">正在整理 12 项指标的研究线索。</p>
           </div>
+          <p class="action-note"><a class="driver-shortcut" href="#scoreHistory">查看近期评分记录与变化</a></p>
           <p class="action-note">部分指标用于历史状态诊断；评分尚不能据此校准个人仓位，也不构成买卖指令。</p>
           <div class="band-scale" aria-label="风险区间">
             <span class="band-low"></span><span class="band-watch"></span><span class="band-elevated"></span><span class="band-high"></span><span class="band-crisis"></span>
@@ -110,6 +112,13 @@
         <summary data-focus-key="source-revision-details">供应商历史值修订</summary>
         <p>以下使用供应商原始序列单位，未换算为风险分；例如 PAYEMS 以千人为单位，CPI 为指数值。这里只记录本功能启用后检测到的同一序列、同一观测期数值变化，不代表官方全部历史版本对账。</p>
         <ul id="revisionList"></ul>
+      </details>
+
+      <details class="model-validation shell" id="scoreHistory">
+        <summary>近期评分记录与变化<span>按纽约观察日</span></summary>
+        <p class="validation-note">每个日期显示当时实际保存的自动评分。选择日期可对照上一份记录，查看分数或有效权重为什么改变。</p>
+        <div id="scoreHistoryContent" class="validation-section" role="status" aria-live="polite"><p>展开后读取最近的记录。</p></div>
+        <button id="retryScoreHistory" type="button" class="ghost-button" hidden>重试读取评分记录</button>
       </details>
 
       <details class="model-validation shell" id="modelValidation">
@@ -172,7 +181,7 @@
     </main>
 
     <footer class="footer shell">
-      <span>US EQUITY RISK RADAR · v4.8.2</span>
+      <span>US EQUITY RISK RADAR · v4.8.3</span>
       <span>数据：公司 IR / SEC / BLS / BEA / Federal Reserve / FRED / Cboe / Nasdaq</span>
     </footer>
 
@@ -203,5 +212,6 @@
 
     <noscript><p class="noscript-message">需要启用 JavaScript 才能读取和计算最新数据。</p></noscript>
     <script type="module" src="/app.js"></script>
+    <script type="module" src="/score-history-client.js"></script>
   </body>
 </html>

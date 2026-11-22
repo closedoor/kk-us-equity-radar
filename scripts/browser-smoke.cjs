@@ -913,6 +913,38 @@ async function main() {
       await expect(edit).toBeFocused();
       await expect(page.locator("#indicator-aiEarnings .metric-value")).toHaveText("42/100");
     });
+    await scenario("saved indicator links work after slow data and browser back restores a filtered-out signal", async (page) => {
+      let release;
+      const gate = new Promise(resolve => { release = resolve; });
+      await page.route("**/api/dashboard*", async route => {
+        await gate;
+        await route.fulfill({ json: fresh() });
+      });
+      const id = "indicator-vix";
+      try {
+        await page.goto(`${baseURL}/#${id}`);
+        await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(0);
+      } finally { release(); }
+      const signal = page.locator(`#${id}`);
+      await expect(signal).toBeFocused();
+      const atSignal = () => signal.evaluate(el => {
+        const top = el.getBoundingClientRect().top;
+        return top >= document.querySelector(".topbar").getBoundingClientRect().bottom - 1 && top < innerHeight;
+      });
+      await expect.poll(atSignal).toBe(true);
+      await page.locator('.section-nav a[href="#calendar"]').click();
+      await page.locator('[data-filter="信用"]').click();
+      await expect(signal).toHaveCount(0);
+      await page.goBack();
+      await expect(signal).toBeFocused();
+      await expect.poll(atSignal).toBe(true);
+      await expect(page.locator('[data-filter="市场确认"]')).toHaveAttribute("aria-pressed", "true");
+      // Refreshing this screen later must not force the linked card back.
+      await page.locator('[data-filter="信用"]').click();
+      await page.locator("#refreshButton").click();
+      await expect(page.locator("#refreshButton")).toBeEnabled();
+      await expect(signal).toHaveCount(0);
+    }, 390, 844);
     await scenario("keyboard focus follows a risk driver to its matching signal", async (page) => {
       await mock(page, () => ({ body: fresh() }));
       await page.goto(baseURL);
@@ -1015,9 +1047,55 @@ async function main() {
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
       await expect(page.locator("#actionCallout > span")).toHaveText("当前研究重点");
       await expect(page.locator(".action-note")).toContainText("不能据此校准个人仓位");
-      await expect(page.locator(".footer")).toContainText("v4.8.2");
+      await expect(page.locator(".footer")).toContainText("v4.8.3");
       if (outputDir) await page.locator("#modelValidation").screenshot({ path: path.join(outputDir, "model-history-forward-390.png"), animations: "disabled" });
     }, 390);
+    await scenario("a reader keeps the evidence table open and focused across unchanged, failed and corrected reports", async (page) => {
+      await freeze(page);
+      const data = fresh();
+      data.refreshing = true;
+      await mock(page, () => ({ body: data }));
+      const history = JSON.parse(await fs.readFile(path.join(__dirname, "../public/model-validation.json"), "utf8"));
+      let mode = "normal", reports = 0;
+      await page.route("**/model-validation.json", (route) => {
+        reports++;
+        return mode === "failed" ? route.fulfill({ status: 503, body: "" }) : route.fulfill({ json: history });
+      });
+      await page.goto(baseURL);
+      const section = page.locator("#modelHistory");
+      await expect(section).toHaveAttribute("data-state", "available");
+      await page.locator("#modelValidation > summary").click();
+      await page.locator(".validation-bands > summary").click();
+      const table = page.locator(".validation-bands .validation-table-wrap").first();
+      await table.focus();
+      const offset = await table.evaluate(el => { el.scrollLeft = 60; return el.scrollLeft; });
+      assert.ok(offset > 0, "narrow-screen table must be horizontally scrollable");
+      await expect(page.locator("#indicatorGrid .indicator-card")).toHaveCount(12);
+      await expect(page.locator("#refreshButton")).toBeEnabled();
+      const before = reports;
+      await page.clock.runFor(3000);
+      await expect.poll(() => reports).toBeGreaterThan(before);
+      await expect(page.locator(".validation-bands")).toHaveAttribute("open", "");
+      await expect(table).toBeFocused();
+      assert.equal(await table.evaluate(el => el.scrollLeft), offset);
+      await expect(page.locator("#refreshButton")).toBeEnabled();
+      mode = "failed";
+      await page.clock.runFor(5500);
+      await expect(section).toHaveAttribute("data-state", "stale");
+      await expect(section.locator("[data-validation-stale]")).toContainText("保留上次成功读取的报告");
+      await expect(section).toContainText("27 / 28");
+      await expect(table).toBeFocused();
+      mode = "normal";
+      history.history.conclusion += " 新版读数已核对。";
+      await expect(page.locator("#refreshButton")).toBeEnabled();
+      await page.clock.runFor(11000);
+      await expect(section).toHaveAttribute("data-state", "available");
+      await expect(section).toContainText("新版读数已核对");
+      await expect(section.locator("[data-validation-stale]")).toHaveCount(0);
+      await expect(page.locator(".validation-bands")).toHaveAttribute("open", "");
+      await expect(table).toBeFocused();
+      assert.equal(await table.evaluate(el => el.scrollLeft), offset);
+    }, 320, 740);
     await scenario("auxiliary validation report failures and body timeouts never block the dashboard", async (page) => {
       await freeze(page);
       await mock(page, () => ({ body: fresh() }));
@@ -1077,6 +1155,24 @@ async function main() {
       await expect.poll(() => reportCalls).toBeGreaterThan(beforeTimedRefresh);
       await expect(page.locator("#forwardValidation")).toContainText("1 个无有效评分，不纳入");
     });
+    await scenario("expired forward windows with missing benchmark closes stay separate from pending samples", async (page) => {
+      await mock(page, () => ({ body: fresh() }));
+      const report = { version: 1, status: "awaiting-outcomes", observedSamples: 2,
+        firstObservationDate: "2026-07-01", lastObservationDate: "2026-07-02", generatedAt: "2026-11-21T12:00:00Z", limitations: [],
+        outcomes: [21, 63].map(tradingDays => ({ tradingDays, samples: 0, immatureSamples: 0, unavailableScoreSamples: 1,
+          incompleteBenchmarkSamples: 1, meanReturnPercent: null, meanDrawdownPercent: null, worstDrawdownPercent: null })) };
+      await page.route("**/forward-validation.json", route => route.fulfill({ json: report }));
+      await page.goto(baseURL);
+      const panel = page.locator("#forwardValidation");
+      await expect(panel).toHaveAttribute("data-state", "available");
+      await page.locator("#modelValidation > summary").click();
+      await expect(panel.locator("h3")).toContainText("到期基准待补全");
+      await expect(panel.locator("li").first()).toContainText("0 个已成熟 · 0 个等待观察 · 1 个无有效评分，不纳入 · 1 个已到期但基准收盘不全，不计收益");
+      report.outcomes[0].incompleteBenchmarkSamples = 2;
+      await page.locator("#refreshButton").click();
+      await expect(panel).toHaveAttribute("data-state", "stale");
+      await expect(panel).not.toContainText("2 个已到期但基准收盘不全");
+    });
     await scenario("vendor source revisions stay hidden when empty and disclose raw units by keyboard and touch", async (page) => {
       let revised = false;
       await mock(page, () => ({ body: { ...fresh(), sourceRevisions: revised ? [{
@@ -1103,6 +1199,7 @@ async function main() {
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
       if (outputDir) await page.locator("#sourceRevisions").screenshot({ path: path.join(outputDir, "source-revisions-390.png"), animations: "disabled" });
     }, 390, 844, { hasTouch: true });
+    await require("./score-history-browser.cjs")({ scenario, baseURL, expect });
     console.log(`${passed} browser scenarios passed`);
   } finally {
     await browser.close();

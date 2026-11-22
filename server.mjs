@@ -14,6 +14,8 @@ import { hydrateSourceLedger, updateSourceLedger } from "./source-revisions.mjs"
 import { fetchLicensedMarketPulse } from "./market-pulse-source.mjs";
 import { marketPulseReference } from "./market-pulse-reference.mjs";
 
+import { readScoreHistory } from "./score-history.mjs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
 const dashboardCacheFile = path.join(__dirname, "dashboard-cache.json");
@@ -40,6 +42,7 @@ let refreshPromise = null;
 let lastRefreshErrors = [];
 let dashboardWritePromise = Promise.resolve();
 let sourceLedger = hydrateSourceLedger(null);
+let scoreHistoryRequest = null; // This deployment’s tracked records are immutable.
 let pulseRequest = null;
 let pulseCache = null;
 let pulseAttemptAt = -Infinity;
@@ -190,11 +193,13 @@ async function fetchJson(url, headers, deadline = Infinity) {
 }
 
 async function fetchFred(id, deadline = Infinity) {
-  const start = new Date();
+  const requestedAt = new Date();
+  const start = new Date(requestedAt);
   start.setUTCFullYear(start.getUTCFullYear() - 3);
   const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${encodeURIComponent(id)}&cosd=${start.toISOString().slice(0, 10)}`;
-  const series = parseFredCsv(await fetchText(url, {}, deadline));
-  return requireFreshSeries(series, { name: fredMeta[id]?.[0] || id, maxAgeDays: fredMaxAgeDays[id] || 120 });
+  const series = parseFredCsv(await fetchText(url, {}, deadline), id);
+  return requireFreshSeries(series, { name: fredMeta[id]?.[0] || id, now: requestedAt, maxAgeDays: fredMaxAgeDays[id] || 120,
+    dailyClose: id === "VIXCLS" ? "vix" : id === "SP500" ? "cash" : undefined });
 }
 
 async function fetchNasdaq(symbol, assetClass, deadline = Infinity) {
@@ -206,7 +211,7 @@ async function fetchNasdaq(symbol, assetClass, deadline = Infinity) {
   const rows = json?.data?.tradesTable?.rows;
   if (!Array.isArray(rows)) throw new Error(json?.status?.bCodeMessage?.[0]?.errorMessage || `No data for ${symbol}`);
   const series = parseNasdaqRows(rows);
-  return requireFreshSeries(series, { name: symbol, maxAgeDays: 14 });
+  return requireFreshSeries(series, { name: symbol, maxAgeDays: 14, now: end, dailyClose: "cash" });
 }
 
 async function mapLimit(items, limit, worker) {
@@ -797,6 +802,16 @@ async function handleRequest(req, res) {
     url = new URL(req.url, "http://localhost");
   } catch {
     return sendJson(res, 400, { error: "Invalid request URL" });
+  }
+
+  if (url.pathname === "/api/score-history") {
+    try {
+      scoreHistoryRequest ??= readScoreHistory();
+      return sendJson(res, 200, await scoreHistoryRequest);
+    } catch {
+      scoreHistoryRequest = null;
+      return sendJson(res, 503, { error: "近期评分记录暂未通过核验，请稍后重试。" });
+    }
   }
 
   if (url.pathname === "/api/market-pulse") {

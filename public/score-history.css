@@ -1,0 +1,11 @@
+#scoreHistory { scroll-margin-top: 5.5rem; }
+#scoreHistoryContent { max-width: 52rem; min-width: 0; overflow-wrap: anywhere; }
+.history-latest { font-weight: 650; }
+.history-picker { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .8rem; }
+.history-picker label { font-weight: 600; }
+.history-picker select { color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 4px; padding: .5em; max-width: 100%; min-width: 0; font: inherit; }
+.history-picker select:focus-visible { outline: 2px solid var(--orange); outline-offset: 3px; }
+.history-picker button { color: var(--link); text-decoration: underline; text-underline-offset: 3px; }
+.history-reading { margin-top: 1rem; padding: .9rem 1rem; border-left: 3px solid var(--orange); background: var(--paper); }
+.history-reading ul { padding-left: 1.35rem; }
+.history-reading li { font-variant-numeric: tabular-nums; }

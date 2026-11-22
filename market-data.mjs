@@ -1,3 +1,9 @@
+import { equityCloseMinute } from "./public/us-equity-session.js";
+
+const nyClock = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+  hourCycle: "h23", hour: "2-digit", minute: "2-digit",
+});
 const DAY_MS = 86_400_000;
 
 export const fredMaxAgeDays = {
@@ -47,8 +53,14 @@ function uniqueObservations(rows) {
   return [...dates.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
-export function parseFredCsv(csv) {
+export function parseFredCsv(csv, expectedSeries) {
   const lines = String(csv || "").trim().split(/\r?\n/);
+  if (expectedSeries !== undefined) {
+    const columns = lines[0].split(",").map((value) => value.trim());
+    if (columns.length !== 2 || !/^(?:date|observation_date)$/i.test(columns[0]) || columns[1] !== expectedSeries) {
+      throw new Error(`FRED 返回的列名与请求序列 ${expectedSeries} 不符`);
+    }
+  }
   if (lines.length < 2) return [];
   return uniqueObservations(lines.slice(1).map((line) => {
     const comma = line.indexOf(",");
@@ -94,15 +106,35 @@ export function relativePerformance(reference, comparison, periods = 60) {
   };
 }
 
-export function requireFreshSeries(series, { name, maxAgeDays, now = new Date() }) {
+export function requireFreshSeries(series, { name, maxAgeDays, dailyClose, now = new Date() }) {
   if (!Array.isArray(series) || !series.length) throw new Error(`${name} 没有可用数据`);
-  const latestDate = series.reduce((latest, point) => point.date > latest ? point.date : latest, "");
-  if (!validIsoDate(latestDate)) throw new Error(`${name} 最新日期格式无效`);
-  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  const ageDays = Math.floor((todayUtc - Date.parse(`${latestDate}T00:00:00Z`)) / DAY_MS);
-  if (ageDays < -1) throw new Error(`${name} 返回了未来日期 ${latestDate}`);
+  const parts = Object.fromEntries(nyClock.formatToParts(now).map(({ type, value }) => [type, value]));
+  const today = `${parts.year}-${parts.month}-${parts.day}`;
+  const latest = (rows) => rows.reduce((date, row) => row.date > date ? row.date : date, "");
+  const reportedDate = latest(series);
+  if (!validIsoDate(reportedDate)) throw new Error(`${name} 最新日期格式无效`);
+  if (reportedDate > today) throw new Error(`${name} 返回了未来日期 ${reportedDate}（纽约日期 ${today}）`);
+  let rows = series;
+  if (dailyClose) {
+    const minutes = Number(parts.hour) * 60 + Number(parts.minute);
+    rows = series.filter(({ date }) => {
+      const weekday = new Date(date + "T00:00:00Z").getUTCDay();
+      if (weekday === 0 || weekday === 6) return false;
+      const close = equityCloseMinute(date);
+      if (dailyClose === "cash" && close === 0) return false;
+      if (date !== today) return true;
+      // Cboe may publish historical observations on US cash holidays (global trading).
+      // A date without a time of day cannot prove today's final close. For an
+      // unknown or non-cash session, wait for a subsequent New York date.
+      return close > 0 && minutes >= close + (dailyClose === "vix" ? 15 : 0);
+    });
+    if (!rows.length) throw new Error(`${name} 暂无已完成交易时段的日度收盘数据`);
+    if (rows.some(({ value }) => !Number.isFinite(value) || value <= 0)) throw new Error(`${name} 含有无效或非正的收盘值`);
+  }
+  const latestDate = latest(rows);
+  const ageDays = (Date.parse(today) - Date.parse(latestDate)) / DAY_MS;
   if (ageDays > maxAgeDays) throw new Error(`${name} 最新数据停留在 ${latestDate}（${ageDays} 天前）`);
-  return series;
+  return rows;
 }
 
 function monthlyPoint(series, monthsAgo) {

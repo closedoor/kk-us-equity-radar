@@ -22,6 +22,9 @@
 - `history-validation.test.mjs`
 - `validation-evidence.mjs`
 - `validation-evidence.test.mjs`
+- `validation-benchmark.test.mjs`
+- `score-history.mjs`
+- `score-history.test.mjs`
 - `calendar.mjs`
 - `calendar.test.mjs`
 - `market-data.mjs`
@@ -38,6 +41,7 @@
 - `backend-reliability.test.mjs`
 - `fixtures/earnings-data.json`
 - `scripts/browser-smoke.cjs`
+- `scripts/score-history-browser.cjs`
 - `scripts/product-audit.cjs`
 - `scripts/scoring-audit.mjs`
 - `scripts/check-earnings.mjs`

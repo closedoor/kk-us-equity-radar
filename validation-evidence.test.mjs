@@ -12,6 +12,10 @@ import { projectDashboard } from "./public/dashboard-state.js";
 import { hydrateSourceLedger, updateSourceLedger } from "./source-revisions.mjs";
 
 const capturedAt = "2026-11-05T22:30:00.000Z";
+function frozenClock(at) {
+  return `const NativeDate = Date, fixed = NativeDate.parse(${JSON.stringify(at)});
+    globalThis.Date = class extends NativeDate { constructor(...args) { super(...(args.length ? args : [fixed])); } static now() { return fixed; } };\n`;
+}
 const evaluateEvidence = (records, prices, options = {}) => evaluate(records, prices, { asOf: "2026-12-01T00:00:00.000Z", ...options });
 function snapshot() {
   const fixture = JSON.parse(readFileSync(new URL("./dashboard-cache.json", import.meta.url)));
@@ -42,6 +46,8 @@ test("unpublished, expired, manual and unfinished observations cannot enter auto
     data => { data.validationReference.date = "2026-11-06"; },
     data => { delete data.validationReference; },
     data => { data.validationReference.close = 0; },
+    data => { data.validationReference.date = "2026-11-01"; }, // Sunday cannot have a cash index close
+    data => { data.indicators.find(row => row.available).date = null; },
   ]) {
     const data = snapshot(); change(data);
     assert.throws(() => capture(data));
@@ -124,10 +130,50 @@ test("New York dates around UTC midnight and DST determine the observation day",
   const data = snapshot();
   data.generatedAt = "2026-11-06T01:00:00.000Z";
   assert.equal(capture(data, data.generatedAt).observationDate, "2026-11-05");
-  data.generatedAt = "2026-03-09T03:59:00.000Z";
+  data.generatedAt = "2026-03-10T03:59:00.000Z";
   data.validationReference.date = "2026-03-06";
   data.indicators.forEach(row => { if (row.date > "2026-03-08") row.date = "2026-03-06"; });
-  assert.equal(capture(data, data.generatedAt).observationDate, "2026-03-08");
+  assert.equal(capture(data, data.generatedAt).observationDate, "2026-03-09");
+});
+
+test("new captures require an actual completed NYSE session, including the half-day close", () => {
+  for (const at of ["2026-11-21T23:00:00Z", "2026-11-26T22:30:00Z", "2026-11-25T20:59:59Z", "2026-11-27T17:59:59Z", "2029-01-09T22:00:00Z"]) {
+    const data = snapshot(); data.generatedAt = at;
+    assert.throws(() => capture(data, at), /session|calendar/i, at);
+  }
+  const data = snapshot();
+  data.generatedAt = "2026-11-27T18:00:00Z";
+  const record = capture(data, data.generatedAt);
+  assert.equal(record.capturePolicy, "nyse-post-close-v1");
+  assert.equal(isEvidence(record), true);
+  data.generatedAt = "2026-11-27T17:59:59Z";
+  assert.throws(() => capture(data, "2026-11-27T18:10:00Z"), /snapshot.*close/i);
+  data.generatedAt = "2026-11-24T22:15:00Z";
+  assert.throws(() => capture(data, "2026-11-25T21:30:00Z"), /snapshot.*close/i);
+  const old = JSON.parse(readFileSync(new URL("./evidence/forward/2026-11-05_model-4.7.0.json", import.meta.url)));
+  assert.equal(isEvidence(old), true, "genuine prior-cadence observation remains readable");
+});
+
+test("missing expected entry, interior or exit closes cannot shift the horizon to a later date", () => {
+  for (const missing of ["2026-11-06", "2026-11-09", "2026-11-10"]) {
+    const m = evaluateEvidence([capture()], prices.filter(row => row.date !== missing), { horizons: [2] }).outcomes[0];
+    assert.equal(m.samples, 0, missing);
+    assert.equal(m.incompleteBenchmarkSamples, 1, missing);
+    assert.equal(m.immatureSamples, 0, missing);
+    assert.equal(m.meanReturnPercent, null, missing);
+  }
+});
+
+test("Thanksgiving is excluded and an early-close benchmark is not known at 12:59 NY time", () => {
+  const data = snapshot();
+  const at = "2026-11-24T22:30:00Z"; data.generatedAt = at;
+  const record = capture(data, at);
+  const pts = [{date:"2026-11-25",value:100}, {date:"2026-11-27",value:90}];
+  const before = (rows, time) => evaluate([record], rows, {horizons:[1],asOf:time}).outcomes[0];
+  assert.throws(() => before(pts, "2026-11-27T17:59:59Z"), /close|future/i);
+  assert.equal(before(pts.slice(0,1), "2026-11-27T17:59:59Z").immatureSamples, 1);
+  assert.equal(before(pts, "2026-11-27T18:00:00Z").outcomes[0].exitDate, "2026-11-27");
+  assert.throws(() => before([...pts,{date:"2026-11-26",value:130}], "2026-11-27T18:01:00Z"), /session|closed/i);
 });
 
 test("insufficient coverage remains unavailable instead of being evaluated as a calm score", () => {
@@ -147,15 +193,34 @@ test("a missing market reference is recorded explicitly without excluding a real
   assert.equal(record.marketReference, null);
 });
 
+test("a holiday or pre-close CLI invocation skips without fetching or writing any files", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "radar-closed-capture-"));
+  try {
+    const preload = path.join(dir, "clock.mjs");
+    const args = ["--import", preload, new URL("./scripts/capture-evidence.mjs", import.meta.url).pathname,
+      "--attempts", "1", "--output-dir", path.join(dir, "records"), "--summary", path.join(dir, "summary.json"), "--ledger-output", path.join(dir, "seed.json")];
+    for (const [time, date, reason] of [
+      ["2026-11-26T22:30:00Z", "2026-11-26", "closed-session"],
+      ["2026-11-27T17:59:59Z", "2026-11-27", "before-session-close"],
+      ["2026-11-21T22:30:00Z", "2026-11-21", "closed-session"],
+    ]) {
+      await writeFile(preload, frozenClock(time) + "globalThis.fetch = () => { throw Error('No network permitted'); };");
+      const { stdout } = await promisify(execFile)(process.execPath, args, { timeout: 5000 });
+      assert.deepEqual(JSON.parse(stdout), { saved: false, skipped: reason, observationDate: date });
+      assert.deepEqual(await readdir(dir), ["clock.mjs"]);
+    }
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
 test("the capture CLI preserves its first immutable daily record across repeated runs", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "radar-evidence-cli-"));
   try {
     const data = snapshot();
-    data.generatedAt = new Date().toISOString();
+    data.generatedAt = capturedAt;
     data.sourceLedger = hydrateSourceLedger({ version: 1, sources: { PAYEMS: { checkedAt: data.generatedAt,
       points: [{ date: "2026-09-01", value: 150000 }] } }, revisions: [] });
     const preload = path.join(dir, "fetch.mjs");
-    await writeFile(preload, `globalThis.fetch = async url => {
+    await writeFile(preload, frozenClock(capturedAt) + `globalThis.fetch = async url => {
       if (String(url).includes('/api/dashboard')) return new Response(${JSON.stringify(JSON.stringify(data))});
       if (String(url).includes('/fredgraph.csv')) return new Response('observation_date,SP500\\n2026-11-04,5000');
       throw Error('Unexpected test network request');
@@ -176,8 +241,8 @@ test("the capture CLI preserves its first immutable daily record across repeated
     const summary = JSON.parse(await readFile(path.join(dir, "summary.json"), "utf8"));
     assert.equal(summary.observedSamples, 1);
     assert.equal(summary.outcomes[0].samples, 0);
-    data.sourceLedger = updateSourceLedger(data.sourceLedger, { PAYEMS: [{ date: "2026-09-01", value: 150010 }] }, new Date().toISOString()).ledger;
-    await writeFile(preload, `globalThis.fetch = async url => {
+    data.sourceLedger = updateSourceLedger(data.sourceLedger, { PAYEMS: [{ date: "2026-09-01", value: 150010 }] }, "2026-11-05T22:30:01.000Z").ledger;
+    await writeFile(preload, frozenClock("2026-11-05T22:30:02.000Z") + `globalThis.fetch = async url => {
       if (String(url).includes('/api/dashboard')) return new Response(${JSON.stringify(JSON.stringify(data))});
       throw Error('test benchmark outage');
     };`);

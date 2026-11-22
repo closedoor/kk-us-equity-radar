@@ -2,7 +2,7 @@ import { mkdir, readFile, readdir, writeFile, unlink, link } from "node:fs/promi
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import { createEvidence, evaluateEvidence, isEvidence } from "../validation-evidence.mjs";
+import { captureWindow, createEvidence, evaluateEvidence, isEvidence } from "../validation-evidence.mjs";
 import { parseFredCsv } from "../market-data.mjs";
 import { hydrateSourceLedger, isSourceLedger } from "../source-revisions.mjs";
 import { createPublicationService } from "../publication.mjs";
@@ -34,6 +34,13 @@ async function requestText(url, deadline = Infinity) {
   } finally { clearTimeout(timer); controller.abort(); }
 }
 
+// A delayed weekday cron or manual dispatch need not fall in an eligible NY session.
+const scheduled = captureWindow(Date.now());
+if (scheduled.state === "unverified-calendar") throw new Error("NYSE calendar is not verified for this capture date");
+if (scheduled.state !== "post-close") {
+  console.log(JSON.stringify({ saved: false, skipped: scheduled.state, observationDate: scheduled.date }));
+  process.exit(0);
+}
 await mkdir(outputDir, { recursive: true });
 let record;
 let capturedLedger;
@@ -105,32 +112,73 @@ const records = [];
 for (const name of (await readdir(outputDir)).filter(name => /^\d{4}-\d{2}-\d{2}_model-\d+\.\d+\.\d+\.json$/.test(name))) {
   records.push(JSON.parse(await readFile(path.join(outputDir, name), "utf8")));
 }
-let prices = [];
 let benchmarkError = null;
-// Validate the stored cohort before treating any later problem as a benchmark outage.
+// Validate the stored cohort first: a corrupt observation is not a benchmark outage.
 let evaluation = evaluateEvidence(records, [], { scoringVersion: record.scoringVersion });
 let retainedResults = false;
+const cohort = new Map(records.filter(row => row.scoringVersion === record.scoringVersion).map(row => [row.observationDate, row]));
+const knownReference = [...cohort.values()].map(row => row.marketReference?.date ?? "").sort().at(-1);
+let previous = null;
 try {
-  prices = parseFredCsv(await requestText("https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500"));
-  if (!prices.length) throw new Error("Benchmark has no valid observations");
-  evaluation = evaluateEvidence(records, prices, { scoringVersion: record.scoringVersion });
+  const prior = JSON.parse(await readFile(summaryFile, "utf8"));
+  const at = Date.parse(prior.evaluatedAt);
+  const accepted = prior.version === 1 && prior.benchmark?.series === "SP500"
+    && (!prior.benchmark.error || prior.retainedResults === true) && Number.isFinite(at) && at <= Date.now()
+    && prior.scoringVersions?.length === 1 && prior.scoringVersions[0] === record.scoringVersion
+    && Number.isInteger(prior.observedSamples) && prior.observedSamples <= cohort.size
+    && Array.isArray(prior.outcomes) && prior.outcomes.length === 2
+    && [21, 63].every(days => prior.outcomes.some(h => h.tradingDays === days))
+    && prior.outcomes.every(h => Array.isArray(h.outcomes) && h.samples === h.outcomes.length
+      && [h.immatureSamples, h.incompleteBenchmarkSamples ?? 0].every(n => Number.isInteger(n) && n >= 0)
+      && h.samples + h.immatureSamples + (h.incompleteBenchmarkSamples || 0) <= cohort.size - evaluation.outcomes[0].unavailableScoreSamples
+      && new Set(h.outcomes.map(o => o.observationDate)).size === h.samples
+      && h.outcomes.every(o => { const r = cohort.get(o.observationDate);
+        return r && r.score !== null && r.score === o.score && r.coverage === o.coverage && o.scoringVersion === record.scoringVersion
+          && Date.parse(r.capturedAt) <= at && o.observationDate < o.entryDate && o.entryDate < o.exitDate
+          && Number.isFinite(o.returnPercent) && Number.isFinite(o.drawdownPercent);
+      }));
+  if (accepted) previous = prior;
+} catch { /* First evaluation or no readable previous summary. */ }
+let latestObservationDate = previous?.benchmark.latestObservationDate ?? null;
+try {
+  const prices = parseFredCsv(await requestText("https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500"), "SP500");
+  if (!prices.length) throw new Error("Benchmark has no valid SP500 observations");
+  const last = prices.at(-1).date;
+  if (last < (knownReference || "") || last < (latestObservationDate || "")) throw new Error("标普基准价格截断：最新日期早于已核验价格");
+  const next = evaluateEvidence(records, prices, { scoringVersion: record.scoringVersion });
+  // A non-empty HTTP 200 can contain only a suffix of price history. Never lose or
+  // re-date an observed outcome; allow legitimate price revisions on the same dates.
+  for (const old of previous?.outcomes || []) {
+    const fresh = new Map(next.outcomes.find(h => h.tradingDays === old.tradingDays).outcomes.map(o => [o.observationDate, o]));
+    if (!old.outcomes.every(o => fresh.get(o.observationDate)?.entryDate === o.entryDate && fresh.get(o.observationDate)?.exitDate === o.exitDate)) {
+      throw new Error("标普基准价格缺失：无法复核已观察到的收益区间");
+    }
+  }
+  evaluation = next;
+  latestObservationDate = last;
 } catch (error) {
   benchmarkError = error.message;
-  try {
-    const previous = JSON.parse(await readFile(summaryFile, "utf8"));
-    if (previous.version === 1 && previous.scoringVersions?.length === 1 && previous.scoringVersions[0] === record.scoringVersion
-      && Array.isArray(previous.outcomes) && previous.outcomes.every(row => [21, 63].includes(row.tradingDays))) {
-      evaluation = { ...evaluation, evaluatedAt: previous.evaluatedAt, status: previous.status, outcomes: previous.outcomes };
-      retainedResults = true;
-    }
-  } catch { /* A first capture may have no previous successful result. */ }
+  retainedResults = Boolean(previous);
+  // A scoreless observation is excluded regardless of benchmark health. Preserve
+  // old verified counts; new scored observations have unknown maturity during outage.
+  const outcomes = evaluation.outcomes.map(h => {
+    const old = previous?.outcomes.find(r => r.tradingDays === h.tradingDays);
+    const row = { ...(old || h), unavailableScoreSamples: h.unavailableScoreSamples, immatureSamples: old?.immatureSamples ?? 0,
+      incompleteBenchmarkSamples: old?.incompleteBenchmarkSamples ?? 0 };
+    const unknown = evaluation.observedSamples - row.samples - row.immatureSamples - row.unavailableScoreSamples - row.incompleteBenchmarkSamples;
+    if (unknown < 0) throw new Error("Retained results conflict with immutable forward cohort");
+    if (unknown > 0) row.unknownSamples = unknown;
+    else delete row.unknownSamples;
+    return row;
+  });
+  evaluation = { ...evaluation, evaluatedAt: previous?.evaluatedAt ?? null, status: previous?.status ?? evaluation.status, outcomes };
 }
 const summary = {
   ...evaluation,
   retainedResults,
   generatedAt: new Date().toISOString(),
   source,
-  benchmark: { series: "SP500", source: "https://fred.stlouisfed.org/series/SP500", error: benchmarkError },
+  benchmark: { series: "SP500", source: "https://fred.stlouisfed.org/series/SP500", latestObservationDate, error: benchmarkError },
 };
 await mkdir(path.dirname(summaryFile), { recursive: true });
 const summaryTemp = `${summaryFile}.${randomUUID()}.tmp`;

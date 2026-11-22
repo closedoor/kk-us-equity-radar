@@ -131,3 +131,31 @@ test("relative performance uses matching endpoints and tolerates missing interio
   assert.equal(relativePerformance(reference, comparison, 0), null);
   assert.equal(relativePerformance(reference.filter((point) => point.date !== "2026-09-04"), comparison, 1), null);
 });
+
+test("FRED rejects a misrouted series or ambiguous columns even when its numbers look like a valid VIX", () => {
+  for (const header of ["observation_date,SP500", "DATE,VIXCLS,SP500", "other,VIXCLS"]) {
+    assert.throws(() => parseFredCsv(header + "\n2026-11-19,28.44", "VIXCLS"), /VIXCLS/);
+  }
+  assert.deepEqual(parseFredCsv("\uFEFFobservation_date,VIXCLS\r\n2026-11-19,28.44", "VIXCLS"), [{ date: "2026-11-19", value: 28.44 }]);
+});
+
+test("observations cannot come from tomorrow in New York even after midnight UTC", () => {
+  assert.throws(() => requireFreshSeries([{ date: "2026-11-24", value: 17 }], {
+    name: "VIX", maxAgeDays: 14, now: new Date("2026-11-24T02:00:00Z"),
+  }), /未来日期/);
+});
+
+test("daily closes never consume a provisional regular-session or early-close price", () => {
+  const prices = [{ date: "2026-11-24", value: 100 }, { date: "2026-11-25", value: 90 }];
+  const select = (rows, at, dailyClose) => requireFreshSeries(rows, { name: "market", maxAgeDays: 14, dailyClose, now: new Date(at) });
+  assert.deepEqual(select(prices, "2026-11-25T20:59:59Z", "cash"), prices.slice(0, 1));
+  assert.deepEqual(select(prices, "2026-11-25T21:00:00Z", "cash"), prices);
+  assert.deepEqual(select(prices, "2026-11-25T21:10:00Z", "vix"), prices.slice(0, 1));
+  assert.deepEqual(select(prices, "2026-11-25T21:16:00Z", "vix"), prices);
+  const early = [...prices, { date: "2026-11-26", value: 999 }, { date: "2026-11-27", value: 80 }];
+  assert.deepEqual(select(early, "2026-11-27T17:59:59Z", "cash"), prices);
+  assert.deepEqual(select(early, "2026-11-27T18:00:00Z", "cash"), [...prices, early[3]]);
+  const nonpositive = [...prices, { date: "2026-11-27", value: -1 }];
+  assert.throws(() => select(nonpositive, "2026-11-27T23:00:00Z", "vix"), /非正/);
+  assert.throws(() => select([prices[1]], "2026-11-25T16:00:00Z", "cash"), /收盘/);
+});
