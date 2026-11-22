@@ -43,3 +43,7 @@ test('calendar provenance distinguishes reference, cached after failure, and FRE
     assert.equal(calendarAgenda([row('inflation','2026-12-10')],{sources:{bls:s}},at('2026-11-22T00:00:00Z')).macro[0].grade,grade);
   }
 });
+test('when two releases share a date, two distinct confirmed times are not both called nearest',()=>{
+  const rows=[row('inflation','2026-12-10','2026-12-10T13:30:00Z'),row('fed','2026-12-10','2026-12-10T19:00:00Z'),row('payrolls','2026-12-10')];
+  assert.deepEqual(calendarAgenda(rows,sync,at('2026-12-10T12:00:00Z')).macro.map(x=>[x.indicatorId,x.next]),[['inflation',true],['fed',false],['payrolls',true]]);
+});

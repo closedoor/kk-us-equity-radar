@@ -27,6 +27,7 @@
 - `score-history.test.mjs`
 - `calendar.mjs`
 - `calendar.test.mjs`
+- `calendar-agenda.test.mjs`
 - `market-data.mjs`
 - `market-data.test.mjs`
 - `market-pulse-source.mjs`
@@ -41,6 +42,8 @@
 - `backend-reliability.test.mjs`
 - `fixtures/earnings-data.json`
 - `scripts/browser-smoke.cjs`
+- `scripts/calendar-agenda-browser.cjs`
+- `scripts/live-release.cjs`
 - `scripts/score-history-browser.cjs`
 - `scripts/product-audit.cjs`
 - `scripts/scoring-audit.mjs`
@@ -143,3 +146,5 @@ Render 免费服务 15 分钟没人访问会休眠。朋友第一次打开可能
 供应商返回 `{quotes, errors?}`。每个 `quotes` 元素为 `{symbol, value, changePercent, date, at, session, source}`。标的限 `SPX`、`RSP`、`QQQ`、`SMH`、`VIX`、`VXSMH`，不得重复。`date` 为纽约交易日 `YYYY-MM-DD`，`at` 为带明确时区的观察时间，`session` 为 `regular`、`close` 或 `unconfirmed`，`source` 为可公开点击的 HTTPS 来源页，不能含凭证。`changePercent` 相对上一常规收盘，无法核实则为 `null`。服务端补上 `checkedAt` 检查时点，供应商错误只公开摘要。请勿把请求时间作为报价时间，也勿把盘后变动或没有收盘证据的延时报价标为 `close`。
 
 行情访问与 `/api/dashboard` 相互独立。行情服务失败会保留已有报价和原观察时间，页面重新核对是否仍具备判定条件；历史记录不能替代当天未到的报价。公开站自动分发的授权范围需按供应商核对；Cboe 对开放网站的延时报价展示有单独的许可条款。
+
+每次正式发布，Live release acceptance 等待正式站接口返回该次提交和产品版本，再用手机视口核对页面日历、来源、北京时间、财报日期及标签。该流程只读取公开页面；不会触发强制刷新，不使用个人数据。

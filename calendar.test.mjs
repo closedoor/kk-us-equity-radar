@@ -929,3 +929,18 @@ test("a restart cannot replay calendar identifications made by the old combined-
     sources:{bls:{mode:"fred-fallback"}}});
   assert.deepEqual(service.snapshot().cpi,[{date:"2025-11-20",period:null}]);
 });
+
+test("a verified next report survives absent financial history, while today's published report is not a new estimate", () => {
+  const config = {fetchText: async () => "", now: () => new Date("2026-11-22T12:00:00Z"), aiEarnings: [
+    {ticker:"IR", nextReportDate:"2026-12-09", nextReportStatus:"confirmed"},
+    {ticker:"RELEASED", released:"2026-11-22"},
+  ]};
+  const service = createCalendarService(config);
+  service.hydrate({earnings:{RELEASED:{date:"2026-11-22"}}});
+  const [confirmed, released] = service.resolvedAiEarnings();
+  assert.equal(confirmed.snapshotStale, true);
+  assert.equal(confirmed.nextReportDate, "2026-12-09");
+  assert.equal(confirmed.nextReportBasis, "company");
+  assert.equal(released.nextReportBasis, "quarterly-fallback");
+  assert.equal(released.nextReportDate, null);
+});

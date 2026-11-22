@@ -559,12 +559,14 @@ export function createCalendarService({
         snapshotValidThrough,
         snapshotLabel: Number.isFinite(snapshotAgeDays) && snapshotAgeDays >= 0 ? `资料截至 ${company.released}` : "资料日期待核对",
       };
-      const automaticIsFuture = validIsoDate(automatic?.date) && automatic.date >= today;
-      if (confirmedSchedule && company.nextReportDate >= today) return {
+      // A verified future announcement remains useful even when the latest financial snapshot is unavailable.
+      const isNextDate = (date) => validIsoDate(date) && date >= today &&
+        (!validIsoDate(company.released) || date > company.released);
+      if (company.nextReportStatus === "confirmed" && isNextDate(company.nextReportDate)) return {
         ...company, ...snapshot, nextReportLabel: company.nextReportLabel || company.nextReportDate, nextReportBasis: "company",
       };
 
-      if (automaticIsFuture && (!validIsoDate(company.released) || isLaterQuarter(automatic.date))) {
+      if (isNextDate(automatic?.date)) {
         return {
           ...company,
           ...snapshot,
