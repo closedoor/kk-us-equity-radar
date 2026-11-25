@@ -1,18 +1,19 @@
 {
   "version": 1,
-  "evaluatedAt": "2026-11-21T03:21:14.670Z",
+  "evaluatedAt": "2026-11-25T04:58:30.777Z",
   "status": "awaiting-outcomes",
   "scoringVersions": [
     "4.7.0"
   ],
-  "observedSamples": 12,
+  "observedSamples": 13,
   "firstObservationDate": "2026-11-05",
-  "lastObservationDate": "2026-11-20",
+  "lastObservationDate": "2026-11-24",
   "outcomes": [
     {
       "tradingDays": 21,
       "immatureSamples": 3,
-      "unavailableScoreSamples": 9,
+      "unavailableScoreSamples": 10,
+      "incompleteBenchmarkSamples": 0,
       "samples": 0,
       "meanReturnPercent": null,
       "meanDrawdownPercent": null,
@@ -69,7 +70,8 @@
     {
       "tradingDays": 63,
       "immatureSamples": 3,
-      "unavailableScoreSamples": 9,
+      "unavailableScoreSamples": 10,
+      "incompleteBenchmarkSamples": 0,
       "samples": 0,
       "meanReturnPercent": null,
       "meanDrawdownPercent": null,
@@ -126,16 +128,18 @@
   ],
   "limitations": [
     "前瞻样本从实际抓取日开始，不补造过去判断。",
-    "下一纽约日期之后首个实际市场收盘价作为起点；按实际价格观察计交易日。",
+    "新版只在纽约已核对的交易日收盘后采集，较早的留存记录保留原采集时间。",
+    "从观察日之后首个交易日收盘起算，按已核对的交易日历计数；缺少任一应有收盘或日历未经核对时不计算结果。",
     "每日窗口互相重叠，样本并不独立；统计为描述结果，未校准概率或交易收益。",
     "价格指数不含分红、交易成本或仓位策略。"
   ],
   "retainedResults": false,
-  "generatedAt": "2026-11-21T03:21:14.806Z",
+  "generatedAt": "2026-11-25T04:58:30.781Z",
   "source": "https://kk-us-equity-radar.onrender.com/api/dashboard?evidence=1",
   "benchmark": {
     "series": "SP500",
     "source": "https://fred.stlouisfed.org/series/SP500",
+    "latestObservationDate": "2026-11-23",
     "error": null
   }
 }
