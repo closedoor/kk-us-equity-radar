@@ -1,18 +1,18 @@
 {
   "version": 1,
-  "evaluatedAt": "2026-11-26T04:16:02.422Z",
+  "evaluatedAt": "2026-11-28T04:04:26.871Z",
   "status": "awaiting-outcomes",
   "scoringVersions": [
     "4.7.0"
   ],
-  "observedSamples": 14,
+  "observedSamples": 15,
   "firstObservationDate": "2026-11-05",
-  "lastObservationDate": "2026-11-25",
+  "lastObservationDate": "2026-11-27",
   "outcomes": [
     {
       "tradingDays": 21,
       "immatureSamples": 3,
-      "unavailableScoreSamples": 11,
+      "unavailableScoreSamples": 12,
       "incompleteBenchmarkSamples": 0,
       "samples": 0,
       "meanReturnPercent": null,
@@ -70,7 +70,7 @@
     {
       "tradingDays": 63,
       "immatureSamples": 3,
-      "unavailableScoreSamples": 11,
+      "unavailableScoreSamples": 12,
       "incompleteBenchmarkSamples": 0,
       "samples": 0,
       "meanReturnPercent": null,
@@ -134,12 +134,12 @@
     "价格指数不含分红、交易成本或仓位策略。"
   ],
   "retainedResults": false,
-  "generatedAt": "2026-11-26T04:16:02.427Z",
+  "generatedAt": "2026-11-28T04:04:26.876Z",
   "source": "https://kk-us-equity-radar.onrender.com/api/dashboard?evidence=1",
   "benchmark": {
     "series": "SP500",
     "source": "https://fred.stlouisfed.org/series/SP500",
-    "latestObservationDate": "2026-11-24",
+    "latestObservationDate": "2026-11-25",
     "error": null
   }
 }

@@ -1,0 +1,942 @@
+{
+  "version": 1,
+  "observationDate": "2026-11-27",
+  "capturePolicy": "nyse-post-close-v1",
+  "capturedAt": "2026-11-28T04:04:26.670Z",
+  "generatedAt": "2026-11-28T04:04:22.427Z",
+  "scoringVersion": "4.7.0",
+  "producer": {
+    "productVersion": "4.8.5",
+    "buildCommit": "03c42110e0376d487cc9afb0f379413b5d9d03a5",
+    "dataQualityVersion": 1
+  },
+  "source": "https://kk-us-equity-radar.onrender.com/api/dashboard?evidence=1",
+  "scoringContext": {
+    "drawdownPercent": 8.136023727031716,
+    "breadthRiskPercent": 20
+  },
+  "score": null,
+  "coverage": 57,
+  "indicators": [
+    {
+      "id": "oil",
+      "weight": 5,
+      "available": true,
+      "risk": 51.9,
+      "date": "2026-11-24"
+    },
+    {
+      "id": "inflation",
+      "weight": 10,
+      "available": false,
+      "risk": null,
+      "date": "2026-10-01"
+    },
+    {
+      "id": "fed",
+      "weight": 10,
+      "available": false,
+      "risk": null,
+      "date": "2026-11-27"
+    },
+    {
+      "id": "rates",
+      "weight": 10,
+      "available": true,
+      "risk": 76.4,
+      "date": "2026-11-25"
+    },
+    {
+      "id": "vix",
+      "weight": 5,
+      "available": true,
+      "risk": 46.5,
+      "date": "2026-11-26"
+    },
+    {
+      "id": "unemployment",
+      "weight": 8,
+      "available": false,
+      "risk": null,
+      "date": "2026-10-01"
+    },
+    {
+      "id": "payrolls",
+      "weight": 5,
+      "available": false,
+      "risk": null,
+      "date": "2026-10-01"
+    },
+    {
+      "id": "aiEarnings",
+      "weight": 5,
+      "available": true,
+      "risk": 28.7,
+      "date": "2026-11-17"
+    },
+    {
+      "id": "credit",
+      "weight": 15,
+      "available": true,
+      "risk": 21.8,
+      "date": "2026-11-26"
+    },
+    {
+      "id": "earningsBreadth",
+      "weight": 10,
+      "available": false,
+      "risk": null,
+      "date": null
+    },
+    {
+      "id": "breadth",
+      "weight": 10,
+      "available": true,
+      "risk": 20,
+      "date": "2026-11-25"
+    },
+    {
+      "id": "sp500",
+      "weight": 7,
+      "available": true,
+      "risk": 56.5,
+      "date": "2026-11-25"
+    }
+  ],
+  "marketReference": {
+    "series": "SP500",
+    "date": "2026-11-25",
+    "close": 7182.78
+  },
+  "publicationSchedule": {
+    "version": 1,
+    "sources": {
+      "cpi": {
+        "period": "2026-10",
+        "publishedAt": "2026-11-10T13:30:00.000Z",
+        "checkedAt": "2026-11-28T04:04:20.425Z",
+        "source": "https://www.bls.gov/news.release/cpi.nr0.htm",
+        "error": null
+      },
+      "employment": {
+        "period": "2026-10",
+        "publishedAt": "2026-11-06T13:30:00.000Z",
+        "checkedAt": "2026-11-28T04:04:20.329Z",
+        "source": "https://www.bls.gov/news.release/empsit.nr0.htm",
+        "error": null
+      },
+      "pce": {
+        "period": "2026-10",
+        "publishedAt": "2026-11-25T13:30:00.000Z",
+        "checkedAt": "2026-11-28T04:04:19.825Z",
+        "source": "https://www.bea.gov/data/personal-consumption-expenditures-price-index",
+        "releaseUrl": "https://www.bea.gov/news/2026/personal-income-and-outlays-october-2026",
+        "error": null
+      }
+    }
+  },
+  "sourceRevisions": [
+    {
+      "series": "NFCI",
+      "date": "2024-12-20",
+      "before": -0.481,
+      "after": -0.476,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2024-12-27",
+      "before": -0.485,
+      "after": -0.48,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-01-03",
+      "before": -0.489,
+      "after": -0.485,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-01-10",
+      "before": -0.495,
+      "after": -0.491,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-01-17",
+      "before": -0.5,
+      "after": -0.496,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-01-24",
+      "before": -0.505,
+      "after": -0.501,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-01-31",
+      "before": -0.508,
+      "after": -0.504,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-02-07",
+      "before": -0.507,
+      "after": -0.503,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-02-14",
+      "before": -0.503,
+      "after": -0.499,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-02-21",
+      "before": -0.493,
+      "after": -0.489,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-02-28",
+      "before": -0.479,
+      "after": -0.476,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-03-07",
+      "before": -0.462,
+      "after": -0.459,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-03-14",
+      "before": -0.443,
+      "after": -0.44,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-03-21",
+      "before": -0.424,
+      "after": -0.422,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-03-28",
+      "before": -0.407,
+      "after": -0.404,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-04-04",
+      "before": -0.392,
+      "after": -0.389,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-04-11",
+      "before": -0.381,
+      "after": -0.379,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-04-18",
+      "before": -0.381,
+      "after": -0.379,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-04-25",
+      "before": -0.388,
+      "after": -0.386,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-05-02",
+      "before": -0.401,
+      "after": -0.399,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-05-09",
+      "before": -0.419,
+      "after": -0.417,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-05-16",
+      "before": -0.437,
+      "after": -0.434,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-05-23",
+      "before": -0.452,
+      "after": -0.449,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-05-30",
+      "before": -0.465,
+      "after": -0.461,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-06-06",
+      "before": -0.475,
+      "after": -0.471,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-06-13",
+      "before": -0.482,
+      "after": -0.479,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-06-20",
+      "before": -0.489,
+      "after": -0.485,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-06-27",
+      "before": -0.496,
+      "after": -0.491,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-07-04",
+      "before": -0.502,
+      "after": -0.498,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-07-11",
+      "before": -0.509,
+      "after": -0.504,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-07-18",
+      "before": -0.513,
+      "after": -0.509,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-07-25",
+      "before": -0.517,
+      "after": -0.513,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-08-01",
+      "before": -0.52,
+      "after": -0.516,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-08-08",
+      "before": -0.522,
+      "after": -0.518,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-08-15",
+      "before": -0.524,
+      "after": -0.52,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-08-22",
+      "before": -0.526,
+      "after": -0.521,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-08-29",
+      "before": -0.527,
+      "after": -0.522,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-09-05",
+      "before": -0.527,
+      "after": -0.522,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-09-12",
+      "before": -0.527,
+      "after": -0.522,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-09-19",
+      "before": -0.526,
+      "after": -0.521,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-09-26",
+      "before": -0.526,
+      "after": -0.521,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-10-03",
+      "before": -0.525,
+      "after": -0.52,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-10-10",
+      "before": -0.523,
+      "after": -0.518,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-10-17",
+      "before": -0.52,
+      "after": -0.515,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-10-24",
+      "before": -0.517,
+      "after": -0.512,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-10-31",
+      "before": -0.514,
+      "after": -0.509,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-11-07",
+      "before": -0.511,
+      "after": -0.505,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-11-14",
+      "before": -0.509,
+      "after": -0.503,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-11-21",
+      "before": -0.508,
+      "after": -0.503,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-11-28",
+      "before": -0.51,
+      "after": -0.504,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-12-05",
+      "before": -0.513,
+      "after": -0.507,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-12-12",
+      "before": -0.519,
+      "after": -0.512,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-12-19",
+      "before": -0.528,
+      "after": -0.521,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2025-12-26",
+      "before": -0.539,
+      "after": -0.533,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-01-02",
+      "before": -0.551,
+      "after": -0.544,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-01-09",
+      "before": -0.562,
+      "after": -0.555,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-01-16",
+      "before": -0.569,
+      "after": -0.562,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-01-23",
+      "before": -0.571,
+      "after": -0.564,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-01-30",
+      "before": -0.567,
+      "after": -0.56,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-02-06",
+      "before": -0.559,
+      "after": -0.552,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-02-13",
+      "before": -0.545,
+      "after": -0.539,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-02-20",
+      "before": -0.528,
+      "after": -0.522,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-02-27",
+      "before": -0.509,
+      "after": -0.503,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-03-06",
+      "before": -0.49,
+      "after": -0.485,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-03-13",
+      "before": -0.474,
+      "after": -0.469,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-03-20",
+      "before": -0.464,
+      "after": -0.46,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-03-27",
+      "before": -0.46,
+      "after": -0.456,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-04-03",
+      "before": -0.465,
+      "after": -0.461,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-04-10",
+      "before": -0.475,
+      "after": -0.471,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-04-17",
+      "before": -0.487,
+      "after": -0.482,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-04-24",
+      "before": -0.497,
+      "after": -0.492,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-05-01",
+      "before": -0.505,
+      "after": -0.5,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-05-08",
+      "before": -0.51,
+      "after": -0.504,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-05-15",
+      "before": -0.512,
+      "after": -0.506,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-05-22",
+      "before": -0.511,
+      "after": -0.505,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-05-29",
+      "before": -0.51,
+      "after": -0.503,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-06-05",
+      "before": -0.509,
+      "after": -0.502,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-06-12",
+      "before": -0.508,
+      "after": -0.501,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-06-19",
+      "before": -0.509,
+      "after": -0.503,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-06-26",
+      "before": -0.512,
+      "after": -0.506,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-07-03",
+      "before": -0.517,
+      "after": -0.511,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-07-10",
+      "before": -0.522,
+      "after": -0.517,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-07-17",
+      "before": -0.528,
+      "after": -0.522,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-07-24",
+      "before": -0.534,
+      "after": -0.529,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-07-31",
+      "before": -0.539,
+      "after": -0.534,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-08-07",
+      "before": -0.544,
+      "after": -0.538,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-08-14",
+      "before": -0.548,
+      "after": -0.542,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-08-21",
+      "before": -0.549,
+      "after": -0.542,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-08-28",
+      "before": -0.547,
+      "after": -0.54,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-09-04",
+      "before": -0.541,
+      "after": -0.535,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-09-11",
+      "before": -0.532,
+      "after": -0.526,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-09-18",
+      "before": -0.52,
+      "after": -0.516,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-09-25",
+      "before": -0.507,
+      "after": -0.504,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-10-02",
+      "before": -0.494,
+      "after": -0.492,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-10-09",
+      "before": -0.484,
+      "after": -0.483,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-10-16",
+      "before": -0.476,
+      "after": -0.474,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-10-23",
+      "before": -0.471,
+      "after": -0.466,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-10-30",
+      "before": -0.47,
+      "after": -0.46,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-11-06",
+      "before": -0.473,
+      "after": -0.455,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    },
+    {
+      "series": "NFCI",
+      "date": "2026-11-13",
+      "before": -0.478,
+      "after": -0.45,
+      "firstDetectedAt": "2026-11-26T04:15:59.083Z",
+      "label": "芝加哥联储金融状况指数"
+    }
+  ],
+  "errors": [],
+  "sha256": "a5c79dd9103b0391e03ee18cf751de7ff48bab08ac0c75d1ff65481f4b770a6f"
+}
